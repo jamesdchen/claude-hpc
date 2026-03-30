@@ -40,6 +40,9 @@ class SlurmBackend(HPCBackend):
             f"{self.log_dir}/slurm-%A_%a.out",
             "--error",
             f"{self.log_dir}/slurm-%A_%a.err",
-            self.script,
         ]
+        if job_env:
+            export_str = ",".join(f"{k}={v}" for k, v in job_env.items())
+            cmd += ["--export", f"ALL,{export_str}"]
+        cmd.append(self.script)
         return cmd

@@ -99,11 +99,7 @@ echo "Executor:     $EXECUTOR"
 echo "============================================"
 
 # --- Execute ---
-time $EXECUTOR \
-    --chunk-id "$CHUNK_ID" \
-    --total-chunks "$TOTAL_CHUNKS" \
-    --gpu-count "$GPU_COUNT" \
-    --output "$RESULT_DIR/results_chunk_${SLURM_ARRAY_TASK_ID}.csv" \
-    ${EXTRA_ARGS:-}
+export CHUNK_ID TOTAL_CHUNKS RESULT_DIR GPU_COUNT
+time $EXECUTOR ${EXTRA_ARGS:-}
 
 echo "Job finished."

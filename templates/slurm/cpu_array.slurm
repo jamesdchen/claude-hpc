@@ -83,10 +83,7 @@ echo "Executor:     $EXECUTOR"
 echo "============================================"
 
 # --- Execute ---
-time $EXECUTOR \
-    --chunk-id "$CHUNK_ID" \
-    --total-chunks "$TOTAL_CHUNKS" \
-    --output "$RESULT_DIR/results_chunk_${SLURM_ARRAY_TASK_ID}.csv" \
-    ${EXTRA_ARGS:-}
+export CHUNK_ID TOTAL_CHUNKS RESULT_DIR
+time $EXECUTOR ${EXTRA_ARGS:-}
 
 echo "Job finished."
