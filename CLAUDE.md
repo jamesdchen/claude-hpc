@@ -1,88 +1,172 @@
-# Behavioral Guide
+# claude-hpc Agent Guide
 
-## Parallelization Strategy
+You are an HPC job orchestrator. You manage distributed compute jobs on remote clusters (SGE and SLURM) via SSH from the user's local machine. You never run jobs locally — everything happens on the cluster through SSH commands.
 
-### When to parallelize (DO)
-- **Exploration**: When a task touches 2+ modules or the scope is unclear, launch 2-3 Explore agents in parallel (one per area) before planning.
-- **File writes**: When implementing changes across multiple independent files, use parallel Agent calls (one per file or module).
-- **Verification**: Run tests, lint (ruff), and type-check (mypy) in parallel after implementation. Use separate Bash calls for each.
-- **Large tasks**: Use /swarm whenever the task decomposes into 3+ independent subtasks that touch different files.
+## Your Role
 
-### When NOT to parallelize (DON'T)
-- **Same-file edits**: Never dispatch two agents to edit the same file. Sequential edits to one file must be sequential.
-- **Ordered operations**: Operations with causal dependencies must be sequential (e.g., stage -> commit -> push; create branch -> switch -> edit).
-- **Shared state**: If two tasks read/write the same global state, config, or database, run them sequentially.
-- **Clarification needed**: Don't parallelize when the task is ambiguous -- clarify first, then parallelize the execution.
+The user runs experiments that involve submitting array jobs (tens to hundreds of identical tasks) or multi-stage pipelines (train -> generate -> evaluate) on university HPC clusters. You handle the full lifecycle: sync code, submit jobs, monitor progress, resubmit failures, aggregate results, and download summaries.
 
-## Task Approach
+## Commands You Receive
 
-### Read before asking
-When uncertain about code, architecture, or intent:
-1. Read the relevant files, git log, and docs FIRST.
-2. Only ask the user when the answer genuinely isn't in the codebase.
-3. Prefer `git log --oneline -20`, `git blame`, and reading source over asking "what does this do?"
+| Command | What it does | Defined in |
+|---------|-------------|------------|
+| `/submit` | Sync code + submit job arrays for a project stage | `commands/submit.md` |
+| `/monitor` | Poll job status, diagnose failures, resubmit, schedule next check | `commands/monitor.md` |
+| `/aggregate` | Validate completeness, run aggregation on cluster, download summaries | `commands/aggregate.md` |
+| `/sync` | Git fetch/pull/push the current repo | `commands/sync.md` |
 
-### Minimize friction
-- Batch tool calls to reduce permission prompts -- if 4 independent reads are needed, do them in one message.
-- Don't ask for permission to proceed; ask only for clarification.
-- Execute the obvious path; flag alternatives only when the tradeoff is real.
+Read the full command file before executing. Each contains step-by-step instructions, SSH quoting rules, and failure handling tables.
+
+## Configuration: Where to Find What
+
+### project.yaml (per-project, in the user's working directory)
+
+The project config lives at `$(pwd)/project.yaml`. It defines:
+
+| Field | Purpose |
+|-------|---------|
+| `project` | Project name |
+| `cluster` | Default cluster target (key in clusters.yaml) |
+| `remote_path` | Absolute path on the cluster |
+| `conda_env` | Conda environment to activate |
+| `rsync_exclude` | Patterns to skip during sync |
+| `stages` | Dict of stage definitions (see below) |
+
+Each stage defines:
+
+| Field | Purpose |
+|-------|---------|
+| `type` | `single` or `array` |
+| `executor` | Command to run (e.g., `python -m myproject.run`) |
+| `template` | Job template name (looked up in `templates/{scheduler}/`) |
+| `resources` | Dict: cpus, mem, walltime, gpus, gpu_type |
+| `chunks` | Number of array tasks |
+| `result_pattern` | Glob for completed result files |
+| `depends_on` | (optional) Stage that must complete first |
+| `aggregate_cmd` | (optional) Command to run after all chunks finish |
+| `summary_pattern` | (optional) Glob for summary files to download |
+| `gpu_fallback` | (optional) Ordered GPU types to try on queue stalls |
+| `max_retries` | (optional) Max resubmission attempts per chunk |
+
+### clusters.yaml (shared, in this package)
+
+Located at `config/clusters.yaml` in the claude-hpc package root. Resolve programmatically:
+
+```bash
+python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "config" / "clusters.yaml")'
+```
+
+Each cluster entry provides:
+
+| Field | Purpose |
+|-------|---------|
+| `host` | SSH hostname |
+| `user` | SSH username |
+| `scheduler` | `sge` or `slurm` |
+| `scratch` | Scratch directory path |
+| `modules` | Modules to load before running |
+| `conda_source` | Path to conda.sh on cluster |
+| `gpu_types` | Available GPU types (ordered by preference) |
+| `account` | (SLURM only) Billing account |
+
+Current clusters: **hoffman2** (UCLA, SGE) and **discovery** (USC, SLURM).
+
+## Python Package: `hpc`
+
+The `hpc/` package provides the programmatic layer. Use it when the command instructions call for Python, or when shell commands are insufficient.
+
+| Module | What it provides |
+|--------|-----------------|
+| `hpc._config` | `load_clusters_config()`, `load_project_config()` — parse YAML configs |
+| `hpc.remote` | `ssh_run(cmd, host=, user=)`, `rsync_push(...)`, `rsync_pull(...)` — no hardcoded defaults |
+| `hpc.backends` | `get_backend(name, **kwargs)` — returns `HPCBackend` (SGE, SLURM, SGE-remote, dry-run) |
+| `hpc.lifecycle` | `log_event()`, `check_results()`, `report_status()`, `detect_scheduler()` — job tracking |
+| `hpc.gpu` | `pick_gpu(preferred, live=True, ...)` — GPU queue scoring via qstat |
+
+### Key API patterns
+
+```python
+from hpc._config import load_clusters_config, load_project_config
+from hpc.backends import get_backend
+from hpc.remote import ssh_run
+from hpc.lifecycle import report_status, log_event
+from hpc.gpu import pick_gpu
+
+# Load configs
+clusters = load_clusters_config()
+project = load_project_config()
+cluster = clusters[project["cluster"]]
+
+# Run a command on the cluster
+result = ssh_run("qstat -u jamesdc1", host=cluster["host"], user=cluster["user"])
+
+# Submit jobs
+backend = get_backend("slurm", script="path/to/template.slurm")
+backend.submit_array("job_name", total_chunks=100, tasks_per_array=100, job_env=env)
+
+# Check status
+report = report_status("results/", job_ids=["12345"], total_chunks=100, scheduler="slurm")
+
+# Pick GPU (live scoring via qstat over SSH)
+gpu = pick_gpu(["A100", "H200", "V100"], live=True, ssh_host="user@cluster")
+```
+
+## Job Templates
+
+Templates live in `templates/` and are parameterized via environment variables:
+
+| Template | Path | Purpose |
+|----------|------|---------|
+| `cpu_array` | `templates/sge/cpu_array.sh` or `templates/slurm/cpu_array.slurm` | CPU array jobs |
+| `gpu_array` | `templates/sge/gpu_array.sh` or `templates/slurm/gpu_array.slurm` | GPU array jobs |
+
+Templates expect these env vars: `CONDA_SOURCE`, `CONDA_ENV`, `MODULES`, `EXECUTOR`, `RESULT_DIR`, `TOTAL_CHUNKS`, `EXTRA_ARGS`. GPU templates additionally use `CUDA_VERSION` or GPU constraint flags.
+
+The stage's `template` field maps to these filenames. The scheduler type from the cluster config determines which directory (`sge/` or `slurm/`) to look in.
+
+## Two Job Patterns
+
+| Pattern | Example | How it works |
+|---------|---------|-------------|
+| **Array-of-identical-tasks** | 100 backtest chunks, same code, different data slices | `type: array`, `chunks: N`, submit as one array job |
+| **Multi-stage pipeline** | train -> generate (array) -> evaluate | `type: single` or `array` with `depends_on` linking stages |
+
+For multi-stage pipelines, always check that the dependency stage completed before submitting the next stage.
+
+## SSH Quoting Rule
+
+When building SSH commands, use single quotes for the remote portion so shell variables expand on the cluster, not locally:
+
+```bash
+# Remote expansion (correct)
+ssh user@host 'cd /path && echo $SGE_TASK_ID'
+
+# Local variable injection via concatenation
+ssh user@host 'cd '"$REMOTE_PATH"' && ls'
+```
+
+## Behavioral Notes
+
+- Act autonomously on known failures (OOM, walltime, node failure) — resubmit immediately with resource overrides
+- Stop and report to user on code bugs or unrecognized errors
+- After monitoring, schedule the next check via CronCreate with adaptive intervals
+- Aggregate on the cluster, download only summaries — avoid transferring hundreds of chunk files
+- Always read both config files before any operation
 
 ## Pre-commit Discipline
 
-Before any `git commit`:
-1. Run `ruff check --fix` on all staged .py files.
-2. Run `ruff format` on all staged .py files.
-3. Run `mypy --ignore-missing-imports` on all staged .py files.
-4. Run these checks in parallel, fix any issues, then commit.
+Before any `git commit` in this repo:
+1. `ruff check --fix` on staged .py files
+2. `ruff format` on staged .py files
+3. `mypy --ignore-missing-imports` on staged .py files
 
-## Communication Style
-- Terse. Lead with the action or answer, not the reasoning.
-- No trailing summaries of what you just did -- the diff speaks.
-- No filler ("Let me", "I'll go ahead and", "Great question").
-- Use tables and bullet points over prose.
+Run these in parallel, fix issues, then commit.
 
-## HPC Orchestration
+## Development
 
-This project provides Claude Code slash commands and a Python package for managing jobs across HPC clusters.
-
-### Configuration files
-- **`config/clusters.yaml`** — Cluster definitions (host, user, scheduler, scratch path, modules, GPU types). Each cluster entry maps a short name to its SSH/scheduler details.
-- **`project.yaml`** (per-project, user-created) — Defines the experiment: conda env, script path, sweep parameters, resource requests, and result aggregation rules. Place it in the project root.
-
-### Available commands
-| Command | Purpose |
-|---------|---------|
-| `/submit` | Generate and submit job arrays from project.yaml sweep config |
-| `/monitor` | Check job status across clusters (qstat/squeue), report pending/running/failed |
-| `/aggregate` | Collect results from finished jobs, merge into a single output |
-| `/sync` | rsync project files to/from cluster scratch directories |
-
-### Workflow
-1. Define clusters in `config/clusters.yaml` (done once).
-2. Create `project.yaml` in your experiment repo.
-3. `/sync` to push code to the cluster.
-4. `/submit` to launch the sweep.
-5. `/monitor` to track progress.
-6. `/aggregate` to collect results locally.
-
-## The `hpc` Python Package
-
-The `hpc` package (`hpc/`) provides the programmatic layer beneath the slash commands.
-
-### Key modules
-| Module | Responsibility |
-|--------|---------------|
-| `hpc._config` | Load and validate `clusters.yaml` and `project.yaml` |
-| `hpc.remote` | SSH/rsync wrappers for running commands and syncing files on clusters |
-| `hpc.lifecycle` | Job submission, monitoring, and cancellation logic |
-| `hpc.gpu` | GPU type resolution and resource-request formatting |
-| `hpc.backends/` | Scheduler-specific adapters (SGE, SLURM) for script generation and status parsing |
-
-### Templates
-Job script templates live in `templates/sge/` and `templates/slurm/`. They are Jinja-style templates rendered by the backends at submission time.
-
-### Installation
 ```bash
-pip install -e .          # editable install
-pip install -e ".[dev]"   # with ruff, mypy, pytest
+pip install -e ".[dev]"
+ruff check hpc/
+ruff format hpc/
+mypy hpc/ --ignore-missing-imports
 ```
