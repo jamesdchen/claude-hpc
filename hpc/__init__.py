@@ -23,12 +23,20 @@ __all__ = [
 ]
 
 from pathlib import Path
+from typing import Any
 
 from hpc._config import _PACKAGE_ROOT, build_stage_env, load_clusters_config, load_project_config
-from hpc.collect import collect
 from hpc.gpu import pick_gpu
 from hpc.lifecycle import check_results, detect_scheduler, log_event, read_events, report_status
 from hpc.remote import rsync_pull, rsync_push, ssh_run
+
+
+def __getattr__(name: str) -> Any:
+    if name == "collect":
+        from hpc.collect import collect
+
+        return collect
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_template_path(scheduler: str, template: str) -> Path:
