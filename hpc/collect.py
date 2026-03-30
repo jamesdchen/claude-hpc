@@ -36,10 +36,21 @@ def _module_to_path(module: str, project_root: Path) -> Path | None:
     return None
 
 
-def _extract_module_from_executor(executor: str) -> str | None:
-    """Parse ``python3 -m some.module ...`` → ``"some.module"``."""
+def _extract_executor_target(executor: str) -> tuple[str | None, str]:
+    """Extract the module or script path from an executor command.
+
+    Returns ``(module_or_path, kind)`` where *kind* is ``"module"`` or
+    ``"script"``.  Returns ``(None, "")`` if parsing fails.
+    """
+    # python3 -m some.module ...
     m = re.search(r"-m\s+([\w.]+)", executor)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1), "module"
+    # python3 scripts/train.py ... or python scripts/train.py ...
+    m = re.search(r"python[3]?\s+([\w./\\-]+\.py)", executor)
+    if m:
+        return m.group(1), "script"
+    return None, ""
 
 
 def _sha256(path: Path) -> str:
@@ -168,9 +179,16 @@ def _build_module_graph(
 
     for stage_name, stage_cfg in stages.items():
         executor = stage_cfg.get("executor", "")
-        module = _extract_module_from_executor(executor)
-        if module is None:
+        target, kind = _extract_executor_target(executor)
+        if target is None:
             continue
+
+        if kind == "module":
+            module = target
+        else:
+            # Script path → convert to dotted module (scripts/train.py → scripts.train)
+            module = target.replace("/", ".").replace("\\", ".").removesuffix(".py")
+
         tree, visited = trace_imports(module, project_root, depth=2)
         graph[stage_name] = tree
         for p in visited:
@@ -242,21 +260,22 @@ def parse_argparse_output(raw: str) -> list[dict[str, Any]]:
     return args
 
 
-def _run_help(module: str) -> dict[str, Any]:
-    """Run ``python3 -m <module> --help`` and parse the output."""
+def _run_help(target: str, kind: str) -> dict[str, Any]:
+    """Run ``--help`` for a module or script and parse the output."""
+    cmd = ["python3", "-m", target, "--help"] if kind == "module" else ["python3", target, "--help"]
     try:
         result = subprocess.run(
-            ["python3", "-m", module, "--help"],
+            cmd,
             capture_output=True,
             text=True,
             timeout=30,
         )
         raw_help = result.stdout or result.stderr
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        return {"module": module, "raw_help": f"ERROR: {exc}", "args": []}
+        return {"module": target, "raw_help": f"ERROR: {exc}", "args": []}
 
     parsed_args = parse_argparse_output(raw_help)
-    return {"module": module, "raw_help": raw_help, "args": parsed_args}
+    return {"module": target, "raw_help": raw_help, "args": parsed_args}
 
 
 def _build_cli_help(project: dict[str, Any]) -> dict[str, Any]:
@@ -268,14 +287,15 @@ def _build_cli_help(project: dict[str, Any]) -> dict[str, Any]:
         entry: dict[str, Any] = {}
 
         executor = stage_cfg.get("executor", "")
-        module = _extract_module_from_executor(executor)
-        if module:
-            entry["executor"] = _run_help(module)
+        target, kind = _extract_executor_target(executor)
+        if target:
+            entry["executor"] = _run_help(target, kind)
 
         agg_cmd = stage_cfg.get("aggregate_cmd", "")
-        agg_module = _extract_module_from_executor(agg_cmd) if agg_cmd else None
-        if agg_module:
-            entry["aggregate"] = _run_help(agg_module)
+        if agg_cmd:
+            agg_target, agg_kind = _extract_executor_target(agg_cmd)
+            if agg_target:
+                entry["aggregate"] = _run_help(agg_target, agg_kind)
 
         if entry:
             result["stages"][stage_name] = entry
@@ -311,24 +331,24 @@ def _build_experiments(project: dict[str, Any], project_root: Path) -> dict[str,
 
     # --- registries ---
     registries_cfg = project.get("registries")
-    if registries_cfg:
+    if registries_cfg and isinstance(registries_cfg, dict):
         registries: dict[str, Any] = {}
-        for reg_entry in registries_cfg:
+        for reg_name, reg_ref in registries_cfg.items():
             # Format: "module.path:ATTR"
-            if ":" not in reg_entry:
+            if not isinstance(reg_ref, str) or ":" not in reg_ref:
                 continue
-            mod_path, attr = reg_entry.rsplit(":", 1)
+            mod_path, attr = reg_ref.rsplit(":", 1)
             try:
                 mod = importlib.import_module(mod_path)
                 val = getattr(mod, attr)
                 if isinstance(val, dict):
-                    registries[attr.lower()] = dict(val)
+                    registries[reg_name] = dict(val)
                 elif isinstance(val, (list, tuple)):
-                    registries[attr.lower()] = list(val)
+                    registries[reg_name] = list(val)
                 else:
-                    registries[attr.lower()] = val
+                    registries[reg_name] = val
             except Exception:  # noqa: BLE001
-                registries[attr.lower()] = None
+                registries[reg_name] = None
         result["registries"] = registries
 
     return result
