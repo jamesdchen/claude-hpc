@@ -151,3 +151,224 @@ stages:
     result_pattern: "eval_results/metrics.json"
     summary_pattern: "eval_results/*"
 ```
+
+---
+---
+
+# hpc.yaml Specification (Experiment Manifest)
+
+The experiment manifest is a simpler alternative to `project.yaml` for repos where
+the author does not want to deal with HPC details. The author provides a run command
+and a parameter grid; claude-hpc handles chunking, submission, monitoring, and
+result collection automatically.
+
+If both `hpc.yaml` and `project.yaml` exist, claude-hpc prefers `hpc.yaml` for
+submission but `project.yaml` remains usable via explicit stage selection.
+
+---
+
+## Top-Level Fields
+
+| Field           | Type      | Required | Description                                                      |
+|-----------------|-----------|----------|------------------------------------------------------------------|
+| `project`       | string    | yes      | Short project name (used in job names, paths, logs).             |
+| `cluster`       | string    | yes      | Cluster key matching an entry in `clusters.yaml`.                |
+| `remote_path`   | string    | yes      | Absolute path on the remote cluster for this project.            |
+| `run`           | string    | yes      | Shell command for a single experiment run. Grid params are appended as `--key value` CLI args. |
+| `grid`          | map       | yes      | Parameter grid (see below).                                      |
+| `resources`     | map       | yes      | Resource request per task (see below).                           |
+| `env`           | map       | no       | Environment setup (see below).                                   |
+| `results`       | map       | no       | Result collection config (see below).                            |
+| `chunking`      | map       | no       | Data chunking within each grid point (see below).                |
+| `rsync_exclude` | list[str] | no       | Patterns passed to `rsync --exclude` during sync.                |
+
+---
+
+## grid
+
+A map of **parameter_name -> list of values**. claude-hpc computes the Cartesian
+product to generate one HPC task per combination (or N tasks per combination if
+`chunking` is set).
+
+```yaml
+grid:
+  model: [ridge, xgboost, lightgbm]
+  features: [har, pca]
+  seed: [1, 2, 3]
+```
+
+This produces 3 × 2 × 3 = 18 grid points. Each grid point becomes a task that runs:
+
+```
+<run> --model ridge --features har --seed 1
+```
+
+---
+
+## env
+
+| Field       | Type   | Required | Description                                                |
+|-------------|--------|----------|------------------------------------------------------------|
+| `modules`   | string | no       | Space-separated modules to load (e.g., `"python gcc"`).   |
+| `conda_env` | string | no       | Conda environment to activate before running.              |
+
+---
+
+## resources
+
+Same schema as `project.yaml` stage resources:
+
+| Field      | Type   | Required | Description                                   |
+|------------|--------|----------|-----------------------------------------------|
+| `cpus`     | int    | no       | Number of CPU cores per task.                 |
+| `mem`      | string | yes      | Memory per task (e.g., `"16G"`).              |
+| `walltime` | string | yes      | Maximum wall-clock time (`HH:MM:SS`).         |
+| `gpus`     | int    | no       | Number of GPUs per task.                      |
+| `gpu_type` | string | no       | Preferred GPU type (e.g., `a100`, `v100`).    |
+
+If `gpus` is present, the `gpu_array` template is used; otherwise `cpu_array`.
+
+---
+
+## results
+
+| Field            | Type   | Required | Description                                                      |
+|------------------|--------|----------|------------------------------------------------------------------|
+| `dir`            | string | no       | Result directory template. Supports `{run_id}` placeholder.     |
+| `pattern`        | string | no       | Glob pattern for result files within the result dir.             |
+| `aggregate_cmd`  | string | no       | Command to run after all tasks complete.                         |
+| `summary_pattern`| string | no       | Glob pattern for summary files to download after aggregation.    |
+
+`{run_id}` is a deterministic identifier derived from the grid point's parameter
+values (e.g., `ridge_har_1`).
+
+---
+
+## chunking
+
+Optional. Splits each grid point into N data chunks for additional parallelism.
+Without this, each grid point is a single HPC task.
+
+| Field       | Type   | Required | Description                                              |
+|-------------|--------|----------|----------------------------------------------------------|
+| `total`     | int    | yes      | Number of chunks per grid point.                         |
+| `chunk_arg` | string | no       | CLI flag for chunk index (default: `"--chunk-id"`).      |
+| `total_arg` | string | no       | CLI flag for total chunks (default: `"--total-chunks"`). |
+
+With chunking, total HPC tasks = grid_points × `total`. Task *i* maps to
+grid point `i // total` and chunk `i % total`.
+
+---
+
+## How It Works
+
+1. claude-hpc reads `hpc.yaml` and expands the grid into individual tasks.
+2. A `_hpc_dispatch.json` manifest is generated mapping each task ID to its
+   full command string and result directory.
+3. A standalone `_hpc_dispatch.py` script is deployed alongside the manifest.
+4. The job template runs `python3 _hpc_dispatch.py` as its executor.
+5. The dispatch script reads the manifest, finds the command for its task ID,
+   and executes it.
+
+The experiment author's code receives grid params as normal CLI args — no
+awareness of HPC, chunking, or task IDs required (unless using `chunking`).
+
+---
+
+## Examples
+
+### Simple Grid Search (CPU)
+
+```yaml
+project: my_experiment
+cluster: hoffman2
+remote_path: /u/home/j/jamesdc1/my_experiment
+
+run: "python3 -m my_experiment.train"
+
+grid:
+  model: [ridge, xgboost, lightgbm]
+  lr: [0.01, 0.001]
+  seed: [1, 2, 3]
+
+env:
+  modules: "python gcc"
+
+resources:
+  cpus: 1
+  mem: "16G"
+  walltime: "4:00:00"
+
+results:
+  dir: "results/{run_id}"
+  pattern: "*.csv"
+
+rsync_exclude: [.git/, results/, __pycache__]
+```
+
+### Grid + Data Chunking (CPU)
+
+```yaml
+project: harxhar
+cluster: hoffman2
+remote_path: /u/home/j/jamesdc1/project-cucuringu/harxhar
+
+run: "python3 -m projects.ml.cli.executor"
+
+grid:
+  model: [ridge, xgboost, lightgbm, random_forest]
+  features: [har, pca, ae]
+
+chunking:
+  total: 100
+  chunk_arg: "--chunk-id"
+  total_arg: "--total-chunks"
+
+env:
+  modules: "python gcc"
+
+resources:
+  cpus: 1
+  mem: "16G"
+  walltime: "4:00:00"
+
+results:
+  dir: "results/{run_id}"
+  pattern: "results_chunk_*.csv"
+  aggregate_cmd: "python projects/ml/scripts/aggregate.py"
+  summary_pattern: "*_summary*.csv"
+
+rsync_exclude: [.git/, results/, __pycache__, "*.pyc", .mypy_cache/, all30min/, .claude/]
+```
+
+### GPU Training Grid
+
+```yaml
+project: dl_sweep
+cluster: hoffman2
+remote_path: /u/home/j/jamesdc1/dl_sweep
+
+run: "python3 train.py"
+
+grid:
+  architecture: [resnet18, resnet50]
+  lr: [0.001, 0.0001]
+  batch_size: [32, 64]
+
+env:
+  modules: "conda cuda/12.3"
+  conda_env: dl-env
+
+resources:
+  cpus: 4
+  mem: "32G"
+  walltime: "6:00:00"
+  gpus: 2
+  gpu_type: a100
+
+results:
+  dir: "results/{run_id}"
+  pattern: "*.pt"
+
+rsync_exclude: [.git/, results/, __pycache__, data/]
+```

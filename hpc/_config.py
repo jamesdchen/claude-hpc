@@ -1,8 +1,8 @@
-"""Configuration loaders for clusters.yaml and project.yaml."""
+"""Configuration loaders for clusters.yaml, project.yaml, and hpc.yaml."""
 
 from __future__ import annotations
 
-__all__ = ["load_clusters_config", "load_project_config", "build_stage_env"]
+__all__ = ["load_clusters_config", "load_project_config", "build_stage_env", "detect_project_type"]
 
 from pathlib import Path
 from typing import Any
@@ -72,3 +72,11 @@ def build_stage_env(cluster_name: str, stage_name: str) -> dict[str, str]:
         result["CONDA_ENV"] = conda_env
 
     return result
+
+
+def detect_project_type(path: Path | None = None) -> str:
+    """Return ``"manifest"`` if ``hpc.yaml`` exists, else ``"project"``."""
+    base = path or Path.cwd()
+    if (base / "hpc.yaml").exists():
+        return "manifest"
+    return "project"

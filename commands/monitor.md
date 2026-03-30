@@ -16,6 +16,37 @@ Single-quote the remote command so variables expand on the cluster, not locally:
 ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && echo $SGE_TASK_ID'
 ```
 
+## Project Type Detection
+
+Check for `hpc.yaml` in the current working directory:
+- If `hpc.yaml` exists → this is a **manifest project**. Read `_hpc_dispatch.json` (locally if available, or from the cluster via SSH) to understand the task-to-grid-point mapping.
+- If only `project.yaml` exists → proceed with the existing stage-based monitoring below.
+
+### Manifest Monitoring Differences
+
+For manifest projects, the monitoring flow is the same as below (Steps 1-6) with these additions:
+
+1. **Task mapping**: Each task ID maps to a grid point and optional chunk. Use `_hpc_dispatch.json` to decode: `grid_point = task_id // chunks_per_point`, `chunk = task_id % chunks_per_point`.
+
+2. **Per-grid-point reporting**: In addition to the overall status summary, report completion per grid point:
+   ```
+   Grid point status:
+     ridge_har:      98/100 chunks complete
+     ridge_pca:      100/100 chunks complete ✓
+     xgboost_har:    45/100 chunks complete, 2 failed
+     xgboost_pca:    0/100 chunks (all pending)
+   ```
+
+3. **Result checking**: Use the task's `result_dir` from the manifest to check for results, rather than a single stage-level `result_pattern`. Each grid point has its own result directory.
+
+4. **Resubmission**: When resubmitting failed tasks, use the same dispatch mechanism. The task IDs in the resubmission correspond to the same manifest entries.
+
+5. **Stage name**: Use the project name from `hpc.yaml` as the stage/job name for queue queries.
+
+After this section, the existing Steps 0-6 continue unchanged.
+
+---
+
 ## Step 0: Load Module Graph
 
 If `.hpc/module_graph.yaml` exists, read it. It maps each stage to its dependency tree — every project file the executor imports, nested by call chain. When diagnosing failures:

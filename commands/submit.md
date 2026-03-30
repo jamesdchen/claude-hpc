@@ -18,6 +18,93 @@ Single-quote the remote command so variables expand on the cluster, not locally:
 ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && echo $SGE_TASK_ID'
 ```
 
+## Project Type Detection
+
+Check for `hpc.yaml` in the current working directory first:
+- If `hpc.yaml` exists → use the **Manifest Flow** below
+- If only `project.yaml` exists → use the **Stage Flow** (Step 0 onwards, unchanged)
+
+---
+
+## Manifest Flow (hpc.yaml)
+
+This flow handles projects where the experiment author provides a parameter grid and run command. claude-hpc automatically generates tasks and dispatches them.
+
+### M-Step 1: Load and Validate Manifest
+
+1. Read `hpc.yaml` from the current working directory
+2. Read `clusters.yaml` (same path resolution as Stage Flow)
+3. Validate the manifest: check required fields (`project`, `cluster`, `remote_path`, `run`, `grid`, `resources`)
+4. If validation errors, report them and stop
+
+### M-Step 2: Expand Grid and Show Run Plan
+
+Compute the Cartesian product of `grid` parameters. Display to the user:
+
+```
+Grid: model=[ridge, xgboost] × features=[har, pca] × seed=[1, 2, 3]
+Grid points: 12
+Chunks per point: 100 (from chunking.total)
+Total HPC tasks: 1200
+
+Sample commands:
+  Task 0: python3 -m my_experiment.train --model ridge --features har --seed 1 --chunk-id 0 --total-chunks 100
+  Task 1: python3 -m my_experiment.train --model ridge --features har --seed 1 --chunk-id 1 --total-chunks 100
+  ...
+  Task 1199: python3 -m my_experiment.train --model xgboost --features pca --seed 3 --chunk-id 99 --total-chunks 100
+```
+
+If no `chunking` section, each grid point is one task (chunks per point = 1).
+
+Ask the user to confirm the run plan before proceeding. They may want to filter the grid (e.g., only certain models).
+
+### M-Step 3: Generate Dispatch Manifest
+
+Use `hpc.grid.build_task_manifest()` to generate a `_hpc_dispatch.json` file locally. This JSON maps each task ID (0-based) to its full command string and result directory.
+
+Also copy `hpc/dispatch.py` to `_hpc_dispatch.py` in the project root (this is the standalone executor that runs on the cluster).
+
+### M-Step 4: Sync to Cluster
+
+Push local code + dispatch files to the cluster:
+
+```bash
+rsync -az --delete \
+    --exclude='.git/' --exclude='__pycache__/' --exclude='*.pyc' \
+    # ... add each entry from hpc.yaml rsync_exclude as --exclude='<pattern>' ...
+    . $SSH_TARGET:$REMOTE_PATH/
+```
+
+Verify `_hpc_dispatch.json` and `_hpc_dispatch.py` were synced:
+```bash
+ssh $SSH_TARGET 'ls '"$REMOTE_PATH"'/_hpc_dispatch.json '"$REMOTE_PATH"'/_hpc_dispatch.py'
+```
+
+### M-Step 5: Submit
+
+Determine the template from resources (GPU present → `gpu_array`, else `cpu_array`).
+Build env vars using `build_manifest_env()`:
+- `EXECUTOR=python3 _hpc_dispatch.py`
+- `HPC_MANIFEST=_hpc_dispatch.json`
+- `REPO_DIR=<remote_path>`
+- `MODULES=<env.modules>`
+- `CONDA_SOURCE=<cluster.conda_source>` (if conda_env set)
+- `CONDA_ENV=<env.conda_env>` (if set)
+- `TOTAL_CHUNKS=<total_tasks>`
+
+Submit using the same SGE/SLURM commands as the Stage Flow (Step 5), substituting the manifest env vars.
+
+Resource flags come from `hpc.yaml` resources (same format as stage resources).
+
+### M-Step 6: Report
+
+After submission:
+1. Parse the job ID from submission output
+2. Report: job ID, project name, total tasks, grid dimensions, cluster
+3. Suggest running `/monitor` to track progress
+
+---
+
 ## Step 0: Load Manifest
 
 If `.hpc/` exists in the project directory, read `.hpc/cli_help.yaml` and `.hpc/experiments.yaml`. These contain cached executor CLI signatures, available experiment configs, and model/feature/subgroup registries. Use them to construct submissions without exploring source code.

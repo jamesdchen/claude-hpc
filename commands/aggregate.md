@@ -10,6 +10,35 @@ Read both config files:
 
 Construct `SSH_TARGET` (`user@host`) and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of `project.cluster`.
 
+## Project Type Detection
+
+Check for `hpc.yaml` in the current working directory:
+- If `hpc.yaml` exists → this is a **manifest project**. Read `_hpc_dispatch.json` to understand the grid structure.
+- If only `project.yaml` exists → proceed with the existing stage-based aggregation below.
+
+### Manifest Aggregation Differences
+
+For manifest projects, the aggregation flow is the same as below (Steps 0-5) with these modifications:
+
+1. **Chunk completeness**: Check each grid point's result directory separately. A grid point is complete when all its chunks (or its single result, if no chunking) are present.
+
+2. **Per-grid-point aggregation**: If `results.aggregate_cmd` is defined in `hpc.yaml`, run it once per completed grid point (with `RESULT_DIR` set to that grid point's result directory), OR once globally if the aggregate command handles discovery itself.
+
+3. **Summary download**: Download summaries from all grid point result directories, not just a single stage result dir.
+
+4. **Reporting**: Show per-grid-point status and results:
+   ```
+   Aggregation results:
+     ridge_har:      complete — QLIKE: 0.342, MSE: 0.0012
+     ridge_pca:      complete — QLIKE: 0.298, MSE: 0.0010
+     xgboost_har:    incomplete (95/100 chunks)
+     xgboost_pca:    complete — QLIKE: 0.310, MSE: 0.0011
+   ```
+
+After this section, the existing Steps 0-5 continue unchanged for stage-based projects.
+
+---
+
 ## Step 0: Load Manifest
 
 If `.hpc/cli_help.yaml` exists, read the aggregate CLI args for the target stage. Use these to understand available aggregation options without reading the aggregation script source.
