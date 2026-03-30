@@ -4,13 +4,11 @@ Aggregation runs on the cluster to avoid transferring many chunk files. Only sum
 
 ## Setup
 
-Read the claude-hpc agent guide for configuration schema, SSH conventions, and Python APIs:
+Read both config files:
+- `project.yaml` in the current working directory
+- `clusters.yaml`: resolve path via `python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "config" / "clusters.yaml")'`
 
-```bash
-python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "CLAUDE.md")'
-```
-
-Read that file, then read both config files (`project.yaml` in cwd, `clusters.yaml` at the path shown in the guide). Construct `SSH_TARGET` and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of `project.cluster`.
+Construct `SSH_TARGET` (`user@host`) and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of `project.cluster`.
 
 ## Step 0: Load Manifest
 

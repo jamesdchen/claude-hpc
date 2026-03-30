@@ -1,125 +1,89 @@
 # claude-hpc
 
-Personal HPC orchestrator for Claude Code. Manages job submission, monitoring, and result aggregation across SGE and SLURM clusters.
+A Claude Code plugin that gives Claude slash commands for managing HPC jobs across SGE and SLURM clusters. Claude handles the full lifecycle — sync code, submit jobs, monitor progress, resubmit failures, aggregate results — all via SSH from your local machine.
 
-## What it does
-
-- **Submit** array jobs from a `project.yaml` sweep config
-- **Monitor** job status across clusters (qstat/squeue), report pending/running/failed
-- **Aggregate** results from finished jobs into a single output
-- **Sync** project files to/from cluster scratch directories via rsync
-
-Works on Hoffman2 (UCLA IDRE, SGE) and Discovery (USC, SLURM).
-
-## Installation
-
-```bash
-pip install -e /path/to/claude-hpc        # editable install
-pip install -e "/path/to/claude-hpc[dev]"  # with ruff, mypy, pytest
-```
-
-Then install the Claude Code commands:
+## Setup
 
 ```bash
 bash setup.sh
 ```
 
-## Usage
+This script:
+1. **Checks prerequisites** — python3, pip, ssh, rsync, ruff, mypy, jq
+2. **Installs slash commands** — copies `commands/*.md` into `~/.claude/commands/` so they're available from any project
+3. **Installs the `hpc` package** — editable pip install for the Python utilities the commands depend on
 
-### As a Python package
+After setup, the commands are available globally in Claude Code.
 
-```python
-from hpc.backends import get_backend
-from hpc.remote import ssh_run, rsync_push, rsync_pull
-from hpc.lifecycle import log_event, report_status, detect_scheduler
-from hpc.gpu import pick_gpu
-from hpc._config import load_clusters_config, load_project_config
+## Collecting project context
 
-# Submit an array job
-backend = get_backend("slurm", script="job.slurm")
-backend.submit_array("my_job", total_chunks=100, tasks_per_array=100, job_env=env)
+Before submitting or monitoring jobs, run:
 
-# Pick best GPU on Hoffman2
-gpu = pick_gpu(["A100", "H200", "V100"], live=True, ssh_host="user@cluster")
-
-# Check job status
-report = report_status("results/", job_ids=["12345"], total_chunks=10, scheduler="slurm")
+```bash
+python -m hpc.collect
 ```
 
-### As Claude Code commands
+This generates a `.hpc/` directory in your project root containing cached artefacts that help the agent debug failures and construct submissions without exploring your source code:
 
-```
-/submit     # Generate and submit job arrays from project.yaml
-/monitor    # Check job status, resubmit failures
-/aggregate  # Collect results from finished jobs
-/sync       # rsync project files to/from cluster
-```
+| Artefact | What it caches |
+|----------|---------------|
+| `module_graph.yaml` | AST-traced import tree for each stage's executor (depth 2) — scopes which files are relevant to a failure |
+| `cli_help.yaml` | Parsed `--help` output for each executor and aggregate command — arg names, types, defaults, choices |
+| `experiments.yaml` | Experiment YAML configs and Python registry values (models, features, subgroups) |
+| `_meta.yaml` | Timestamps and SHA256 hashes of source files for staleness detection |
+
+The slash commands check `.hpc/` automatically. If it's missing or stale, they'll suggest regenerating it.
+
+## Commands
+
+| Command | What it does |
+|---------|-------------|
+| `/submit` | Sync code to the cluster and submit job arrays from `project.yaml` |
+| `/monitor` | Poll job status, diagnose failures, resubmit with resource overrides, schedule next check |
+| `/aggregate` | Validate chunk completeness, run aggregation on cluster, download summaries |
+| `/sync` | Git fetch, pull with rebase, push — with conflict resolution and selective commits |
+
+## Job templates
+
+Four templates ship with claude-hpc, covering the CPU/GPU and SGE/SLURM combinations:
+
+| Template | SGE | SLURM |
+|----------|-----|-------|
+| CPU array | `templates/sge/cpu_array.sh` | `templates/slurm/cpu_array.slurm` |
+| GPU array | `templates/sge/gpu_array.sh` | `templates/slurm/gpu_array.slurm` |
+
+Templates are parameterized via environment variables (`CONDA_SOURCE`, `CONDA_ENV`, `MODULES`, `EXECUTOR`, `RESULT_DIR`, `TOTAL_CHUNKS`, etc.) injected at submission time from `project.yaml` and `clusters.yaml`. The stage's `template` field selects which template to use, and the cluster's `scheduler` field determines the directory.
 
 ## Project integration
 
-Each project repo needs a `project.yaml`:
+Each project needs a `project.yaml` at its root. Minimal example:
 
 ```yaml
-project: my_project
+project: my_backtest
 cluster: hoffman2
-remote_path: /u/home/user/my_project
-conda_env: my_env
-rsync_exclude: [.git/, results/, __pycache__]
+remote_path: /u/home/j/jamesdc1/my_backtest
+conda_env: backtest-env
+rsync_exclude: [.git/, results/, __pycache__, "*.pyc"]
 
 stages:
-  train:
-    type: single
-    executor: "python scripts/train.py"
-    template: gpu_array
-    resources: { cpus: 8, mem: "64G", walltime: "2:00:00", gpus: 1, gpu_type: a100 }
-    result_pattern: "checkpoints/best.pt"
-
-  sweep:
+  backtest:
     type: array
-    depends_on: train
-    executor: "python scripts/sweep.py"
-    template: gpu_array
-    resources: { cpus: 4, mem: "16G", walltime: "1:00:00", gpus: 1, gpu_type: a100 }
-    chunks: 10
+    executor: "python -m backtest.run"
+    template: cpu_array
+    resources: { cpus: 1, mem: "16G", walltime: "4:00:00" }
+    chunks: 100
     result_pattern: "results/chunk_*.csv"
     aggregate_cmd: "python scripts/aggregate.py"
+    summary_pattern: "*_summary*.csv"
 ```
 
-Then add `claude-hpc` to your project's requirements and import from `hpc.*`.
+See [`config/schema.md`](config/schema.md) for the full specification of `project.yaml` fields.
 
-## Package structure
+## Supported clusters
 
-| Module | Responsibility |
-|--------|---------------|
-| `hpc._config` | Load and validate `clusters.yaml` and `project.yaml` |
-| `hpc.remote` | SSH/rsync wrappers (no hardcoded defaults) |
-| `hpc.lifecycle` | Job event logging, status querying, result checking |
-| `hpc.gpu` | GPU type selection (static fallback + live qstat scoring) |
-| `hpc.backends/` | Scheduler adapters: SGE, SLURM, SGE-remote, dry-run |
+| Cluster | Institution | Scheduler |
+|---------|------------|-----------|
+| Hoffman2 | UCLA IDRE | SGE |
+| Discovery | USC | SLURM |
 
-## Cluster config
-
-Defined in `config/clusters.yaml`:
-
-```yaml
-hoffman2:
-  host: hoffman2.idre.ucla.edu
-  user: jamesdc1
-  scheduler: sge
-  gpu_types: [a100, h200, a6000, h100, v100, rtx2080ti]
-
-discovery:
-  host: discovery2.usc.edu
-  user: jc_905
-  scheduler: slurm
-  account: pollok_1603
-  gpu_types: [a100, a40, v100, l40s]
-```
-
-## Development
-
-```bash
-ruff check hpc/
-ruff format hpc/
-mypy hpc/ --ignore-missing-imports
-```
+Cluster connection details are defined in `config/clusters.yaml`.
