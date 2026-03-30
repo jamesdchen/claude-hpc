@@ -14,6 +14,8 @@ cluster targets, sync rules, and computational stages.
 | `remote_path`    | string     | yes      | Absolute path on the remote cluster for this project.        |
 | `conda_env`      | string     | yes      | Conda environment to activate before running any stage.      |
 | `rsync_exclude`  | list[str]  | no       | Patterns passed to `rsync --exclude` during sync.            |
+| `experiment_paths` | list[str]  | no       | Glob patterns for experiment YAML configs (used by `hpc collect`). |
+| `registries`       | map        | no       | Importable registries for model/feature/subgroup choices (used by `hpc collect`). |
 
 ---
 
@@ -49,6 +51,39 @@ parallel.
 | `walltime` | string | yes      | Maximum wall-clock time (`HH:MM:SS`).         |
 | `gpus`     | int    | no       | Number of GPUs per task.                      |
 | `gpu_type` | string | no       | Preferred GPU type (e.g., `a100`, `v100`).    |
+
+---
+
+## collect Fields
+
+These optional fields configure `python -m hpc.collect`, which generates a `.hpc/` directory
+with cached dependency graphs, CLI help, and experiment metadata.
+
+### experiment_paths
+
+List of glob patterns relative to the project root. Each matching YAML file is read and
+summarized in `.hpc/experiments.yaml`.
+
+```yaml
+experiment_paths:
+  - "projects/ml/experiments/*.yaml"
+  - "projects/dl/experiments/*.yaml"
+```
+
+### registries
+
+Map of registry names to importable Python references in `"module.path:ATTRIBUTE"` format.
+Each attribute is imported and its value stored in `.hpc/experiments.yaml` under `registries`.
+
+```yaml
+registries:
+  models: "projects.ml.models.registry:ALL_MODELS"
+  features: "projects.ml.features.feature_groups:FEATURE_TYPES"
+  subgroups: "projects.ml.features.feature_groups:SUBGROUPS"
+```
+
+If the import fails (e.g., missing dependencies on the local machine), the registry entry
+is stored as `null`.
 
 ---
 

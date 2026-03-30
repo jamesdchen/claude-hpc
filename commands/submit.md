@@ -12,6 +12,12 @@ python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "CLAUDE.
 
 Read that file, then read both config files (`project.yaml` in cwd, `clusters.yaml` at the path shown in the guide). Construct `SSH_TARGET` and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of `project.cluster`.
 
+## Step 0: Load Manifest
+
+If `.hpc/` exists in the project directory, read `.hpc/cli_help.yaml` and `.hpc/experiments.yaml`. These contain cached executor CLI signatures, available experiment configs, and model/feature/subgroup registries. Use them to construct submissions without exploring source code.
+
+If `.hpc/` is missing or stale (check `_meta.yaml` timestamp), suggest running `python -m hpc.collect` to regenerate.
+
 ## Step 1: Clarify What to Run
 
 List the available stages from `project.stages` in a table:

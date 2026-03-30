@@ -12,6 +12,10 @@ python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "CLAUDE.
 
 Read that file, then read both config files (`project.yaml` in cwd, `clusters.yaml` at the path shown in the guide). Construct `SSH_TARGET` and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of `project.cluster`.
 
+## Step 0: Load Manifest
+
+If `.hpc/cli_help.yaml` exists, read the aggregate CLI args for the target stage. Use these to understand available aggregation options without reading the aggregation script source.
+
 ## Arguments
 
 $ARGUMENTS formats:

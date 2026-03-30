@@ -10,6 +10,15 @@ python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "CLAUDE.
 
 Read that file, then read both config files (`project.yaml` in cwd, `clusters.yaml` at the path shown in the guide). Construct `SSH_TARGET` and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of `project.cluster`.
 
+## Step 0: Load Module Graph
+
+If `.hpc/module_graph.yaml` exists, read it. It maps each stage to its dependency tree — every project file the executor imports, nested by call chain. When diagnosing failures:
+
+1. Find the failing file from the traceback in the module graph
+2. Read only that file
+3. If you need upstream context, follow the tree to the caller
+4. Never read files outside the stage's dependency tree
+
 ## Operating Principles
 
 1. **Act autonomously on known failures.** For OOM, walltime, and node failures, immediately resubmit with appropriate resource overrides. Do NOT ask for permission. Only pause for code bugs or unrecognized errors.
