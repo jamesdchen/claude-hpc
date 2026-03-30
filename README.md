@@ -1,89 +1,130 @@
 # claude-hpc
 
-A Claude Code plugin that gives Claude slash commands for managing HPC jobs across SGE and SLURM clusters. Claude handles the full lifecycle — sync code, submit jobs, monitor progress, resubmit failures, aggregate results — all via SSH from your local machine.
+A standalone Claude Code plugin for running any experiment repo on HPC clusters (SGE/SLURM). Point it at your code, define a parameter grid, and claude-hpc handles the rest — chunking, submission, monitoring, failure recovery, and result collection — all via SSH.
 
-## Setup
+## Quick Start
+
+### 1. Install
 
 ```bash
 bash setup.sh
 ```
 
-This script:
-1. **Checks prerequisites** — python3, pip, ssh, rsync, ruff, mypy, jq
-2. **Installs slash commands** — copies `commands/*.md` into `~/.claude/commands/` so they're available from any project
-3. **Installs the `hpc` package** — editable pip install for the Python utilities the commands depend on
+Installs slash commands globally and the `hpc` Python package.
 
-After setup, the commands are available globally in Claude Code.
+### 2. Add `hpc.yaml` to your experiment repo
 
-## Collecting project context
+```yaml
+project: my_experiment
+cluster: hoffman2
+remote_path: /u/home/j/jamesdc1/my_experiment
 
-Before submitting or monitoring jobs, run:
+run: "python3 train.py"
 
-```bash
-python -m hpc.collect
+grid:
+  model: [ridge, xgboost, lightgbm]
+  lr: [0.01, 0.001]
+  seed: [1, 2, 3]
+
+env:
+  modules: "python gcc"
+
+resources:
+  cpus: 1
+  mem: "16G"
+  walltime: "4:00:00"
+
+results:
+  dir: "results/{run_id}"
+  pattern: "*.csv"
 ```
 
-This generates a `.hpc/` directory in your project root containing cached artefacts that help the agent debug failures and construct submissions without exploring your source code:
+### 3. Run
 
-| Artefact | What it caches |
-|----------|---------------|
-| `module_graph.yaml` | AST-traced import tree for each stage's executor (depth 2) — scopes which files are relevant to a failure |
-| `cli_help.yaml` | Parsed `--help` output for each executor and aggregate command — arg names, types, defaults, choices |
-| `experiments.yaml` | Experiment YAML configs and Python registry values (models, features, subgroups) |
-| `_meta.yaml` | Timestamps and SHA256 hashes of source files for staleness detection |
+```
+/submit    → expands grid (18 tasks), syncs code, submits to cluster
+/monitor   → tracks per-grid-point completion, auto-resubmits failures
+/aggregate → runs aggregation, downloads summaries
+```
 
-The slash commands check `.hpc/` automatically. If it's missing or stale, they'll suggest regenerating it.
+That's it. Your experiment code receives grid params as CLI args (`--model ridge --lr 0.01 --seed 1`). No HPC awareness needed.
+
+## How It Works
+
+1. claude-hpc reads `hpc.yaml` and computes the Cartesian product of the `grid`
+2. A `_hpc_dispatch.json` manifest maps each task ID to its full command
+3. A standalone `_hpc_dispatch.py` script (zero dependencies) is deployed to the cluster
+4. The job template runs the dispatch script, which looks up the command for its task ID
+5. Your code runs with the right params — no `CHUNK_ID`, no env var parsing
+
+### Two Layers of Parallelism
+
+| Layer | What | Who handles it |
+|-------|------|----------------|
+| **Grid** | Different param combos (model × lr × seed) | claude-hpc (automatic) |
+| **Data chunking** | Splitting one run's data across N workers | Opt-in via `chunking:` section |
+
+```yaml
+# Optional: split each grid point into 100 data chunks
+chunking:
+  total: 100
+  chunk_arg: "--chunk-id"
+  total_arg: "--total-chunks"
+```
+
+With chunking, total tasks = grid points × chunks (e.g., 18 × 100 = 1,800).
 
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
-| `/submit` | Sync code to the cluster and submit job arrays from `project.yaml` |
-| `/monitor` | Poll job status, diagnose failures, resubmit with resource overrides, schedule next check |
-| `/aggregate` | Validate chunk completeness, run aggregation on cluster, download summaries |
-| `/sync` | Git fetch, pull with rebase, push — with conflict resolution and selective commits |
+| `/submit` | Expand grid, sync code, submit array jobs |
+| `/monitor` | Poll status, diagnose failures, auto-resubmit, self-schedule next check |
+| `/aggregate` | Validate completeness, run aggregation on cluster, download summaries |
+| `/sync` | Git fetch, pull with rebase, push — with conflict handling |
 
-## Job templates
+## Configuration
 
-Four templates ship with claude-hpc, covering the CPU/GPU and SGE/SLURM combinations:
+### `hpc.yaml` (Experiment Manifest) — recommended
+
+The simple path. Define your run command and parameter grid. See [`config/schema.md`](config/schema.md) for the full spec.
+
+### `project.yaml` (Stage-Based) — advanced
+
+For projects that need fine-grained control over executor commands, multi-stage pipelines with dependencies, or custom chunking logic. See [`config/schema.md`](config/schema.md).
+
+Both formats are supported. If `hpc.yaml` exists, it takes precedence for `/submit`.
+
+## Job Templates
 
 | Template | SGE | SLURM |
 |----------|-----|-------|
 | CPU array | `templates/sge/cpu_array.sh` | `templates/slurm/cpu_array.slurm` |
 | GPU array | `templates/sge/gpu_array.sh` | `templates/slurm/gpu_array.slurm` |
 
-Templates are parameterized via environment variables (`CONDA_SOURCE`, `CONDA_ENV`, `MODULES`, `EXECUTOR`, `RESULT_DIR`, `TOTAL_CHUNKS`, etc.) injected at submission time from `project.yaml` and `clusters.yaml`. The stage's `template` field selects which template to use, and the cluster's `scheduler` field determines the directory.
+Templates are parameterized via environment variables injected at submission time. Auto-selected based on `resources.gpus` in your config.
 
-## Project integration
+## Collecting Project Context (Optional)
 
-Each project needs a `project.yaml` at its root. Minimal example:
-
-```yaml
-project: my_backtest
-cluster: hoffman2
-remote_path: /u/home/j/jamesdc1/my_backtest
-conda_env: backtest-env
-rsync_exclude: [.git/, results/, __pycache__, "*.pyc"]
-
-stages:
-  backtest:
-    type: array
-    executor: "python -m backtest.run"
-    template: cpu_array
-    resources: { cpus: 1, mem: "16G", walltime: "4:00:00" }
-    chunks: 100
-    result_pattern: "results/chunk_*.csv"
-    aggregate_cmd: "python scripts/aggregate.py"
-    summary_pattern: "*_summary*.csv"
+```bash
+python -m hpc.collect
 ```
 
-See [`config/schema.md`](config/schema.md) for the full specification of `project.yaml` fields.
+Generates a `.hpc/` directory with cached CLI help, import graphs, and experiment metadata. Helps the agent debug failures without exploring source code.
 
-## Supported clusters
+## Supported Clusters
 
 | Cluster | Institution | Scheduler |
 |---------|------------|-----------|
 | Hoffman2 | UCLA IDRE | SGE |
 | Discovery | USC | SLURM |
 
-Cluster connection details are defined in `config/clusters.yaml`.
+Cluster connection details are in `config/clusters.yaml`.
+
+## Python API
+
+```python
+from hpc import expand_grid, build_task_manifest, load_manifest, build_manifest_env
+from hpc import load_clusters_config, load_project_config, get_template_path
+from hpc.backends import get_backend
+```
