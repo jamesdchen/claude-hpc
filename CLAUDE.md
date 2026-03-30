@@ -77,7 +77,7 @@ The `hpc/` package provides the programmatic layer. Use it when the command inst
 
 | Module | What it provides |
 |--------|-----------------|
-| `hpc._config` | `load_clusters_config()`, `load_project_config()` — parse YAML configs |
+| `hpc._config` | `load_clusters_config()`, `load_project_config()`, `build_stage_env()` — config + env builder |
 | `hpc.remote` | `ssh_run(cmd, host=, user=)`, `rsync_push(...)`, `rsync_pull(...)` — no hardcoded defaults |
 | `hpc.backends` | `get_backend(name, **kwargs)` — returns `HPCBackend` (SGE, SLURM, SGE-remote, dry-run) |
 | `hpc.lifecycle` | `log_event()`, `check_results()`, `report_status()`, `detect_scheduler()` — job tracking |
@@ -86,7 +86,7 @@ The `hpc/` package provides the programmatic layer. Use it when the command inst
 ### Key API patterns
 
 ```python
-from hpc._config import load_clusters_config, load_project_config
+from hpc import build_stage_env, load_clusters_config, load_project_config
 from hpc.backends import get_backend
 from hpc.remote import ssh_run
 from hpc.lifecycle import report_status, log_event
@@ -96,6 +96,10 @@ from hpc.gpu import pick_gpu
 clusters = load_clusters_config()
 project = load_project_config()
 cluster = clusters[project["cluster"]]
+
+# Build template env vars for a stage
+stage_env = build_stage_env("discovery", "train")
+# → {"MODULES": ..., "REPO_DIR": ..., "EXECUTOR": ..., "CONDA_SOURCE": ..., "CONDA_ENV": ...}
 
 # Run a command on the cluster
 result = ssh_run("qstat -u jamesdc1", host=cluster["host"], user=cluster["user"])

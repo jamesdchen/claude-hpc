@@ -8,6 +8,7 @@ clusters.yaml and per-project project.yaml files.
 __all__ = [
     "load_clusters_config",
     "load_project_config",
+    "build_stage_env",
     "get_template_path",
     "ssh_run",
     "rsync_push",
@@ -22,7 +23,7 @@ __all__ = [
 
 from pathlib import Path
 
-from hpc._config import _PACKAGE_ROOT, load_clusters_config, load_project_config
+from hpc._config import _PACKAGE_ROOT, build_stage_env, load_clusters_config, load_project_config
 from hpc.gpu import pick_gpu
 from hpc.lifecycle import check_results, detect_scheduler, log_event, read_events, report_status
 from hpc.remote import rsync_pull, rsync_push, ssh_run
