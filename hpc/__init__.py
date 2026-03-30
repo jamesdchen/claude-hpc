@@ -21,6 +21,9 @@ __all__ = [
     "detect_scheduler",
     "pick_gpu",
     "collect",
+    # Chunking protocol
+    "ChunkContext",
+    "chunk_context",
     # Manifest / grid API
     "load_manifest",
     "manifest_exists",
@@ -35,6 +38,7 @@ __all__ = [
 from pathlib import Path
 from typing import Any
 
+from hpc.chunking import ChunkContext, chunk_context
 from hpc._config import (
     _PACKAGE_ROOT,
     build_stage_env,

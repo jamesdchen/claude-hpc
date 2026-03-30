@@ -121,6 +121,24 @@ Generates a `.hpc/` directory with cached CLI help, import graphs, and experimen
 
 Cluster connection details are in `config/clusters.yaml`.
 
+## Chunking Protocol
+
+claude-hpc provides a chunking protocol so experiment executors don't need to
+implement their own parallelisation logic.
+
+```python
+from hpc.chunking import chunk_context
+
+ctx = chunk_context()                          # no-op locally (chunk 0 of 1)
+my_range = ctx.split(range(train_win, N))      # full range locally, subset on HPC
+results.to_csv(ctx.output_path())              # ./results_chunk_1.csv locally
+```
+
+- `chunk_context()` reads `CHUNK_ID`, `TOTAL_CHUNKS`, `RESULT_DIR` from env vars (set by claude-hpc job templates)
+- Defaults to chunk 0 of 1 for local development — executor processes everything
+- `ctx.split()` accepts a `range` or `int` and returns the sub-range for this chunk
+- `ctx.output_path()` generates the standard `results_chunk_{id+1}.csv` filename
+
 ## Python API
 
 ```python
