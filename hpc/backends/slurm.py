@@ -1,0 +1,45 @@
+"""SLURM backend — submits array jobs via sbatch."""
+
+import os
+
+from hpc.backends import HPCBackend, register
+
+
+@register("slurm")
+class SlurmBackend(HPCBackend):
+    def __init__(
+        self,
+        script: str | None = None,
+        account: str | None = None,
+        cluster: str | None = None,
+        log_dir: str | None = None,
+    ):
+        if script is None:
+            raise ValueError("SlurmBackend requires a 'script' path")
+        self.script = script
+        self.account = account or os.environ.get("SLURM_ACCOUNT", "")
+        self.cluster = cluster or os.environ.get("SLURM_CLUSTER", "")
+        self.log_dir = log_dir or os.environ.get("SLURM_LOG_DIR", "logs")
+
+    def _build_command(self, task_range: str, job_name: str, job_env: dict[str, str]) -> list[str]:
+        cmd = [
+            "sbatch",
+        ]
+        if self.cluster:
+            cmd.append(f"--clusters={self.cluster}")
+        cmd += [
+            "--array",
+            task_range,
+            "--job-name",
+            job_name,
+        ]
+        if self.account:
+            cmd += ["--account", self.account]
+        cmd += [
+            "--output",
+            f"{self.log_dir}/slurm-%A_%a.out",
+            "--error",
+            f"{self.log_dir}/slurm-%A_%a.err",
+            self.script,
+        ]
+        return cmd

@@ -1,0 +1,73 @@
+{
+  "autoDreamEnabled": true,
+  "skipDangerousModePermissionPrompt": true,
+  "voiceEnabled": false,
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "deny": [
+      "Bash(scancel:*)",
+      "Bash(qdel:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm -r :*)",
+      "Bash(chmod -R:*)",
+      "Bash(chown -R:*)",
+      "Bash(module purge:*)",
+      "Bash(conda remove:*)",
+      "Bash(conda env remove:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(kill -9:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "read input; file=$(echo \"$input\" | jq -r '.tool_input.file_path // empty'); if [ -n \"$file\" ] && [[ \"$file\" == *.py ]]; then ruff_out=$(ruff check \"$file\" 2>&1); ruff_rc=$?; mypy_out=$(mypy \"$file\" --ignore-missing-imports 2>&1); mypy_rc=$?; if [ $ruff_rc -ne 0 ] || [ $mypy_rc -ne 0 ]; then echo '❌ Lint/type errors — fix before proceeding:'; [ $ruff_rc -ne 0 ] && echo \"--- ruff ---\" && echo \"$ruff_out\"; [ $mypy_rc -ne 0 ] && echo \"--- mypy ---\" && echo \"$mypy_out\"; exit 1; fi; fi"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "code-simplifier@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    }
+  },
+  "autoUpdatesChannel": "latest",
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "api.github.com",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "registry.npmjs.org",
+        "raw.githubusercontent.com",
+        "hoffman2.idre.ucla.edu",
+        "discovery2.usc.edu"
+      ],
+      "allowLocalBinding": false
+    },
+    "excludedCommands": [
+      "git",
+      "pip",
+      "python",
+      "ssh",
+      "rsync",
+      "scp"
+    ]
+  }
+}
