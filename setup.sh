@@ -57,9 +57,11 @@ else
     echo "  (no command files found in commands/)"
 fi
 
-# Settings and CLAUDE.md
-safe_copy "$REPO_DIR/settings.json" "$CLAUDE_DIR/settings.json"
-safe_copy "$REPO_DIR/CLAUDE.md"     "$CLAUDE_DIR/CLAUDE.md"
+# NOTE: We intentionally do NOT copy settings.json or CLAUDE.md to ~/.claude/.
+# claude-hpc is a specialization layer, not a replacement for global config.
+# Its CLAUDE.md lives here as project-level instructions (active when working
+# in this directory). The slash commands (installed above) carry their own
+# context and work from any project that has a project.yaml.
 
 # ── Install Python package ────────────────────────────────────────
 echo ""
@@ -81,6 +83,5 @@ else
     echo "  (none yet — add .md files to commands/)"
 fi
 echo ""
-echo "Config files:"
-echo "  $CLAUDE_DIR/settings.json"
-echo "  $CLAUDE_DIR/CLAUDE.md"
+echo "Note: global ~/.claude/CLAUDE.md and settings.json were NOT modified."
+echo "claude-hpc layers on top of your global config via slash commands."

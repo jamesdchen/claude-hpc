@@ -1,33 +1,14 @@
 Monitor running HPC jobs via SSH and take corrective action.
 
-## Configuration
+## Setup
 
-Read the two config files at the start:
-
-- **$PROJECT_YAML** — `project.yaml` in the current working directory.
-- **$CLUSTERS_YAML** — `config/clusters.yaml` in the claude-hpc package directory.
+Read the claude-hpc agent guide for configuration schema, SSH conventions, and Python APIs:
 
 ```bash
-PROJECT_YAML="$(pwd)/project.yaml"
-CLUSTERS_YAML="$(python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "config" / "clusters.yaml")')"
+python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "CLAUDE.md")'
 ```
 
-Extract from project config:
-- Target cluster name (or `--cluster` override from `$ARGUMENTS`)
-- Stage definition: `result_pattern`, `result_dir`, `total_chunks`, `gpu_fallback`, `max_retries`, `aggregate_cmd`, `depends_on`
-
-Extract from cluster config:
-- `host`, `user` → `SSH_TARGET="$USER@$HOST"`
-- `scheduler` — `sge` or `slurm`
-- `gpu_types` — fallback order for GPU queue stalls
-
-Construct `REMOTE_PATH` from `project.remote_path`.
-
-### SSH Quoting Rule
-**Always use single quotes** for remote commands containing shell variables that should expand on the remote host:
-```bash
-ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && for f in results/*.csv; do echo "$f"; done'
-```
+Read that file, then read both config files (`project.yaml` in cwd, `clusters.yaml` at the path shown in the guide). Construct `SSH_TARGET` and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of `project.cluster`.
 
 ## Operating Principles
 
@@ -47,35 +28,13 @@ $ARGUMENTS formats (pick one):
    Example: `train 12345678,12345679 100`
 
 3. **Auto-discover** (empty):
-   Check for active jobs belonging to the current project.
-
-   For SGE:
-   ```bash
-   ssh $SSH_TARGET 'qstat -u '"$USER"''
-   ```
-   For SLURM:
-   ```bash
-   ssh $SSH_TARGET 'squeue -u '"$USER"' --format="%.18i %.9P %.30j %.8T %.10M %.6D %R"'
-   ```
-   Cross-reference with stage names from project.yaml to identify which stages are running.
+   Check for active jobs belonging to the current project via queue status commands. Cross-reference with stage names from project.yaml to identify which stages are running.
 
 ## Step 1: Check Status
 
-### SGE
+Run the appropriate scheduler query (qstat for SGE, sacct for SLURM) and count completed results:
+
 ```bash
-# Job queue status
-ssh $SSH_TARGET 'qstat -u '"$USER"''
-
-# Count completed results for the stage
-ssh $SSH_TARGET 'ls '"$REMOTE_PATH"'/<stage.result_dir>/<stage.result_pattern> 2>/dev/null | wc -l'
-```
-
-### SLURM
-```bash
-# Job queue status
-ssh $SSH_TARGET 'sacct -j <JOB_ID> --format=JobID,State,ExitCode,Elapsed,MaxRSS --noheader'
-
-# Count completed results
 ssh $SSH_TARGET 'ls '"$REMOTE_PATH"'/<stage.result_dir>/<stage.result_pattern> 2>/dev/null | wc -l'
 ```
 
@@ -90,47 +49,13 @@ Parse results to determine state:
 
 ### Step 1b: Detect Queue Stalls
 
-For SGE — check how long jobs have been queued:
-```bash
-ssh $SSH_TARGET 'qstat -u '"$USER"' -j <JOBID>' | grep submission_time
-```
-
-For SLURM — check pending duration:
-```bash
-ssh $SSH_TARGET 'squeue -j <JOBID> --format="%.18i %.8T %.20S %.20V" --noheader'
-```
-
 **Stall heuristic**: If ALL tasks have been pending for >15 minutes with zero running, or if the state is unchanged across 2 consecutive checks, treat as a stall. Go to Step 2 with category `queue_stall`.
 
 ## Step 2: Diagnose Failures
 
-Read error logs for failed chunks.
+Read error logs for failed chunks (tail -50 from the appropriate log path).
 
-For SGE:
-```bash
-ssh $SSH_TARGET 'tail -50 '"$REMOTE_PATH"'/logs/<stage_name>.o<JOBID>.<TASKID>'
-```
-Or check scratch for GPU jobs:
-```bash
-ssh $SSH_TARGET 'tail -50 <cluster.scratch>/<stage_name>.o<JOBID>.<TASKID>'
-```
-
-For SLURM:
-```bash
-ssh $SSH_TARGET 'tail -50 '"$REMOTE_PATH"'/logs/<stage_name>_<JOBID>_<TASKID>.out'
-```
-
-Check job accounting:
-
-For SGE:
-```bash
-ssh $SSH_TARGET 'qacct -j <JOBID> -t <TASKID>'
-```
-
-For SLURM:
-```bash
-ssh $SSH_TARGET 'sacct -j <JOBID>_<TASKID> --format=JobID,State,ExitCode,Elapsed,MaxRSS,MaxVMSize --noheader'
-```
+Check job accounting (qacct for SGE, sacct for SLURM).
 
 Classify the failure:
 
@@ -160,30 +85,7 @@ Check retry count. The stage's `max_retries` (default 3) is the limit. If exceed
 | Node fail | no overrides | no overrides |
 | Queue stall | switch GPU type (use `gpu_fallback` from stage, or `gpu_types` from cluster) | next GPU in fallback |
 
-### GPU Fallback Order
-
-Use the stage's `gpu_fallback` list if defined, otherwise fall back to `cluster.gpu_types`. Skip the GPU type that stalled. For single-GPU types, also adjust cuda count and batch size as needed.
-
-### SGE Resubmission
-```bash
-ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && qsub -t <failed_task_ids> \
-    -N <stage_name> -o logs -j y \
-    -l <resource_overrides> \
-    -v CONDA_SOURCE=<...>,CONDA_ENV=<...>,MODULES='"'"'<...>'"'"',EXECUTOR='"'"'<...>'"'"',RESULT_DIR=<...>,TOTAL_CHUNKS=<...>,EXTRA_ARGS='"'"'<...>'"'"' \
-    <template_path>'
-```
-
-### SLURM Resubmission
-```bash
-ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && sbatch \
-    --array=<failed_task_ids> \
-    --job-name=<stage_name> \
-    --output=logs/%x_%A_%a.out \
-    --account=<cluster.account> \
-    <resource_overrides> \
-    --export=CONDA_SOURCE=<...>,CONDA_ENV=<...>,MODULES='"'"'<...>'"'"',EXECUTOR='"'"'<...>'"'"',RESULT_DIR=<...>,TOTAL_CHUNKS=<...> \
-    <template_path>'
-```
+Build the resubmission command using the same template and env vars as the original, with resource overrides applied. Use single-quote SSH convention from the agent guide.
 
 **Update your job-ids list** for subsequent status checks.
 
@@ -197,12 +99,7 @@ ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && <stage.aggregate_cmd>'
 
 After aggregation:
 1. Verify output files exist using `stage.summary_pattern`.
-2. Download summaries locally:
-   ```bash
-   rsync -az \
-       --include='*/' --include='<stage.summary_pattern>' --exclude='*' \
-       $SSH_TARGET:$REMOTE_PATH/<stage.result_dir>/ ./<stage.result_dir>/
-   ```
+2. Download summaries locally via rsync (include only summary patterns, exclude everything else).
 3. Read and report key findings from the local summary files.
 
 ### Multi-Stage Progression
@@ -214,8 +111,6 @@ If the current stage completes and another stage has `depends_on` pointing to th
 **Skip if `all_complete` or fully abandoned.** Report done and stop.
 
 ### Adaptive wait interval
-
-If progress data is available (percentage complete, estimated time remaining):
 
 | Condition | Interval | Reason |
 |-----------|----------|--------|
@@ -259,9 +154,5 @@ Always end with a concise summary:
 ## Context Management
 
 1. **Within a conversation**: Avoid re-reading data already in context. Summarize before scheduling.
-2. **Cron handoff**: Each CronCreate starts fresh. The prompt must carry all state:
-   ```
-   [Monitor State] stage=<name> | cluster=<cluster> | chunks=X/Y done, Z running, W failed | retries: {...} | jobs: <ids> | last_check: <time> | prev_interval: <min>
-   [Actions taken]: resubmitted chunk 3 (OOM, retry 1), ...
-   ```
+2. **Cron handoff**: Each CronCreate starts fresh. The prompt must carry all state.
 3. **Minimize tool output**: Use `tail -20` for logs. Prefer compact status commands over verbose output.
