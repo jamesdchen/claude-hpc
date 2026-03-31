@@ -70,14 +70,21 @@ Push local code + dispatch files to the cluster:
 
 ```bash
 rsync -az --delete \
-    --exclude='.git/' --exclude='__pycache__/' --exclude='*.pyc' \
+    --exclude='.git/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='hpc/' \
     # ... add each entry from hpc.yaml rsync_exclude as --exclude='<pattern>' ...
     . $SSH_TARGET:$REMOTE_PATH/
 ```
 
-Verify `_hpc_dispatch.json` and `_hpc_dispatch.py` were synced:
+Deploy the `hpc` runtime package so `from hpc.chunking import chunk_context` works on the cluster. Resolve `claude-hpc` root via `python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT)'`, then:
+
 ```bash
-ssh $SSH_TARGET 'ls '"$REMOTE_PATH"'/_hpc_dispatch.json '"$REMOTE_PATH"'/_hpc_dispatch.py'
+ssh $SSH_TARGET 'mkdir -p '"$REMOTE_PATH"'/hpc && touch '"$REMOTE_PATH"'/hpc/__init__.py'
+scp $HPC_ROOT/hpc/chunking.py $SSH_TARGET:$REMOTE_PATH/hpc/chunking.py
+```
+
+Verify deployment:
+```bash
+ssh $SSH_TARGET 'ls '"$REMOTE_PATH"'/_hpc_dispatch.json '"$REMOTE_PATH"'/_hpc_dispatch.py '"$REMOTE_PATH"'/hpc/chunking.py'
 ```
 
 ### M-Step 5: Submit
@@ -127,12 +134,21 @@ Push local code to the cluster using the project's rsync_exclude list:
 ```bash
 # Build exclude flags from project.yaml rsync_exclude list
 rsync -az --delete \
-    --exclude='.git/' --exclude='__pycache__/' --exclude='*.pyc' \
+    --exclude='.git/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='hpc/' \
     # ... add each entry from project.rsync_exclude as --exclude='<pattern>' ...
     . $SSH_TARGET:$REMOTE_PATH/
 ```
 
 Verify the sync succeeded (exit code 0) before proceeding.
+
+## Step 2b: Deploy HPC Runtime
+
+Deploy the minimal `hpc` runtime package so `from hpc.chunking import chunk_context` works inside jobs. Resolve `claude-hpc` root via `python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT)'`, then:
+
+```bash
+ssh $SSH_TARGET 'mkdir -p '"$REMOTE_PATH"'/hpc && touch '"$REMOTE_PATH"'/hpc/__init__.py'
+scp $HPC_ROOT/hpc/chunking.py $SSH_TARGET:$REMOTE_PATH/hpc/chunking.py
+```
 
 ## Step 3: Pre-Flight Validation
 

@@ -14,6 +14,7 @@ __all__ = [
     "ssh_run",
     "rsync_push",
     "rsync_pull",
+    "deploy_runtime",
     "log_event",
     "read_events",
     "check_results",
@@ -57,7 +58,7 @@ from hpc.manifest import (
     resolve_template,
     validate_manifest,
 )
-from hpc.remote import rsync_pull, rsync_push, ssh_run
+from hpc.remote import deploy_runtime, rsync_pull, rsync_push, ssh_run
 
 
 def __getattr__(name: str) -> Any:

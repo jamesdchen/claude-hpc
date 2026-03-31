@@ -14,6 +14,7 @@ __all__ = [
     "ssh_run",
     "rsync_push",
     "rsync_pull",
+    "deploy_runtime",
 ]
 
 import subprocess
@@ -25,6 +26,7 @@ DEFAULT_RSYNC_EXCLUDES: list[str] = [
     "*.pyc",
     ".mypy_cache/",
     ".claude/",
+    "hpc/",  # protect deployed runtime stubs from --delete
 ]
 
 
@@ -110,6 +112,39 @@ def rsync_push(
 
     return subprocess.run(
         [*flags, *exclude_flags, src, dst],
+        capture_output=True,
+        text=True,
+    )
+
+
+def deploy_runtime(
+    *,
+    host: str,
+    user: str,
+    remote_path: str,
+) -> subprocess.CompletedProcess[str]:
+    """Deploy minimal ``hpc`` runtime package to the cluster.
+
+    Creates ``{remote_path}/hpc/`` with an empty ``__init__.py`` and a
+    copy of ``chunking.py`` so that ``from hpc.chunking import chunk_context``
+    works inside HPC jobs without installing the full claude-hpc package.
+
+    Must be called **after** :func:`rsync_push` (which uses ``--delete``).
+    """
+    from hpc._config import _PACKAGE_ROOT
+
+    target = _target(user, host)
+
+    ssh_run(
+        f"mkdir -p {remote_path}/hpc && touch {remote_path}/hpc/__init__.py",
+        host=host,
+        user=user,
+    )
+
+    src = str(_PACKAGE_ROOT / "hpc" / "chunking.py")
+    dst = f"{target}:{remote_path}/hpc/chunking.py"
+    return subprocess.run(
+        ["scp", src, dst],
         capture_output=True,
         text=True,
     )
