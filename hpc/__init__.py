@@ -2,13 +2,11 @@
 
 Provides pluggable HPC backends (SGE, SLURM), remote execution utilities,
 job lifecycle tracking, GPU selection, and experiment-agnostic grid dispatch —
-all configurable via clusters.yaml and per-project project.yaml or hpc.yaml files.
+all configurable via clusters.yaml and per-project hpc.yaml files.
 """
 
 __all__ = [
     "load_clusters_config",
-    "load_project_config",
-    "build_stage_env",
     "detect_project_type",
     "get_template_path",
     "ssh_run",
@@ -42,10 +40,8 @@ from typing import Any
 
 from hpc._config import (
     _PACKAGE_ROOT,
-    build_stage_env,
     detect_project_type,
     load_clusters_config,
-    load_project_config,
 )
 from hpc.chunking import ChunkContext, chunk_context, collect_chunks
 from hpc.gpu import pick_gpu

@@ -1,374 +1,270 @@
-# project.yaml Specification
-
-Each project managed by claude-hpc has a `project.yaml` at its root defining
-cluster targets, sync rules, and computational stages.
-
----
+# hpc.yaml Specification
 
 ## Top-Level Fields
 
-| Field            | Type       | Required | Description                                                  |
-|------------------|------------|----------|--------------------------------------------------------------|
-| `project`        | string     | yes      | Short project name (used in job names, paths, logs).         |
-| `cluster`        | string     | yes      | Cluster key matching an entry in `clusters.yaml`.            |
-| `remote_path`    | string     | yes      | Absolute path on the remote cluster for this project.        |
-| `conda_env`      | string     | yes      | Conda environment to activate before running any stage.      |
-| `rsync_exclude`  | list[str]  | no       | Patterns passed to `rsync --exclude` during sync.            |
-| `experiment_paths` | list[str]  | no       | Glob patterns for experiment YAML configs (used by `hpc collect`). |
-| `registries`       | map        | no       | Importable registries for model/feature/subgroup choices (used by `hpc collect`). |
+These are shared across all profiles:
 
----
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `project` | string | yes | Short project name (used in job names, paths, logs) |
+| `cluster` | string | yes | Cluster key matching an entry in `clusters.yaml` |
+| `remote_path` | string | yes | Absolute path on the remote cluster |
+| `rsync_exclude` | list[str] | no | Patterns passed to `rsync --exclude` during sync |
+| `experiment_paths` | list[str] | no | Glob patterns for experiment YAML configs (used by `hpc collect`) |
+| `registries` | map | no | Importable registries in `"module.path:ATTR"` format (used by `hpc collect`) |
+| `cluster_envs` | map | no | Per-cluster env overrides keyed by cluster name, then env_group name |
 
-## stages
+## profiles
 
-A map of **stage_name -> stage_config**. Stages execute in dependency order
-(topological sort of `depends_on` edges). Independent stages may run in
-parallel.
+A map of **profile_name -> profile_config**. Each profile is either:
+- A **single-stage profile** with `run`, `grid`, `resources`, etc. at the profile level
+- A **multi-stage profile** with a `stages` key containing a DAG of stages
 
-### Stage Fields
+When `profiles` is present, `run`/`grid`/`resources` are NOT at the top level.
 
-| Field             | Type                 | Required | Description                                                                                       |
-|-------------------|----------------------|----------|---------------------------------------------------------------------------------------------------|
-| `type`            | `single` \| `array`  | yes      | `single` = one job. `array` = SLURM/SGE array job.                                               |
-| `executor`        | string               | yes      | Shell command to run (receives chunk index via env var for array jobs).                            |
-| `template`        | string               | yes      | SLURM/SGE template name from `templates/`.                                                        |
-| `resources`       | map                  | yes      | Resource request (see below).                                                                     |
-| `chunks`          | int                  | no       | Number of array tasks (required when `type: array`).                                              |
-| `depends_on`      | string \| list[str]  | no       | Stage name(s) that must complete before this stage starts.                                        |
-| `result_pattern`  | string               | no       | Glob pattern for expected output files. `{exp_id}` is interpolated at runtime.                    |
-| `aggregate_cmd`   | string               | no       | Command to run after all array tasks complete to merge results.                                   |
-| `summary_pattern` | string               | no       | Glob pattern for summary/aggregate output files.                                                  |
-| `gpu_fallback`    | list[str]            | no       | Ordered list of GPU types to try if the preferred type is unavailable.                            |
-| `max_retries`     | int                  | no       | Maximum number of automatic resubmissions on failure.                                             |
-| `seed_env`        | string               | no       | Environment variable that receives the array task ID (default: `SLURM_ARRAY_TASK_ID`).           |
+Top-level `project`, `cluster`, `remote_path`, `rsync_exclude` are shared across all profiles.
 
-### Resource Fields
+### Single-Stage Profile Fields
 
-| Field      | Type   | Required | Description                                   |
-|------------|--------|----------|-----------------------------------------------|
-| `cpus`     | int    | yes      | Number of CPU cores per task.                 |
-| `mem`      | string | yes      | Memory per task (e.g., `"16G"`, `"4G"`).      |
-| `walltime` | string | yes      | Maximum wall-clock time (`HH:MM:SS`).         |
-| `gpus`     | int    | no       | Number of GPUs per task.                      |
-| `gpu_type` | string | no       | Preferred GPU type (e.g., `a100`, `v100`).    |
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `run` | string | yes | Shell command. Grid params appended as `--key value` CLI args |
+| `grid` | map | yes | Parameter grid — Cartesian product generates tasks |
+| `resources` | map | yes | Resource request per task |
+| `env` | map | no | Environment setup (modules, conda_env) |
+| `env_group` | string | no | Key into `cluster_envs[cluster]` for env overrides |
+| `results` | map | no | Result collection config |
+| `chunking` | map | no | Data chunking within each grid point |
+| `gpu_fallback` | list[str] | no | Ordered GPU types to try |
+| `max_retries` | int | no | Max auto-resubmissions on failure |
 
----
+### Multi-Stage Profiles
 
-## collect Fields
+When a profile contains a `stages` key, each stage has the same fields as a single-stage profile, plus:
 
-These optional fields configure `python -m hpc.collect`, which generates a `.hpc/` directory
-with cached dependency graphs, CLI help, and experiment metadata.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `depends_on` | string or list[str] | no | Stage(s) that must complete first |
 
-### experiment_paths
-
-List of glob patterns relative to the project root. Each matching YAML file is read and
-summarized in `.hpc/experiments.yaml`.
-
-```yaml
-experiment_paths:
-  - "projects/ml/experiments/*.yaml"
-  - "projects/dl/experiments/*.yaml"
-```
-
-### registries
-
-Map of registry names to importable Python references in `"module.path:ATTRIBUTE"` format.
-Each attribute is imported and its value stored in `.hpc/experiments.yaml` under `registries`.
-
-```yaml
-registries:
-  models: "projects.ml.models.registry:ALL_MODELS"
-  features: "projects.ml.features.feature_groups:FEATURE_TYPES"
-  subgroups: "projects.ml.features.feature_groups:SUBGROUPS"
-```
-
-If the import fails (e.g., missing dependencies on the local machine), the registry entry
-is stored as `null`.
-
----
-
-## Examples
-
-### Array of Identical Tasks (single stage)
-
-A classic embarrassingly-parallel backtest split into 100 chunks on CPU:
-
-```yaml
-project: my_backtest
-cluster: hoffman2
-remote_path: /u/home/j/jamesdc1/my_backtest
-conda_env: backtest-env
-rsync_exclude: [.git/, results/, __pycache__, "*.pyc"]
-
-stages:
-  backtest:
-    type: array
-    executor: "python -m backtest.run"
-    template: cpu_array
-    resources: { cpus: 1, mem: "16G", walltime: "4:00:00" }
-    chunks: 100
-    result_pattern: "results/{exp_id}/chunk_*.csv"
-    aggregate_cmd: "python scripts/aggregate.py"
-    summary_pattern: "*_summary*.csv"
-```
-
-### Multi-Stage Pipeline with Dependencies
-
-A train -> generate -> evaluate pipeline where each stage depends on the
-previous one:
-
-```yaml
-project: generative_model
-cluster: discovery
-remote_path: /home1/user/generative_model
-conda_env: gen-env
-rsync_exclude: [.git/, samples/, __pycache__, "*.pyc", data/]
-
-stages:
-  train:
-    type: single
-    executor: "python scripts/train.py"
-    template: gpu_array
-    resources: { cpus: 8, mem: "64G", walltime: "2:00:00", gpus: 1, gpu_type: a100 }
-    result_pattern: "checkpoints/best.pt"
-
-  generate:
-    type: array
-    depends_on: train
-    executor: "python scripts/generate.py --checkpoint checkpoints/best.pt"
-    template: gpu_array
-    resources: { cpus: 8, mem: "64G", walltime: "0:30:00", gpus: 1, gpu_type: a100 }
-    chunks: 10
-    seed_env: SLURM_ARRAY_TASK_ID
-    result_pattern: "samples/seed_*/chunk_*.pt"
-
-  evaluate:
-    type: single
-    depends_on: generate
-    executor: "python scripts/evaluate.py --checkpoint checkpoints/best.pt"
-    template: gpu_array
-    resources: { cpus: 8, mem: "64G", walltime: "0:30:00", gpus: 1, gpu_type: a100 }
-    result_pattern: "eval_results/metrics.json"
-    summary_pattern: "eval_results/*"
-```
-
----
----
-
-# hpc.yaml Specification (Experiment Manifest)
-
-The experiment manifest is a simpler alternative to `project.yaml` for repos where
-the author does not want to deal with HPC details. The author provides a run command
-and a parameter grid; claude-hpc handles chunking, submission, monitoring, and
-result collection automatically.
-
-If both `hpc.yaml` and `project.yaml` exist, claude-hpc prefers `hpc.yaml` for
-submission but `project.yaml` remains usable via explicit stage selection.
-
----
-
-## Top-Level Fields
-
-| Field           | Type      | Required | Description                                                      |
-|-----------------|-----------|----------|------------------------------------------------------------------|
-| `project`       | string    | yes      | Short project name (used in job names, paths, logs).             |
-| `cluster`       | string    | yes      | Cluster key matching an entry in `clusters.yaml`.                |
-| `remote_path`   | string    | yes      | Absolute path on the remote cluster for this project.            |
-| `run`           | string    | yes      | Shell command for a single experiment run. Grid params are appended as `--key value` CLI args. |
-| `grid`          | map       | yes      | Parameter grid (see below).                                      |
-| `resources`     | map       | yes      | Resource request per task (see below).                           |
-| `env`           | map       | no       | Environment setup (see below).                                   |
-| `results`       | map       | no       | Result collection config (see below).                            |
-| `chunking`      | map       | no       | Data chunking within each grid point (see below).                |
-| `rsync_exclude` | list[str] | no       | Patterns passed to `rsync --exclude` during sync.                |
-
----
+Stages without `grid` run as single jobs. Stages with `grid` get fan-out (parallel tasks) → fan-in (`results.aggregate_cmd`).
 
 ## grid
 
-A map of **parameter_name -> list of values**. claude-hpc computes the Cartesian
-product to generate one HPC task per combination (or N tasks per combination if
-`chunking` is set).
-
-```yaml
-grid:
-  model: [ridge, xgboost, lightgbm]
-  features: [har, pca]
-  seed: [1, 2, 3]
-```
-
-This produces 3 × 2 × 3 = 18 grid points. Each grid point becomes a task that runs:
-
-```
-<run> --model ridge --features har --seed 1
-```
-
----
+Map of parameter_name → list of values. Cartesian product = one task per combo (or N tasks if chunking).
 
 ## env
 
-| Field       | Type   | Required | Description                                                |
-|-------------|--------|----------|------------------------------------------------------------|
-| `modules`   | string | no       | Space-separated modules to load (e.g., `"python gcc"`).   |
-| `conda_env` | string | no       | Conda environment to activate before running.              |
-
----
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `modules` | string | no | Space-separated modules to load |
+| `conda_env` | string | no | Conda environment to activate |
 
 ## resources
 
-Same schema as `project.yaml` stage resources:
-
-| Field      | Type   | Required | Description                                   |
-|------------|--------|----------|-----------------------------------------------|
-| `cpus`     | int    | no       | Number of CPU cores per task.                 |
-| `mem`      | string | yes      | Memory per task (e.g., `"16G"`).              |
-| `walltime` | string | yes      | Maximum wall-clock time (`HH:MM:SS`).         |
-| `gpus`     | int    | no       | Number of GPUs per task.                      |
-| `gpu_type` | string | no       | Preferred GPU type (e.g., `a100`, `v100`).    |
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cpus` | int | no | CPU cores per task |
+| `mem` | string | yes | Memory per task (e.g., `"16G"`) |
+| `walltime` | string | yes | Max wall-clock time (`HH:MM:SS`) |
+| `gpus` | int | no | GPUs per task |
+| `gpu_type` | string | no | Preferred GPU type (e.g., `a100`) |
 
 If `gpus` is present, the `gpu_array` template is used; otherwise `cpu_array`.
 
----
-
 ## results
 
-| Field            | Type   | Required | Description                                                      |
-|------------------|--------|----------|------------------------------------------------------------------|
-| `dir`            | string | no       | Result directory template. Supports `{run_id}` placeholder.     |
-| `pattern`        | string | no       | Glob pattern for result files within the result dir.             |
-| `aggregate_cmd`  | string | no       | Command to run after all tasks complete.                         |
-| `summary_pattern`| string | no       | Glob pattern for summary files to download after aggregation.    |
-
-`{run_id}` is a deterministic identifier derived from the grid point's parameter
-values (e.g., `ridge_har_1`).
-
----
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `dir` | string | no | Result directory template. Supports `{run_id}` placeholder |
+| `pattern` | string | no | Glob pattern for result files |
+| `aggregate_cmd` | string | no | Fan-in command after all tasks complete |
+| `summary_pattern` | string | no | Glob for summary files to download after aggregation |
 
 ## chunking
 
-Optional. Splits each grid point into N data chunks for additional parallelism.
-Without this, each grid point is a single HPC task.
+Splits each grid point into N data chunks for additional parallelism.
 
-| Field       | Type   | Required | Description                                              |
-|-------------|--------|----------|----------------------------------------------------------|
-| `total`     | int    | yes      | Number of chunks per grid point.                         |
-| `chunk_arg` | string | no       | CLI flag for chunk index (default: `"--chunk-id"`).      |
-| `total_arg` | string | no       | CLI flag for total chunks (default: `"--total-chunks"`). |
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `total` | int | yes | Chunks per grid point |
+| `chunk_arg` | string | no | CLI flag for chunk index (default: `"--chunk-id"`) |
+| `total_arg` | string | no | CLI flag for total chunks (default: `"--total-chunks"`) |
 
-With chunking, total HPC tasks = grid_points × `total`. Task *i* maps to
-grid point `i // total` and chunk `i % total`.
+Total HPC tasks = grid_points × `total`.
+
+## cluster_envs
+
+Optional per-cluster environment overrides. Keyed by cluster name, then by env_group name. Profiles reference these via `env_group`.
+
+```yaml
+cluster_envs:
+  hoffman2:
+    ml: { modules: "python gcc" }
+    dl: { modules: "conda cuda/12.3", conda_env: harxhar-dl }
+  discovery:
+    ml: { modules: "python" }
+    dl: { modules: "", conda_env: project-cucuringu }
+```
+
+## collect Fields
+
+`experiment_paths` and `registries` configure `python -m hpc.collect`, which generates a `.hpc/` directory with cached dependency graphs and experiment metadata.
+
+### experiment_paths
+
+List of glob patterns. Each matching YAML is summarized in `.hpc/experiments.yaml`.
+
+### registries
+
+Map of registry names to `"module.path:ATTRIBUTE"` references. Each attribute is imported and stored in `.hpc/experiments.yaml`.
 
 ---
 
 ## How It Works
 
-1. claude-hpc reads `hpc.yaml` and expands the grid into individual tasks.
-2. A `_hpc_dispatch.json` manifest is generated mapping each task ID to its
-   full command string and result directory.
-3. A standalone `_hpc_dispatch.py` script is deployed alongside the manifest.
-4. The job template runs `python3 _hpc_dispatch.py` as its executor.
-5. The dispatch script reads the manifest, finds the command for its task ID,
-   and executes it.
+1. claude-hpc reads `hpc.yaml` and selects a profile (and stage, if multi-stage).
+2. The grid is expanded into individual tasks.
+3. A `_hpc_dispatch.json` manifest maps each task ID to its command + result dir.
+4. A standalone `_hpc_dispatch.py` script is deployed alongside the manifest.
+5. The job template runs `python3 _hpc_dispatch.py` as its executor.
+6. The dispatch script reads the manifest and executes the command for its task ID.
 
-The experiment author's code receives grid params as normal CLI args — no
-awareness of HPC, chunking, or task IDs required (unless using `chunking`).
+The experiment author's code receives grid params as normal CLI args — no awareness of HPC, chunking, or task IDs required (unless using `chunking`).
 
 ---
 
 ## Examples
 
-### Simple Grid Search (CPU)
+### Single-Profile, Single-Stage (simplest)
 
 ```yaml
 project: my_experiment
 cluster: hoffman2
 remote_path: /u/home/j/jamesdc1/my_experiment
 
-run: "python3 -m my_experiment.train"
-
-grid:
-  model: [ridge, xgboost, lightgbm]
-  lr: [0.01, 0.001]
-  seed: [1, 2, 3]
-
-env:
-  modules: "python gcc"
-
-resources:
-  cpus: 1
-  mem: "16G"
-  walltime: "4:00:00"
-
-results:
-  dir: "results/{run_id}"
-  pattern: "*.csv"
-
-rsync_exclude: [.git/, results/, __pycache__]
+profiles:
+  sweep:
+    run: "python3 -m my_experiment.train"
+    grid:
+      model: [ridge, xgboost, lightgbm]
+      lr: [0.01, 0.001]
+      seed: [1, 2, 3]
+    env: { modules: "python gcc" }
+    resources: { cpus: 1, mem: "16G", walltime: "4:00:00" }
+    results:
+      dir: "results/{run_id}"
+      pattern: "*.csv"
+    rsync_exclude: [.git/, results/, __pycache__]
 ```
 
-### Grid + Data Chunking (CPU)
+### Multi-Profile (harxhar pattern — ML + DL in one repo)
 
 ```yaml
+# ML/DL backtesting pipelines for financial volatility forecasting.
 project: harxhar
 cluster: hoffman2
 remote_path: /u/home/j/jamesdc1/project-cucuringu/harxhar
 
-run: "python3 -m projects.ml.cli.executor"
+experiment_paths: ["projects/ml/experiments/*.yaml"]
+registries:
+  models: "projects.ml.models.registry:ALL_MODELS"
+  features: "projects.ml.features.feature_groups:FEATURE_TYPES"
+  subgroups: "projects.ml.features.feature_groups:SUBGROUPS"
 
-grid:
-  model: [ridge, xgboost, lightgbm, random_forest]
-  features: [har, pca, ae]
+cluster_envs:
+  hoffman2:
+    ml: { modules: "python gcc" }
+    dl: { modules: "conda cuda/12.3", conda_env: harxhar-dl }
 
-chunking:
-  total: 100
-  chunk_arg: "--chunk-id"
-  total_arg: "--total-chunks"
+profiles:
+  ml:
+    run: "python3 -m projects.ml.cli.executor"
+    grid:
+      model: [ridge, xgboost, lightgbm, random_forest]
+      features: [har, pca, ae]
+    chunking: { total: 100, chunk_arg: "--chunk-id", total_arg: "--total-chunks" }
+    env_group: ml
+    resources: { cpus: 1, mem: "16G", walltime: "4:00:00" }
+    results:
+      dir: "results/{run_id}"
+      pattern: "results_chunk_*.csv"
+      aggregate_cmd: "python projects/ml/scripts/aggregate.py"
+      summary_pattern: "*_summary*.csv"
 
-env:
-  modules: "python gcc"
+  dl:
+    run: "python3 -m projects.dl.cli.gpu_executor"
+    grid:
+      experiment: [patchts, ae_ridge]
+    chunking: { total: 10, chunk_arg: "--chunk-id", total_arg: "--total-chunks" }
+    env_group: dl
+    resources: { cpus: 4, mem: "16G", walltime: "6:00:00", gpus: 2, gpu_type: a100 }
+    gpu_fallback: [a100, h200, a6000, h100, v100, rtx2080ti]
+    max_retries: 3
+    results:
+      dir: "results/{run_id}"
+      pattern: "results_chunk_*.csv"
+      aggregate_cmd: "python -m projects.dl.scripts.aggregate"
+      summary_pattern: "*_summary*.csv"
 
-resources:
-  cpus: 1
-  mem: "16G"
-  walltime: "4:00:00"
-
-results:
-  dir: "results/{run_id}"
-  pattern: "results_chunk_*.csv"
-  aggregate_cmd: "python projects/ml/scripts/aggregate.py"
-  summary_pattern: "*_summary*.csv"
-
-rsync_exclude: [.git/, results/, __pycache__, "*.pyc", .mypy_cache/, all30min/, .claude/]
+rsync_exclude: [.git/, results/, results_scaling_laws/, __pycache__/, "*.pyc", .mypy_cache/, all30min/, .claude/]
 ```
 
-### GPU Training Grid
+### Multi-Stage Profile (train → test pipeline)
 
 ```yaml
-project: dl_sweep
+project: vol_cfm
+cluster: discovery
+remote_path: /home1/jc_905/vol_cfm
+
+cluster_envs:
+  discovery:
+    dl: { conda_env: project-cucuringu }
+
+profiles:
+  cfm:
+    stages:
+      train:
+        run: "python scripts/train.py"
+        env_group: dl
+        resources: { cpus: 8, mem: "64G", walltime: "2:00:00", gpus: 1, gpu_type: a100 }
+        results:
+          pattern: "checkpoints/best.pt"
+
+      generate:
+        depends_on: train
+        run: "python scripts/generate.py --checkpoint checkpoints/best.pt"
+        chunking: { total: 10 }
+        env_group: dl
+        resources: { cpus: 8, mem: "64G", walltime: "0:30:00", gpus: 1, gpu_type: a100 }
+        results:
+          pattern: "samples/seed_*/chunk_*.pt"
+
+      evaluate:
+        depends_on: generate
+        run: "python scripts/evaluate.py --checkpoint checkpoints/best.pt"
+        env_group: dl
+        resources: { cpus: 8, mem: "64G", walltime: "0:30:00", gpus: 1, gpu_type: a100 }
+        results:
+          pattern: "eval_results/metrics.json"
+          summary_pattern: "eval_results/*"
+
+rsync_exclude: [.git/, samples/, __pycache__, "*.pyc", .mypy_cache/, data/]
+```
+
+### Single-Profile Shorthand (no profiles key)
+
+For the simplest case, `run`/`grid`/`resources` can live at the top level without a `profiles` wrapper:
+
+```yaml
+project: quick_sweep
 cluster: hoffman2
-remote_path: /u/home/j/jamesdc1/dl_sweep
+remote_path: /u/home/j/jamesdc1/quick_sweep
 
 run: "python3 train.py"
-
 grid:
-  architecture: [resnet18, resnet50]
-  lr: [0.001, 0.0001]
+  lr: [0.01, 0.001]
   batch_size: [32, 64]
-
-env:
-  modules: "conda cuda/12.3"
-  conda_env: dl-env
-
-resources:
-  cpus: 4
-  mem: "32G"
-  walltime: "6:00:00"
-  gpus: 2
-  gpu_type: a100
-
-results:
-  dir: "results/{run_id}"
-  pattern: "*.pt"
-
-rsync_exclude: [.git/, results/, __pycache__, data/]
+resources: { cpus: 1, mem: "8G", walltime: "1:00:00" }
 ```
+
+This is equivalent to a single profile named after the project.

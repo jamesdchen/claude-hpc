@@ -9,14 +9,13 @@ import ast
 import hashlib
 import importlib
 import re
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-from hpc._config import load_project_config
+from hpc.manifest import load_manifest, normalize_profile
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -169,151 +168,87 @@ def trace_imports(
     return [rel], _visited_files
 
 
+def _trace_target(
+    target: str,
+    kind: str,
+    project_root: Path,
+    expanded: set[str],
+    visited: list[Path],
+) -> tuple[list[Any], list[Path]]:
+    """Trace imports for a single executor/aggregate target."""
+    if kind == "module":
+        module = target
+    else:
+        module = target.replace("/", ".").replace("\\", ".").removesuffix(".py")
+
+    tree, visited = trace_imports(
+        module, project_root, depth=2, _expanded=expanded, _visited_files=visited
+    )
+    return tree, visited
+
+
 def _build_module_graph(
-    project: dict[str, Any], project_root: Path
+    manifest: dict[str, Any], project_root: Path
 ) -> tuple[dict[str, Any], list[Path]]:
-    """Build module_graph.yaml content. Returns (graph_dict, visited_files)."""
-    stages = project.get("stages", {})
+    """Build module_graph.yaml from hpc.yaml manifest."""
     graph: dict[str, Any] = {}
     all_visited: list[Path] = []
+    expanded: set[str] = set()
 
-    for stage_name, stage_cfg in stages.items():
-        executor = stage_cfg.get("executor", "")
-        target, kind = _extract_executor_target(executor)
-        if target is None:
-            continue
+    profiles = manifest.get("profiles")
+    if profiles is None:
+        # Single-profile shorthand — treat as one profile named after the project
+        profiles = {manifest.get("project", "default"): manifest}
 
-        if kind == "module":
-            module = target
-        else:
-            # Script path → convert to dotted module (scripts/train.py → scripts.train)
-            module = target.replace("/", ".").replace("\\", ".").removesuffix(".py")
+    for prof_name, prof_cfg in profiles.items():
+        stages = normalize_profile(prof_cfg)
 
-        tree, visited = trace_imports(module, project_root, depth=2)
-        graph[stage_name] = tree
-        for p in visited:
-            if p not in all_visited:
-                all_visited.append(p)
+        for stg_name, stg_cfg in stages.items():
+            # Build the graph key
+            if stg_name == "default" and len(stages) == 1:
+                key = prof_name
+            else:
+                key = f"{prof_name}.{stg_name}"
+
+            entries: list[Any] = []
+
+            # Trace the run command
+            run_cmd = stg_cfg.get("run", "")
+            target, kind = _extract_executor_target(run_cmd)
+            if target:
+                tree, all_visited = _trace_target(
+                    target, kind, project_root, expanded, all_visited
+                )
+                entries.extend(tree)
+
+            # Trace the aggregate command
+            results = stg_cfg.get("results", {})
+            agg_cmd = results.get("aggregate_cmd", "")
+            if agg_cmd:
+                agg_target, agg_kind = _extract_executor_target(agg_cmd)
+                if agg_target:
+                    tree, all_visited = _trace_target(
+                        agg_target, agg_kind, project_root, expanded, all_visited
+                    )
+                    entries.extend(tree)
+
+            if entries:
+                graph[key] = entries
 
     return graph, all_visited
 
 
 # ---------------------------------------------------------------------------
-# 2. CLI help
-# ---------------------------------------------------------------------------
-
-_ARG_RE = re.compile(
-    r"^\s+"
-    r"(?:(-\w),\s+)?"  # optional short flag
-    r"(--[\w-]+)"  # long flag
-    r"(?:\s+\{([^}]+)\})?"  # optional choices
-    r"(?:\s+(\S+))?"  # optional metavar
-    r"(?:\s{2,}(.*))?$"  # optional help text
-)
-_DEFAULT_RE = re.compile(r"\(default:\s*(.+?)\)")
-_METAVAR_TYPE_MAP: dict[str, str] = {
-    "INT": "int",
-    "FLOAT": "float",
-    "STR": "str",
-    "PATH": "str",
-    "FILE": "str",
-    "DIR": "str",
-}
-
-
-def parse_argparse_output(raw: str) -> list[dict[str, Any]]:
-    """Parse argparse ``--help`` output into a list of arg dicts."""
-    args: list[dict[str, Any]] = []
-    for line in raw.splitlines():
-        m = _ARG_RE.match(line)
-        if not m:
-            continue
-        _short, long, choices_raw, metavar, help_text = m.groups()
-        entry: dict[str, Any] = {"name": long}
-
-        if choices_raw:
-            entry["choices"] = [c.strip() for c in choices_raw.split(",")]
-
-        if metavar:
-            mapped = _METAVAR_TYPE_MAP.get(metavar.upper())
-            if mapped:
-                entry["type"] = mapped
-
-        help_text = help_text or ""
-
-        dm = _DEFAULT_RE.search(help_text)
-        if dm:
-            entry["default"] = dm.group(1)
-
-        if "required" in help_text.lower():
-            entry["required"] = True
-        elif "default" not in entry and choices_raw is None:
-            # No default and no choices — likely required.
-            entry["required"] = True
-
-        if help_text:
-            cleaned = _DEFAULT_RE.sub("", help_text).strip()
-            if cleaned:
-                entry["help"] = cleaned
-
-        args.append(entry)
-    return args
-
-
-def _run_help(target: str, kind: str) -> dict[str, Any]:
-    """Run ``--help`` for a module or script and parse the output."""
-    cmd = ["python3", "-m", target, "--help"] if kind == "module" else ["python3", target, "--help"]
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        raw_help = result.stdout or result.stderr
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        return {"module": target, "raw_help": f"ERROR: {exc}", "args": []}
-
-    parsed_args = parse_argparse_output(raw_help)
-    return {"module": target, "raw_help": raw_help, "args": parsed_args}
-
-
-def _build_cli_help(project: dict[str, Any]) -> dict[str, Any]:
-    """Build cli_help.yaml content."""
-    stages = project.get("stages", {})
-    result: dict[str, Any] = {"stages": {}}
-
-    for stage_name, stage_cfg in stages.items():
-        entry: dict[str, Any] = {}
-
-        executor = stage_cfg.get("executor", "")
-        target, kind = _extract_executor_target(executor)
-        if target:
-            entry["executor"] = _run_help(target, kind)
-
-        agg_cmd = stage_cfg.get("aggregate_cmd", "")
-        if agg_cmd:
-            agg_target, agg_kind = _extract_executor_target(agg_cmd)
-            if agg_target:
-                entry["aggregate"] = _run_help(agg_target, agg_kind)
-
-        if entry:
-            result["stages"][stage_name] = entry
-
-    return result
-
-
-# ---------------------------------------------------------------------------
-# 3. Experiments
+# 2. Experiments
 # ---------------------------------------------------------------------------
 
 
-def _build_experiments(project: dict[str, Any], project_root: Path) -> dict[str, Any]:
-    """Build experiments.yaml content."""
+def _build_experiments(manifest: dict[str, Any], project_root: Path) -> dict[str, Any]:
+    """Build experiments.yaml content from hpc.yaml fields."""
     result: dict[str, Any] = {}
 
     # --- experiment files ---
-    exp_paths = project.get("experiment_paths")
+    exp_paths = manifest.get("experiment_paths")
     if exp_paths:
         experiments: list[dict[str, Any]] = []
         for pattern in exp_paths:
@@ -330,7 +265,7 @@ def _build_experiments(project: dict[str, Any], project_root: Path) -> dict[str,
         result["experiments"] = experiments
 
     # --- registries ---
-    registries_cfg = project.get("registries")
+    registries_cfg = manifest.get("registries")
     if registries_cfg and isinstance(registries_cfg, dict):
         registries: dict[str, Any] = {}
         for reg_name, reg_ref in registries_cfg.items():
@@ -355,7 +290,7 @@ def _build_experiments(project: dict[str, Any], project_root: Path) -> dict[str,
 
 
 # ---------------------------------------------------------------------------
-# 4. Meta
+# 3. Meta
 # ---------------------------------------------------------------------------
 
 
@@ -389,31 +324,25 @@ def collect(project_root: Path | None = None) -> Path:
         project_root = Path.cwd()
     project_root = project_root.resolve()
 
-    project = load_project_config(project_root / "project.yaml")
+    manifest = load_manifest(project_root / "hpc.yaml")
 
     hpc_dir = project_root / ".hpc"
     hpc_dir.mkdir(exist_ok=True)
 
     # 1. Module graph
-    module_graph, visited_files = _build_module_graph(project, project_root)
+    module_graph, visited_files = _build_module_graph(manifest, project_root)
     (hpc_dir / "module_graph.yaml").write_text(
         yaml.safe_dump(module_graph, default_flow_style=False, sort_keys=False)
     )
 
-    # 2. CLI help
-    cli_help = _build_cli_help(project)
-    (hpc_dir / "cli_help.yaml").write_text(
-        yaml.safe_dump(cli_help, default_flow_style=False, sort_keys=False)
-    )
-
-    # 3. Experiments
-    experiments = _build_experiments(project, project_root)
+    # 2. Experiments
+    experiments = _build_experiments(manifest, project_root)
     if experiments:
         (hpc_dir / "experiments.yaml").write_text(
             yaml.safe_dump(experiments, default_flow_style=False, sort_keys=False)
         )
 
-    # 4. Meta
+    # 3. Meta
     meta = _build_meta(visited_files, project_root)
     (hpc_dir / "_meta.yaml").write_text(
         yaml.safe_dump(meta, default_flow_style=False, sort_keys=False)

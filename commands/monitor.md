@@ -3,10 +3,12 @@ Monitor running HPC jobs via SSH and take corrective action.
 ## Setup
 
 Read both config files:
-- `project.yaml` in the current working directory
+- `hpc.yaml` in the current working directory
 - `clusters.yaml`: resolve path via `python -c 'from hpc._config import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "config" / "clusters.yaml")'`
 
-Construct `SSH_TARGET` (`user@host`) and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of `project.cluster`.
+Construct `SSH_TARGET` (`user@host`) and `REMOTE_PATH` from the configs. If `$ARGUMENTS` contains `--cluster <name>`, use that cluster instead of the top-level `cluster` field. If `$ARGUMENTS` contains `--profile <name>`, use that profile; otherwise infer from context or ask.
+
+Read `_hpc_dispatch.json` (locally if available, or from the cluster via SSH) to load the task-to-grid-point mapping. Each task ID maps to a grid point and optional chunk: `grid_point = task_id // chunks_per_point`, `chunk = task_id % chunks_per_point`.
 
 ## SSH Quoting
 
@@ -16,45 +18,14 @@ Single-quote the remote command so variables expand on the cluster, not locally:
 ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && echo $SGE_TASK_ID'
 ```
 
-## Project Type Detection
-
-Check for `hpc.yaml` in the current working directory:
-- If `hpc.yaml` exists → this is a **manifest project**. Read `_hpc_dispatch.json` (locally if available, or from the cluster via SSH) to understand the task-to-grid-point mapping.
-- If only `project.yaml` exists → proceed with the existing stage-based monitoring below.
-
-### Manifest Monitoring Differences
-
-For manifest projects, the monitoring flow is the same as below (Steps 1-6) with these additions:
-
-1. **Task mapping**: Each task ID maps to a grid point and optional chunk. Use `_hpc_dispatch.json` to decode: `grid_point = task_id // chunks_per_point`, `chunk = task_id % chunks_per_point`.
-
-2. **Per-grid-point reporting**: In addition to the overall status summary, report completion per grid point:
-   ```
-   Grid point status:
-     ridge_har:      98/100 chunks complete
-     ridge_pca:      100/100 chunks complete ✓
-     xgboost_har:    45/100 chunks complete, 2 failed
-     xgboost_pca:    0/100 chunks (all pending)
-   ```
-
-3. **Result checking**: Use the task's `result_dir` from the manifest to check for results, rather than a single stage-level `result_pattern`. Each grid point has its own result directory.
-
-4. **Resubmission**: When resubmitting failed tasks, use the same dispatch mechanism. The task IDs in the resubmission correspond to the same manifest entries.
-
-5. **Stage name**: Use the project name from `hpc.yaml` as the stage/job name for queue queries.
-
-After this section, the existing Steps 0-6 continue unchanged.
-
----
-
 ## Step 0: Load Module Graph
 
-If `.hpc/module_graph.yaml` exists, read it. It maps each stage to its dependency tree — every project file the executor imports, nested by call chain. When diagnosing failures:
+If `.hpc/module_graph.yaml` exists, read it. It maps each profile to its dependency tree — every project file the executor imports, nested by call chain. When diagnosing failures:
 
 1. Find the failing file from the traceback in the module graph
 2. Read only that file
 3. If you need upstream context, follow the tree to the caller
-4. Never read files outside the stage's dependency tree
+4. Never read files outside the profile's dependency tree
 
 ## Operating Principles
 
@@ -66,29 +37,42 @@ If `.hpc/module_graph.yaml` exists, read it. It maps each stage to its dependenc
 
 $ARGUMENTS formats (pick one):
 
-1. **Stage + monitor** (no job-ids — checks active jobs for the stage):
-   `<stage_name>` or `<stage_name> --cluster <name>`
+1. **Profile + monitor** (no job-ids — checks active jobs for the profile):
+   `<profile_name>` or `<profile_name> --cluster <name>`
+   For multi-stage profiles: `<profile_name>.<stage_name>`
 
 2. **Monitor existing** (job-ids provided):
-   `<stage_name> <job_ids> [total_chunks]`
-   Example: `train 12345678,12345679 100`
+   `<profile_name> <job_ids> [total_tasks]`
+   Example: `ml 12345678,12345679 1200`
 
 3. **Auto-discover** (empty):
-   Check for active jobs belonging to the current project via queue status commands. Cross-reference with stage names from project.yaml to identify which stages are running.
+   Check for active jobs belonging to the current project via queue status commands. Cross-reference with profile names from `hpc.yaml` to identify which profiles are running.
 
 ## Step 1: Check Status
 
-Run the appropriate scheduler query (qstat for SGE, sacct for SLURM) and count completed results:
+Run the appropriate scheduler query (qstat for SGE, sacct for SLURM) and count completed results per grid point using `results.dir` and `results.pattern` from the profile:
 
 ```bash
-ssh $SSH_TARGET 'ls '"$REMOTE_PATH"'/<stage.result_dir>/<stage.result_pattern> 2>/dev/null | wc -l'
+ssh $SSH_TARGET 'ls '"$REMOTE_PATH"'/<results.dir>/<results.pattern> 2>/dev/null | wc -l'
+```
+
+Use `_hpc_dispatch.json` to map each task ID back to its grid point and chunk. Report completion per grid point:
+
+```
+Grid point status:
+  ridge_har:      98/100 chunks complete
+  ridge_pca:      100/100 chunks complete ✓
+  xgboost_har:    45/100 chunks complete, 2 failed
+  xgboost_pca:    0/100 chunks (all pending)
+
+Overall: 243/400 tasks complete, 155 running, 2 failed
 ```
 
 Parse results to determine state:
 
 | Condition | State | Action |
 |-----------|-------|--------|
-| completed == total_chunks | `all_complete` | Go to Step 4 |
+| completed == total_tasks | `all_complete` | Go to Step 4 |
 | running > 0 or pending > 0 | `still_running` | Check for stalls (Step 1b), then Step 5 |
 | failed > 0 and running == 0 | `has_failures` | Go to Step 2 |
 | completed == 0 and running == 0 | `all_failed` | Go to Step 2 (triage carefully) |
@@ -99,7 +83,7 @@ Parse results to determine state:
 
 ## Step 2: Diagnose Failures
 
-Read error logs for failed chunks (tail -50 from the appropriate log path).
+Read error logs for failed tasks (tail -50 from the appropriate log path).
 
 Check job accounting (qacct for SGE, sacct for SLURM).
 
@@ -117,9 +101,9 @@ Classify the failure:
 
 **AUTONOMY RULE**: For OOM, walltime, node failures, and queue stalls — act immediately. Only STOP for code bugs and unrecognized errors.
 
-## Step 3: Resubmit Failed Chunks
+## Step 3: Resubmit Failed Tasks
 
-Check retry count. The stage's `max_retries` (default 3) is the limit. If exceeded, report to user and skip.
+Check retry count. The profile's `max_retries` (default 3) is the limit. If exceeded, report to user and skip.
 
 ### Resource overrides by failure type
 
@@ -129,28 +113,28 @@ Check retry count. The stage's `max_retries` (default 3) is the limit. If exceed
 | System OOM | 2x memory | 4x memory |
 | Timeout | 2.5x walltime | 3.5x walltime |
 | Node fail | no overrides | no overrides |
-| Queue stall | switch GPU type (use `gpu_fallback` from stage, or `gpu_types` from cluster) | next GPU in fallback |
+| Queue stall | switch GPU type (use `gpu_fallback` from profile, or `gpu_types` from cluster) | next GPU in fallback |
 
-Build the resubmission command using the same template and env vars as the original, with resource overrides applied. Use single-quote SSH convention from the agent guide.
+Build the resubmission command using the same dispatch mechanism. The task IDs in the resubmission correspond to the same `_hpc_dispatch.json` entries. Apply resource overrides to the submission flags.
 
 **Update your job-ids list** for subsequent status checks.
 
 ## Step 4: Aggregate (if configured)
 
-When all chunks complete and the stage has `aggregate_cmd`:
+When all tasks complete and the profile has `results.aggregate_cmd`:
 
 ```bash
-ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && <stage.aggregate_cmd>'
+ssh $SSH_TARGET 'cd '"$REMOTE_PATH"' && <results.aggregate_cmd>'
 ```
 
 After aggregation:
-1. Verify output files exist using `stage.summary_pattern`.
+1. Verify output files exist using `results.summary_pattern`.
 2. Download summaries locally via rsync (include only summary patterns, exclude everything else).
 3. Read and report key findings from the local summary files.
 
 ### Multi-Stage Progression
 
-If the current stage completes and another stage has `depends_on` pointing to this stage, prompt: "Stage `<next_stage>` depends on `<this_stage>` which is now complete. Submit it? (`/submit <next_stage>`)"
+If the current stage completes and another stage has `depends_on` pointing to this stage, check the `depends_on` graph for newly unblocked stages. For each unblocked stage, prompt: "Stage `<next_stage>` is now unblocked (depends on `<this_stage>`). Submit it? (`/submit <profile_name>.<next_stage>`)"
 
 ## Step 5: Schedule Next Check
 
@@ -173,7 +157,7 @@ Fallback (no progress data):
 |-------|----------|
 | All pending, none running | 5 min |
 | Some running, no progress yet | 3 min |
-| Just resubmitted failed chunks | 3 min |
+| Just resubmitted failed tasks | 3 min |
 | Unchanged from previous check | double previous interval (cap 15 min) |
 
 ### Schedule via CronCreate
@@ -183,9 +167,9 @@ Fallback (no progress data):
 3. The prompt must include full state for the next iteration:
 
 ```
-/monitor <stage_name> <comma_separated_job_ids> <total_chunks>
+/monitor <profile_name> <comma_separated_job_ids> <total_tasks>
 
-[Monitor State] stage=<name> | cluster=<cluster> | chunks=X/Y done, Z running, W failed | retries: {chunk: count, ...} | jobs: <id_list> | gpu_type: <current_gpu> | last_check: <time> | prev_interval: <minutes> | consecutive_pending: <count>
+[Monitor State] profile=<name> | cluster=<cluster> | tasks=X/Y done, Z running, W failed | grid_points: {point: done/total, ...} | retries: {task: count, ...} | jobs: <id_list> | gpu_type: <current_gpu> | last_check: <time> | prev_interval: <minutes> | consecutive_pending: <count>
 ```
 
 4. Report: `Next check in X min (reason). Cron job: <id>`
@@ -193,7 +177,8 @@ Fallback (no progress data):
 ## Step 6: Report
 
 Always end with a concise summary:
-- Chunks: X/Y complete, Z running, W failed
+- Grid point completion breakdown
+- Tasks: X/Y complete, Z running, W failed
 - Actions taken this iteration (if any)
 - Next: waiting / needs attention / done
 
