@@ -24,6 +24,7 @@ __all__ = [
     # Chunking protocol
     "ChunkContext",
     "chunk_context",
+    "collect_chunks",
     # Manifest / grid API
     "load_manifest",
     "manifest_exists",
@@ -38,7 +39,6 @@ __all__ = [
 from pathlib import Path
 from typing import Any
 
-from hpc.chunking import ChunkContext, chunk_context
 from hpc._config import (
     _PACKAGE_ROOT,
     build_stage_env,
@@ -46,6 +46,7 @@ from hpc._config import (
     load_clusters_config,
     load_project_config,
 )
+from hpc.chunking import ChunkContext, chunk_context, collect_chunks
 from hpc.gpu import pick_gpu
 from hpc.grid import build_task_manifest, expand_grid, total_tasks
 from hpc.lifecycle import check_results, detect_scheduler, log_event, read_events, report_status

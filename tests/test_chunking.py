@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from hpc.chunking import ChunkContext, chunk_context
+from hpc.chunking import ChunkContext, chunk_context, collect_chunks
 
 
 class TestChunkContext:
@@ -95,3 +95,49 @@ class TestChunkContext:
         ctx = ChunkContext(chunk_id=0, total_chunks=1, result_dir=Path("."))
         with pytest.raises(AttributeError):
             ctx.chunk_id = 5  # type: ignore[misc]
+
+
+class TestCollectChunks:
+    def _write_csv(self, path, n=5, start_date="2020-01-01", include_date=True):
+        """Helper to write a chunk CSV."""
+        data = {"val": list(range(n))}
+        if include_date:
+            data["date"] = pd.date_range(start_date, periods=n, freq="h").tolist()
+        pd.DataFrame(data).to_csv(path, index=False)
+
+    def test_empty_directory(self, tmp_path):
+        df = collect_chunks(tmp_path)
+        assert df.empty
+
+    def test_single_csv(self, tmp_path):
+        self._write_csv(tmp_path / "results_chunk_1.csv", n=5)
+        df = collect_chunks(tmp_path)
+        assert len(df) == 5
+        assert isinstance(df.index, pd.DatetimeIndex)
+
+    def test_multiple_csvs_concatenated_and_sorted(self, tmp_path):
+        self._write_csv(tmp_path / "results_chunk_1.csv", n=3, start_date="2020-01-02")
+        self._write_csv(tmp_path / "results_chunk_2.csv", n=3, start_date="2020-01-01")
+        df = collect_chunks(tmp_path)
+        assert len(df) == 6
+        # Should be sorted by date — chunk_2 dates come first
+        assert df.index[0] < df.index[3]
+
+    def test_no_date_column(self, tmp_path):
+        self._write_csv(tmp_path / "results_chunk_1.csv", n=4, include_date=False)
+        df = collect_chunks(tmp_path)
+        assert len(df) == 4
+        assert not isinstance(df.index, pd.DatetimeIndex)
+
+    def test_unreadable_file_skipped(self, tmp_path):
+        self._write_csv(tmp_path / "results_chunk_1.csv", n=3)
+        (tmp_path / "results_chunk_2.csv").write_bytes(b"\x80\x81\x82\x83")
+        self._write_csv(tmp_path / "results_chunk_3.csv", n=4)
+        df = collect_chunks(tmp_path)
+        assert len(df) == 7  # 3 + 4, skipping the bad file
+
+    def test_custom_pattern(self, tmp_path):
+        self._write_csv(tmp_path / "results_chunk_1.csv", n=5)
+        self._write_csv(tmp_path / "output_1.csv", n=3)
+        df = collect_chunks(tmp_path, pattern="output_*.csv")
+        assert len(df) == 3

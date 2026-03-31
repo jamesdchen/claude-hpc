@@ -19,8 +19,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-__all__ = ["ChunkContext", "chunk_context"]
+if TYPE_CHECKING:
+    import pandas as pd
+
+__all__ = ["ChunkContext", "chunk_context", "collect_chunks"]
 
 
 @dataclass(frozen=True)
@@ -73,3 +77,46 @@ def chunk_context() -> ChunkContext:
         total_chunks=int(os.environ.get("TOTAL_CHUNKS", "1")),
         result_dir=Path(os.environ.get("RESULT_DIR", ".")),
     )
+
+
+def collect_chunks(
+    result_dir: str | Path,
+    pattern: str = "results_chunk_*.csv",
+    date_column: str = "date",
+) -> pd.DataFrame:
+    """Stitch chunk CSVs into a single sorted DataFrame.
+
+    Companion to :func:`chunk_context` — handles the fan-in after parallel
+    execution.  Returns an empty ``DataFrame`` if no matching files are found.
+
+    Parameters
+    ----------
+    result_dir : str or Path
+        Directory containing chunk CSV files.
+    pattern : str
+        Glob pattern for chunk files (default matches ``ctx.output_path()``).
+    date_column : str
+        Column to parse as datetime and use as sorted index.  Ignored if the
+        column does not exist in the data.
+    """
+    import pandas as pd
+
+    files = sorted(Path(result_dir).glob(pattern))
+    if not files:
+        return pd.DataFrame()
+
+    dfs: list[pd.DataFrame] = []
+    for f in files:
+        try:
+            dfs.append(pd.read_csv(f))
+        except (OSError, pd.errors.ParserError, UnicodeDecodeError):
+            continue
+
+    if not dfs:
+        return pd.DataFrame()
+
+    combined = pd.concat(dfs, ignore_index=True)
+    if date_column in combined.columns:
+        combined[date_column] = pd.to_datetime(combined[date_column])
+        combined = combined.set_index(date_column).sort_index()
+    return combined

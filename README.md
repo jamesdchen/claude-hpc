@@ -138,6 +138,7 @@ results.to_csv(ctx.output_path())              # ./results_chunk_1.csv locally
 - Defaults to chunk 0 of 1 for local development — executor processes everything
 - `ctx.split()` accepts a `range` or `int` and returns the sub-range for this chunk
 - `ctx.output_path()` generates the standard `results_chunk_{id+1}.csv` filename
+- `collect_chunks(result_dir)` stitches chunk CSVs back into a single sorted DataFrame (fan-in companion to `chunk_context`)
 
 ## Python API
 
