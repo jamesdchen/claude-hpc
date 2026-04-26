@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 def test_alias_is_identity():
     from hpc_mapreduce.reduce.metrics import reduce_backtest, reduce_by_grid_point
+
     assert reduce_backtest is reduce_by_grid_point
 
 

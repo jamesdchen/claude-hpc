@@ -281,7 +281,9 @@ def rsync_pull(
         ``--include='*/'`` is prepended automatically (to traverse
         directories) and a trailing ``--exclude='*'`` is appended.
     """
-    src = f"{_target(user, host)}:{shlex.quote(remote_path.rstrip('/'))}/{shlex.quote(remote_subdir.strip('/'))}/"
+    remote_q = shlex.quote(remote_path.rstrip("/"))
+    subdir_q = shlex.quote(remote_subdir.strip("/"))
+    src = f"{_target(user, host)}:{remote_q}/{subdir_q}/"
 
     dst_path = Path(local_dir)
     dst_path.mkdir(parents=True, exist_ok=True)

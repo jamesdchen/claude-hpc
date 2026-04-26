@@ -89,8 +89,7 @@ class TestWeightedMeanOrderInvariant:
         # 500 tasks with varying metric magnitudes and n_samples counts.
         rng = random.Random(42)
         entries_forward = [
-            {"mse": rng.uniform(1e-8, 1e4), "n_samples": rng.randint(1, 10_000)}
-            for _ in range(500)
+            {"mse": rng.uniform(1e-8, 1e4), "n_samples": rng.randint(1, 10_000)} for _ in range(500)
         ]
         entries_shuffled = list(entries_forward)
         rng.shuffle(entries_shuffled)
