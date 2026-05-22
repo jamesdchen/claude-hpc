@@ -26,8 +26,12 @@ Edge cases
 ----------
 - ``snap.co_tenants`` empty → forecast equals current capacity.
 - All jobs expected to complete by T → max available pool.
-- Jobs that lack ``elapsed_s`` or ``walltime_ask_sec`` → assume
-  they'll continue running (conservative).
+- A co-tenant row without ``walltime_ask_sec`` (the common case —
+  production snapshots rarely carry a per-job ask) falls back to the
+  owning user's profile median ``median_walltime_ask_sec``. With no
+  profile for that user the median is 0 and the job is assumed to keep
+  running (conservative) — an unprofiled cluster degrades to the
+  "current capacity" forecast rather than guessing.
 """
 
 from __future__ import annotations
@@ -172,8 +176,7 @@ def forecast_state_at(
 
             # Predict whether this job completes inside the window.
             elapsed = _to_int_zero(tenant.get("elapsed_s"))
-            ask = _to_int_zero(tenant.get("walltime_ask_sec"))
-            if ask <= 0 or elapsed < 0:
+            if elapsed < 0:
                 continue
             user = str(tenant.get("user") or "")
             profile = profiles.get(user) if user else None
@@ -181,6 +184,17 @@ def forecast_state_at(
                 # Synthesize a thin profile so the estimator falls
                 # through to fallback_ratio.
                 profile = UserProfile(user=user, n_observations=0)
+            ask = _to_int_zero(tenant.get("walltime_ask_sec"))
+            if ask <= 0:
+                # Production co-tenant snapshot rows rarely carry a
+                # per-job walltime ask. Fall back to the owning user's
+                # learned median — the same source queue_simulator_inputs
+                # uses. With no profile that median is 0, so the job is
+                # left out of the completing pool and assumed to keep
+                # running: the conservative documented default.
+                ask = _to_int_zero(profile.median_walltime_ask_sec)
+            if ask <= 0:
+                continue
             residual = predict_residual_lifetime(
                 profile=profile,
                 elapsed_sec=elapsed,

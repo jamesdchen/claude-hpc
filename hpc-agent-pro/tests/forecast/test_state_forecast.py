@@ -259,3 +259,36 @@ class TestEdge:
         out = forecast_state_at(snap, t_offset_sec=10000)
         assert out.n_jobs_completing_by_t == 0
         assert out.available_gpus == 3
+
+    def test_missing_row_walltime_falls_back_to_profile_median(self):
+        """A row with no walltime ask uses the user's profile median.
+
+        Production co-tenant rows rarely carry a per-job ask; without
+        this fallback forecast_state_at would be a no-op in production.
+        """
+        snap = _snap(
+            [
+                _node(
+                    co_tenants=[
+                        {
+                            "user": "alice",
+                            "state": "RUNNING",
+                            "cpus": 8,
+                            "mem_gb": 32,
+                            "gpus": 1,
+                            "elapsed_s": 100,
+                        }
+                    ]
+                )
+            ]
+        )
+        prof = UserProfile(
+            user="alice",
+            n_observations=50,
+            median_walltime_ask_sec=3600,
+            median_actual_over_ask=1.0,
+        )
+        out = forecast_state_at(snap, t_offset_sec=10000, profiles={"alice": prof})
+        # ask falls back to the profile's 3600s → residual ~3500s ≤ T.
+        assert out.n_jobs_completing_by_t == 1
+        assert out.available_gpus == 4
