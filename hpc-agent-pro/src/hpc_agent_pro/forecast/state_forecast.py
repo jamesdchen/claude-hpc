@@ -173,13 +173,6 @@ def forecast_state_at(
             # Predict whether this job completes inside the window.
             elapsed = _to_int_zero(tenant.get("elapsed_s"))
             ask = _to_int_zero(tenant.get("walltime_ask_sec"))
-            if ask <= 0 and elapsed > 0:
-                # Production cluster snapshots do not carry a walltime ask
-                # on co-tenant rows; without this fallback every job fails
-                # the ``ask <= 0`` guard and the whole forecast collapses
-                # to a no-op. Mirror the queue simulator's running-job
-                # heuristic (``elapsed + 1h``).
-                ask = elapsed + 3600
             if ask <= 0 or elapsed < 0:
                 continue
             user = str(tenant.get("user") or "")
