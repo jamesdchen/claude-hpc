@@ -83,8 +83,17 @@ def estimate_climb_rate(samples: list[PrioritySample]) -> ClimbEstimate:
 
     if len(timed) == 2:
         (t0, p0), (t1, p1) = timed
-        hours = max((t1 - t0).total_seconds() / 3600.0, 1e-6)
-        slope = (p1 - p0) / hours
+        delta_s = (t1 - t0).total_seconds()
+        if delta_s < 1.0:
+            # Two samples at (near-)identical timestamps: dividing by a
+            # clamped epsilon would manufacture an astronomical climb
+            # rate. Treat it as not enough signal instead.
+            return ClimbEstimate(
+                rate_priority_per_hour=0.0,
+                n_samples=2,
+                method="insufficient_data",
+            )
+        slope = (p1 - p0) / (delta_s / 3600.0)
         return ClimbEstimate(
             rate_priority_per_hour=max(slope, 0.0),
             n_samples=2,

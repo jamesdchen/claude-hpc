@@ -26,7 +26,7 @@ dependencies = [
     # compatible host range — the plugin depends on hpc_agent internals
     # (the @primitive seam, infra.inspect, state.runtime_prior) that are
     # only contract-stable within a minor series.
-    "hpc-agent>=0.3,<0.4",
+    "hpc-agent>=0.4,<0.5",
     # Pydantic v2 Spec / Result models for the moved primitives.
     "pydantic>=2.6",
     # Cross-file $ref resolution for the copied JSON schemas
