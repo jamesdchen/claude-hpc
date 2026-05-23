@@ -61,10 +61,29 @@ primitive_modules: tuple[str, ...] = (
 
 # ─── slash-command assets ──────────────────────────────────────────────────
 #
-# The planner-aware /submit-hpc skill + command. ``hpc-agent
-# install-commands`` installs these over the core package's
-# execution-only copies once this plugin is present.
+# The planner-aware /submit-hpc slash command (no longer ships an
+# overriding hpc-submit *skill* — that consumer became a worker prompt;
+# see ``worker_prompt_assets`` below). ``hpc-agent install-commands``
+# overlays anything here over the core package's slash-command assets
+# once this plugin is present.
 slash_command_assets = files("hpc_agent_pro") / "slash_commands"
+
+
+# ─── worker-prompt assets ──────────────────────────────────────────────────
+#
+# Worker prompts are the deterministic text the spawn pipeline inlines
+# into the cacheable prefix shipped to ``claude -p --bare`` workers (see
+# ``hpc_agent.atoms.spawn_prompt._procedure_body``). They are NOT Claude
+# Code skills — the headless worker has no Skill tool, so the procedure
+# travels inside the prompt. A plugin overlays a procedure by exposing
+# this attribute; the first plugin to provide ``<workflow>.md`` wins,
+# then the host's bundled procedure is used.
+#
+# Pro ships its planner-aware ``submit.md`` here (the file with the Step
+# 4c smart-constraint-planner section); it overrides the host's bundled
+# ``hpc_agent/worker_prompts/submit.md`` whenever this plugin is
+# installed. See ``docs/internals/skill-policy.md``.
+worker_prompt_assets = files("hpc_agent_pro") / "worker_prompts"
 
 
 # ─── CLI helpers (mirrored from hpc_agent.agent_cli) ───────────────────────
