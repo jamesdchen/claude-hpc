@@ -96,19 +96,19 @@ The verb partitions primitives into bands the reader can scan independently:
 | [clusters-describe](clusters-describe.md) | yes | _none_ | `hpc-agent clusters describe <name> [--strict]` |
 | [clusters-list](clusters-list.md) | yes | _none_ | `hpc-agent clusters list` |
 | [decide-monitor-arm](decide-monitor-arm.md) | yes | _none_ | `hpc-agent decide-monitor-arm --spec <path>` |
-| [discover-executors](discover-executors.md) | yes | _none_ | `hpc-agent discover --experiment-dir <path> [--search-dirs <a,b,c>]` |
-| [discover-reducers](discover-reducers.md) | yes | _none_ | `hpc-agent discover-reducers --experiment-dir <path>` |
+| [discover-executors](discover-executors.md) | yes | _none_ | `hpc-agent discover [--experiment-dir <dir>] [--search-dirs <search_dirs>]` |
+| [discover-reducers](discover-reducers.md) | yes | _none_ | `hpc-agent discover-reducers [--experiment-dir <dir>]` |
 | [failures](failures.md) | yes | ssh: `<cluster>` | `hpc-agent failures --run-id <id> [--lines <n>]` |
-| [find-prior-run](find-prior-run.md) | yes | _none_ | `hpc-agent find-prior-run --experiment-dir <path> --cmd-sha <hex>` |
-| [list-in-flight](list-in-flight.md) | yes | _none_ | `hpc-agent list-in-flight --experiment-dir <path>` |
-| [load-context](load-context.md) | yes | _none_ | `hpc-agent load-context --experiment-dir <path>` |
+| [find-prior-run](find-prior-run.md) | yes | _none_ | `hpc-agent find-prior-run [--experiment-dir <dir>] --cmd-sha <cmd_sha>` |
+| [list-in-flight](list-in-flight.md) | yes | _none_ | `hpc-agent list-in-flight [--experiment-dir <dir>]` |
+| [load-context](load-context.md) | yes | _none_ | `hpc-agent load-context [--experiment-dir <dir>]` |
 | [logs](logs.md) | yes | ssh: `<cluster>` | `hpc-agent logs --run-id <id> (--task-id <ids> | --all-failed) [--lines <n>]` |
 | [monitor-summary](monitor-summary.md) | yes | _none_ | `hpc-agent monitor-summary --experiment-dir <path> --run-id <id>` |
-| [plan-throughput](plan-throughput.md) | yes | _none_ | `hpc-agent plan-throughput --cluster <name> --total-tasks <n> [--est-task-duration-s <n>]` |
+| [plan-throughput](plan-throughput.md) | yes | _none_ | `hpc-agent plan-throughput --cluster <cluster> --total-tasks <total_tasks> [--est-task-duration-s <est_task_duration_s>]` |
 | [poll-run-status](poll-run-status.md) | yes | ssh: `<cluster>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent status --run-id <id> [--experiment-dir <dir>]` |
 | [recall](recall.md) | yes | _none_ | `hpc-agent recall` |
 | [recommend-partition](recommend-partition.md) | yes | _none_ | `(none — Python-only primitive)` |
-| [suggest-setup-action](suggest-setup-action.md) | yes | _none_ | `hpc-agent suggest-setup-action --experiment-dir <path>` |
+| [suggest-setup-action](suggest-setup-action.md) | yes | _none_ | `hpc-agent suggest-setup-action [--experiment-dir <dir>]` |
 | [summarize-submit-plan](summarize-submit-plan.md) | yes | _none_ | `hpc-agent summarize-submit-plan --spec <path>` |
 | [verify-aggregation-complete](verify-aggregation-complete.md) | yes | _none_ | `hpc-agent verify-aggregation-complete --experiment-dir <path> --run-id <id> --combiner-dir <path>` |
 

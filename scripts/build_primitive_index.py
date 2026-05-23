@@ -109,6 +109,7 @@ def primitives_from_registry() -> list[dict]:
     """
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from hpc_agent._internal.primitive import get_registry, register_primitives
+    from hpc_agent.cli._dispatch import cli_to_invocation_string
 
     # The registry is now explicit: callers must register primitives
     # before querying. Without this call, get_registry() raises
@@ -139,7 +140,15 @@ def primitives_from_registry() -> list[dict]:
                 # derived from the func's qualified name. We still pass
                 # the dict shape downstream consumers expect.
                 "backed_by": {
-                    "cli": meta.cli if meta.cli is not None else "(none — Python-only primitive)",
+                    # ``meta.cli`` may be either a legacy string or a
+                    # :class:`CliShape`; route through the dispatcher's
+                    # canonical renderer so both project to the same
+                    # shell-invocation string the table expects.
+                    "cli": (
+                        cli_to_invocation_string(meta.name, meta.cli)
+                        if meta.cli is not None
+                        else "(none — Python-only primitive)"
+                    ),
                     "python": f"{meta.func.__module__}.{meta.func.__qualname__}",
                 },
             }

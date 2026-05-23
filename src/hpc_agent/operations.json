@@ -219,7 +219,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent discover --experiment-dir <path> [--search-dirs <a,b,c>]",
+    "cli": "hpc-agent discover [--experiment-dir <dir>] [--search-dirs <search_dirs>]",
     "idempotent": true,
     "input_schema": null,
     "name": "discover-executors",
@@ -230,7 +230,7 @@
   },
   {
     "agent_facing": false,
-    "cli": "hpc-agent discover-reducers --experiment-dir <path>",
+    "cli": "hpc-agent discover-reducers [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": null,
     "name": "discover-reducers",
@@ -254,7 +254,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent find-prior-run --experiment-dir <path> --cmd-sha <hex>",
+    "cli": "hpc-agent find-prior-run [--experiment-dir <dir>] --cmd-sha <cmd_sha>",
     "idempotent": true,
     "input_schema": null,
     "name": "find-prior-run",
@@ -265,7 +265,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent list-in-flight --experiment-dir <path>",
+    "cli": "hpc-agent list-in-flight [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": null,
     "name": "list-in-flight",
@@ -276,7 +276,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent load-context --experiment-dir <path>",
+    "cli": "hpc-agent load-context [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": null,
     "name": "load-context",
@@ -311,7 +311,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent plan-throughput --cluster <name> --total-tasks <n> [--est-task-duration-s <n>]",
+    "cli": "hpc-agent plan-throughput --cluster <cluster> --total-tasks <total_tasks> [--est-task-duration-s <est_task_duration_s>]",
     "idempotent": true,
     "input_schema": null,
     "name": "plan-throughput",
@@ -358,7 +358,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent suggest-setup-action --experiment-dir <path>",
+    "cli": "hpc-agent suggest-setup-action [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": null,
     "name": "suggest-setup-action",

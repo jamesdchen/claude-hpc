@@ -80,7 +80,6 @@ from hpc_agent.cli.campaign import (  # noqa: E402
     cmd_campaign_replay,
     cmd_campaign_status,
 )
-from hpc_agent.state.discover import discover_executors
 
 # ─── subcommand: capabilities ──────────────────────────────────────────────
 
@@ -280,126 +279,11 @@ def cmd_recall(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-# ─── subcommand: discover ──────────────────────────────────────────────────
-
-
-def cmd_discover(args: argparse.Namespace) -> int:
-    search_dirs: tuple[str, ...] | None = None
-    raw = getattr(args, "search_dirs", None)
-    if raw:
-        # Comma-separated on the CLI; convert to the tuple the Python API
-        # expects. Empty entries (e.g. trailing comma) are dropped so a
-        # user typing ``--search-dirs scripts,`` doesn't accidentally
-        # scan an unnamed subdir.
-        parts = tuple(p.strip() for p in raw.split(",") if p.strip())
-        if parts:
-            search_dirs = parts
-    infos = discover_executors(args.experiment_dir, search_dirs=search_dirs)
-    data: dict[str, Any] = {
-        "executors": [
-            {
-                "name": i.name,
-                "path": str(i.path),
-                "cli_framework": i.cli_framework,
-                "has_main_guard": i.has_main_guard,
-            }
-            for i in infos
-        ]
-    }
-    _ok(data, name="discover-executors")
-    return EXIT_OK
-
-
-# ─── subcommand: discover-reducers ─────────────────────────────────────────
-
-
-def cmd_discover_reducers(args: argparse.Namespace) -> int:
-    """Surface candidate reducer / aggregator scripts in the experiment repo.
-
-    The motivating failure mode: at /aggregate-hpc time the agent writes
-    a fresh QLIKE / RMSE / etc. aggregator instead of finding the one
-    the user already committed. This subcommand calls
-    :func:`hpc_agent.state.discover.discover_reducers` so the slash
-    command can route through a CLI primitive instead of grep'ing the
-    repo by hand.
-    """
-    from hpc_agent.state.discover import discover_reducers
-
-    infos = discover_reducers(args.experiment_dir)
-    data = {
-        "reducers": [
-            {
-                "name": i.name,
-                "path": str(i.path),
-                "matches": list(i.matches),
-                "docstring": i.docstring,
-            }
-            for i in infos
-        ]
-    }
-    _ok(data, name="discover-reducers")
-    return EXIT_OK
-
-
-# ─── subcommand: plan-throughput ───────────────────────────────────────────
-
-
-def cmd_plan_throughput(args: argparse.Namespace) -> int:
-    from hpc_agent.atoms.plan_throughput import plan_throughput
-
-    data = plan_throughput(
-        cluster=args.cluster,
-        total_tasks=args.total_tasks,
-        est_task_duration_s=args.est_task_duration_s,
-    )
-    _ok(data, name="plan-throughput")
-    return EXIT_OK
-
-
-def cmd_clusters_list(_args: argparse.Namespace) -> int:
-    """Argparse adapter — primitive lives at hpc_agent.atoms.clusters."""
-    from hpc_agent.atoms.clusters import list_clusters
-
-    _ok(list_clusters(), name="clusters-list")
-    return EXIT_OK
-
-
-def cmd_clusters_describe(args: argparse.Namespace) -> int:
-    """Argparse adapter — primitive lives at hpc_agent.atoms.clusters."""
-    from hpc_agent.atoms.clusters import describe_cluster
-
-    _ok(
-        describe_cluster(name=args.name, strict=bool(getattr(args, "strict", False))),
-        name="clusters-describe",
-    )
-    return EXIT_OK
-
-
-# ─── subcommand: list-in-flight ────────────────────────────────────────────
-
-
 # ``_last_status_age_seconds`` lives at the atom layer (it's the
 # freshness helper used by both list-in-flight and the cmd_status
 # adapter); re-exported here so cmd_status can keep its existing
 # import-free callsite without a layering inversion.
 from hpc_agent.atoms.list_in_flight import _last_status_age_seconds  # noqa: E402,F401
-
-
-def cmd_list_in_flight(args: argparse.Namespace) -> int:
-    """Argparse adapter — primitive lives at hpc_agent.atoms.list_in_flight."""
-    from hpc_agent.atoms.list_in_flight import list_in_flight
-
-    _ok(list_in_flight(experiment_dir=args.experiment_dir), name="list-in-flight")
-    return EXIT_OK
-
-
-def cmd_load_context(args: argparse.Namespace) -> int:
-    """Argparse adapter — primitive lives at hpc_agent.atoms.load_context."""
-    from hpc_agent.atoms.load_context import load_context
-
-    _ok(load_context(experiment_dir=args.experiment_dir), name="load-context")
-    return EXIT_OK
-
 
 # ─── subcommand: campaign status / list ────────────────────────────────────
 
@@ -583,25 +467,6 @@ def cmd_monitor_summary(args: argparse.Namespace) -> int:
 
     out = monitor_summary(args.experiment_dir, run_id=args.run_id)
     _ok(out, name="monitor-summary")
-    return EXIT_OK
-
-
-def cmd_suggest_setup_action(args: argparse.Namespace) -> int:
-    """Argparse adapter — primitive lives at hpc_agent.atoms.setup_actions."""
-    from hpc_agent.atoms.setup_actions import suggest_setup_action
-
-    _ok(suggest_setup_action(args.experiment_dir), name="suggest-setup-action")
-    return EXIT_OK
-
-
-def cmd_find_prior_run(args: argparse.Namespace) -> int:
-    """Argparse adapter — primitive lives at hpc_agent.atoms.setup_actions."""
-    from hpc_agent.atoms.setup_actions import find_prior_run
-
-    _ok(
-        find_prior_run(args.experiment_dir, cmd_sha=args.cmd_sha),
-        name="find-prior-run",
-    )
     return EXIT_OK
 
 
@@ -1828,36 +1693,6 @@ def _register_legacy_subcommands(
     )
     p_cr.set_defaults(func=cmd_cluster_reduce)
 
-    # suggest-setup-action
-    p_ssa = sub.add_parser(
-        "suggest-setup-action",
-        help=(
-            "Run the /submit-hpc Setup priority cascade and recommend "
-            "{action: monitor|reuse|interview|fresh, run_id, candidates}. "
-            "Replaces the priority-list-walking prose at Step 0."
-        ),
-    )
-    _add_experiment_dir(p_ssa)
-    p_ssa.set_defaults(func=cmd_suggest_setup_action)
-
-    # find-prior-run
-    p_fpr = sub.add_parser(
-        "find-prior-run",
-        help=(
-            "Look up a prior run by cmd_sha for /submit-hpc Step 6c "
-            "resume detection. Returns {found, run_id, is_orphan, "
-            "status, age_sec, ...}."
-        ),
-    )
-    _add_experiment_dir(p_fpr)
-    p_fpr.add_argument(
-        "--cmd-sha",
-        type=str,
-        required=True,
-        help="The cmd_sha (SHA-256 hex) to match against existing sidecars.",
-    )
-    p_fpr.set_defaults(func=cmd_find_prior_run)
-
     # summarize-submit-plan
     p_ssp = sub.add_parser(
         "summarize-submit-plan",
@@ -2097,109 +1932,6 @@ def _register_legacy_subcommands(
         ),
     )
     p_rc.set_defaults(func=cmd_recall)
-
-    # discover
-    p_disc = sub.add_parser(
-        "discover",
-        help="List executor scripts in --experiment-dir (CLIs with __main__).",
-    )
-    _add_experiment_dir(p_disc)
-    p_disc.add_argument(
-        "--search-dirs",
-        type=str,
-        default=None,
-        help=(
-            "Comma-separated subdirectory names to scan under "
-            "--experiment-dir (e.g. 'scripts' or 'scripts,executors'). "
-            "Default: 'executors,scripts,src' with a fallback to the "
-            "experiment-dir root. Pass this when the caller knows its "
-            "own layout convention — e.g. an integrator with a "
-            "modules-only 'src/' should pass --search-dirs scripts."
-        ),
-    )
-    p_disc.set_defaults(func=cmd_discover)
-
-    # discover-reducers
-    p_dr = sub.add_parser(
-        "discover-reducers",
-        help=(
-            "List candidate reducer / aggregator scripts in --experiment-dir "
-            "(matches by filename stem and top-level function names like "
-            "aggregate / reduce / score). Use at /aggregate-hpc time to find "
-            "an existing reducer instead of writing a fresh one."
-        ),
-    )
-    _add_experiment_dir(p_dr)
-    p_dr.set_defaults(func=cmd_discover_reducers)
-
-    # plan-throughput
-    p_pt = sub.add_parser(
-        "plan-throughput",
-        help=(
-            "Pack a task grid into batched submission waves. Pure-local: "
-            "reads the cluster's constraints from clusters.yaml and returns "
-            "the wave plan + wave_map for the per-run sidecar."
-        ),
-    )
-    p_pt.add_argument(
-        "--cluster",
-        required=True,
-        help="Cluster name; its constraints block in clusters.yaml supplies the limits.",
-    )
-    p_pt.add_argument(
-        "--total-tasks",
-        type=int,
-        required=True,
-        help="Total task count to pack into waves.",
-    )
-    p_pt.add_argument(
-        "--est-task-duration-s",
-        type=int,
-        default=None,
-        help=(
-            "Estimated per-task wall seconds. When given, enables the "
-            "walltime-feasibility check and the total-time estimate."
-        ),
-    )
-    p_pt.set_defaults(func=cmd_plan_throughput)
-
-    # clusters
-    p_cl = sub.add_parser("clusters", help="Introspect available cluster definitions.")
-    p_cl_sub = p_cl.add_subparsers(dest="clusters_cmd", required=True)
-    p_cl_list = p_cl_sub.add_parser("list", help="List all clusters.")
-    p_cl_list.set_defaults(func=cmd_clusters_list)
-    p_cl_desc = p_cl_sub.add_parser("describe", help="Print one cluster's config.")
-    p_cl_desc.add_argument("name")
-    p_cl_desc.add_argument(
-        "--strict",
-        action="store_true",
-        help=(
-            "Surface yaml keys not recognized by ClusterConfig under "
-            "data.unknown_keys. Useful for catching typos that the "
-            "default extra='ignore' validation would silently drop."
-        ),
-    )
-    p_cl_desc.set_defaults(func=cmd_clusters_describe)
-
-    # list-in-flight
-    p_lif = sub.add_parser(
-        "list-in-flight",
-        help="List runs with status=in_flight in the journal (recovery path).",
-    )
-    _add_experiment_dir(p_lif)
-    p_lif.set_defaults(func=cmd_list_in_flight)
-
-    # load-context
-    p_lctx = sub.add_parser(
-        "load-context",
-        help=(
-            "Reconstruct workflow context (latest run + config snapshot, "
-            "in-flight runs, campaigns) from on-disk state. Run this first "
-            "in any fresh-context step instead of relying on memory."
-        ),
-    )
-    _add_experiment_dir(p_lctx)
-    p_lctx.set_defaults(func=cmd_load_context)
 
     # campaign — closed-loop campaign read-only commands
     p_camp = sub.add_parser(
