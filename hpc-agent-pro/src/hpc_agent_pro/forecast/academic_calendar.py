@@ -96,7 +96,7 @@ def load_project_deadlines(experiment_dir: Path) -> tuple[Deadline, ...]:
     if not path.is_file():
         return DEFAULT_DEADLINES
     try:
-        raw = yaml.safe_load(path.read_text())
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         raise ValueError(f"deadlines.yaml parse error: {exc}") from exc
     if raw is None:

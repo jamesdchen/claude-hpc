@@ -411,7 +411,7 @@ def read_prediction_sidecar(experiment_dir: Path, run_id: str) -> dict[str, Any]
     """Read the prediction sidecar, or ``None`` if missing/corrupt."""
     path = prediction_sidecar_path(experiment_dir, run_id)
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return None
     try:
