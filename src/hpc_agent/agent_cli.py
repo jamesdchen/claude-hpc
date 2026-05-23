@@ -58,28 +58,6 @@ from hpc_agent.cli._helpers import (  # noqa: F401 — re-exported public surfac
     _require_ssh_agent,
     _validate_against_schema,
 )
-
-# ─── campaign verb-group re-exports ────────────────────────────────────────
-#
-# Phase-1 split: the eight ``cmd_campaign_*`` adapters now live in
-# :mod:`hpc_agent.cli.campaign`. We re-export them here so:
-#   * external imports (``from hpc_agent.agent_cli import cmd_campaign_init``)
-#     keep resolving, and
-#   * the ``set_defaults(func=cmd_campaign_*)`` argparse wiring further
-#     down in :func:`build_parser` resolves the bare names.
-# The submodule lazy-imports the envelope helpers (``_ok``, ``_err``,
-# ``_validate_against_schema``) from this module *inside* each function
-# body to break the import cycle.
-from hpc_agent.cli.campaign import (  # noqa: E402
-    cmd_campaign_advance,
-    cmd_campaign_budget,
-    cmd_campaign_converged,
-    cmd_campaign_health,
-    cmd_campaign_init,
-    cmd_campaign_list,
-    cmd_campaign_replay,
-    cmd_campaign_status,
-)
 from hpc_agent.state.discover import discover_executors
 
 # ─── subcommand: capabilities ──────────────────────────────────────────────
@@ -401,15 +379,6 @@ def cmd_load_context(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-# ─── subcommand: campaign status / list ────────────────────────────────────
-
-
-# cmd_campaign_status / cmd_campaign_list now live in hpc_agent.cli.campaign;
-# re-exported with the rest of the campaign verb group below (search for
-# "from hpc_agent.cli.campaign import"). Kept here as a comment so future
-# greps for ``def cmd_campaign_status`` in agent_cli still find the trail.
-
-
 def cmd_build_submit_spec(args: argparse.Namespace) -> int:
     """Argparse adapter — primitive lives at hpc_agent.atoms.build_submit_spec.
 
@@ -711,13 +680,6 @@ def cmd_axes_init(args: argparse.Namespace) -> int:
         name="axes-init",
     )
     return EXIT_OK
-
-
-# cmd_campaign_init / _replay / _converged / _budget / _advance now live in
-# hpc_agent.cli.campaign; re-exported at the bottom of this module (see
-# the ``from hpc_agent.cli.campaign import ...`` line) so existing import
-# paths (``from hpc_agent.agent_cli import cmd_campaign_init``) and the
-# ``set_defaults(func=cmd_campaign_*)`` argparse wiring below keep working.
 
 
 # ─── subcommand: status ────────────────────────────────────────────────────
@@ -1375,12 +1337,6 @@ def cmd_failures(args: argparse.Namespace) -> int:
         name="failures",
     )
     return EXIT_OK
-
-
-# ─── subcommand: campaign-health ───────────────────────────────────────────
-
-
-# cmd_campaign_health now lives in hpc_agent.cli.campaign; re-exported below.
 
 
 # ─── subcommand: build-executor ────────────────────────────────────────────
@@ -2201,138 +2157,8 @@ def _register_legacy_subcommands(
     _add_experiment_dir(p_lctx)
     p_lctx.set_defaults(func=cmd_load_context)
 
-    # campaign — closed-loop campaign read-only commands
-    p_camp = sub.add_parser(
-        "campaign",
-        help="Closed-loop campaign read-only commands (status, list).",
-    )
-    p_camp_sub = p_camp.add_subparsers(dest="action", required=True)
-
-    p_camp_st = p_camp_sub.add_parser(
-        "status",
-        help=(
-            "Report per-iteration reduced metrics for one campaign. "
-            "Walks every sidecar tagged with --campaign-id, runs "
-            "reduce_metrics on each, and emits the history dict-list."
-        ),
-    )
-    _add_experiment_dir(p_camp_st)
-    p_camp_st.add_argument("--campaign-id", required=True)
-    p_camp_st.set_defaults(func=cmd_campaign_status)
-
-    p_camp_ls = p_camp_sub.add_parser(
-        "list",
-        help="List every campaign with at least one sidecar in this experiment.",
-    )
-    _add_experiment_dir(p_camp_ls)
-    p_camp_ls.set_defaults(func=cmd_campaign_list)
-
-    p_camp_in = p_camp_sub.add_parser(
-        "init",
-        help="Write the campaign manifest from CLI args.",
-    )
-    _add_experiment_dir(p_camp_in)
-    p_camp_in.add_argument("--campaign-id", required=True)
-    p_camp_in.add_argument("--goal", type=str, default="")
-    p_camp_in.add_argument("--max-iters", type=int, default=None)
-    p_camp_in.add_argument("--metric", type=str, default=None)
-    p_camp_in.add_argument("--target", type=float, default=None)
-    p_camp_in.add_argument("--direction", choices=["minimize", "maximize"], default=None)
-    p_camp_in.add_argument("--plateau-window", type=int, default=None)
-    p_camp_in.add_argument("--plateau-tolerance", type=float, default=None)
-    p_camp_in.add_argument(
-        "--plateau-mode",
-        choices=["prior_window", "all_time_best"],
-        default=None,
-        help=(
-            "Plateau baseline (default ``all_time_best``). Controls whether the "
-            "recent window is compared to the all-time prior best or to the "
-            "prior window of equal size — see ``campaign-converged --help``."
-        ),
-    )
-    p_camp_in.add_argument("--max-jobs", type=int, default=None)
-    p_camp_in.add_argument("--max-tasks", type=int, default=None)
-    p_camp_in.add_argument("--max-walltime-sec", type=int, default=None)
-    p_camp_in.add_argument("--strategy-name", type=str, default=None)
-    p_camp_in.add_argument(
-        "--strategy-params-json",
-        type=str,
-        default=None,
-        help="JSON object for strategy.params (round-tripped untouched).",
-    )
-    p_camp_in.set_defaults(func=cmd_campaign_init)
-
-    p_camp_rp = p_camp_sub.add_parser(
-        "replay",
-        help="Return the last N iterations of a campaign with reduced metrics.",
-    )
-    _add_experiment_dir(p_camp_rp)
-    p_camp_rp.add_argument("--campaign-id", required=True)
-    p_camp_rp.add_argument("--last-n", type=int, default=5)
-    p_camp_rp.set_defaults(func=cmd_campaign_replay)
-
-    p_camp_cv = p_camp_sub.add_parser(
-        "converged",
-        help="Apply user-supplied stop criteria to a campaign's history.",
-    )
-    _add_experiment_dir(p_camp_cv)
-    p_camp_cv.add_argument("--campaign-id", required=True)
-    p_camp_cv.add_argument("--max-iters", type=int, default=None)
-    p_camp_cv.add_argument("--metric", type=str, default=None)
-    p_camp_cv.add_argument("--target", type=float, default=None)
-    p_camp_cv.add_argument("--direction", choices=["minimize", "maximize"], default=None)
-    p_camp_cv.add_argument("--plateau-window", type=int, default=None)
-    p_camp_cv.add_argument("--plateau-tolerance", type=float, default=None)
-    p_camp_cv.add_argument(
-        "--plateau-mode",
-        choices=["prior_window", "all_time_best"],
-        default=None,
-        help=(
-            "Plateau baseline. ``all_time_best`` (default): fires when the "
-            "recent ``--plateau-window`` iters didn't beat the all-time prior "
-            "best — 'no new record in N iters'. ``prior_window``: fires when "
-            "they didn't beat the prior window of equal size — 'improvements "
-            "have stalled'. The prior_window mode requires 2*window history."
-        ),
-    )
-    p_camp_cv.set_defaults(func=cmd_campaign_converged)
-
-    p_camp_bg = p_camp_sub.add_parser(
-        "budget",
-        help="Roll up campaign-level spend and compare to optional caps.",
-    )
-    _add_experiment_dir(p_camp_bg)
-    p_camp_bg.add_argument("--campaign-id", required=True)
-    p_camp_bg.add_argument("--max-jobs", type=int, default=None)
-    p_camp_bg.add_argument("--max-tasks", type=int, default=None)
-    p_camp_bg.add_argument("--max-walltime-sec", type=int, default=None)
-    p_camp_bg.set_defaults(func=cmd_campaign_budget)
-
-    p_camp_ad = p_camp_sub.add_parser(
-        "advance",
-        help=(
-            "Decide the next campaign action (continue / stop_converged / "
-            "stop_over_budget / wait_in_flight)."
-        ),
-    )
-    _add_experiment_dir(p_camp_ad)
-    p_camp_ad.add_argument("--campaign-id", required=True)
-    p_camp_ad.add_argument("--max-iters", type=int, default=None)
-    p_camp_ad.add_argument("--metric", type=str, default=None)
-    p_camp_ad.add_argument("--target", type=float, default=None)
-    p_camp_ad.add_argument("--direction", choices=["minimize", "maximize"], default=None)
-    p_camp_ad.add_argument("--plateau-window", type=int, default=None)
-    p_camp_ad.add_argument("--plateau-tolerance", type=float, default=None)
-    p_camp_ad.add_argument(
-        "--plateau-mode",
-        choices=["prior_window", "all_time_best"],
-        default=None,
-        help="See ``campaign-converged --help``.",
-    )
-    p_camp_ad.add_argument("--max-jobs", type=int, default=None)
-    p_camp_ad.add_argument("--max-tasks", type=int, default=None)
-    p_camp_ad.add_argument("--max-walltime-sec", type=int, default=None)
-    p_camp_ad.set_defaults(func=cmd_campaign_advance)
+    # campaign — verb-group registered from the registry walk (CliShape on
+    # atoms.campaign_*). See hpc_agent.cli.parser.
 
     # status
     p_st = sub.add_parser(
@@ -2556,21 +2382,7 @@ def _register_legacy_subcommands(
     )
     p_fail.set_defaults(func=cmd_failures)
 
-    # campaign-health (D2a)
-    p_ch = sub.add_parser(
-        "campaign-health",
-        help=(
-            "Structured run-history aggregation for an LLM agent. Returns "
-            "walltime cliff rates, failure breakdown, GPU utilization, and "
-            "a ready-to-feed-LLM suggested_prompt."
-        ),
-    )
-    _add_experiment_dir(p_ch)
-    p_ch.add_argument("--campaign-id", default=None)
-    p_ch.add_argument("--since-iso", default=None)
-    p_ch.add_argument("--profile", default=None)
-    p_ch.add_argument("--cluster", default=None)
-    p_ch.set_defaults(func=cmd_campaign_health)
+    # campaign-health: migrated to atoms.campaign_health (CliShape).
 
     # build-executor
     p_be = sub.add_parser(

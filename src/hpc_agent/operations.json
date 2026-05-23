@@ -98,7 +98,7 @@
   },
   {
     "agent_facing": false,
-    "cli": "hpc-agent campaign advance --campaign-id <id>",
+    "cli": "hpc-agent campaign advance [--experiment-dir <dir>] --campaign-id <campaign_id> [--max-iters <max_iters>] [--metric <metric>] [--target <target>] [--direction <direction>] [--plateau-window <plateau_window>] [--plateau-tolerance <plateau_tolerance>] [--plateau-mode <plateau_mode>] [--max-jobs <max_jobs>] [--max-tasks <max_tasks>] [--max-walltime-sec <max_walltime_sec>]",
     "idempotent": true,
     "input_schema": null,
     "name": "campaign-advance",
@@ -109,7 +109,7 @@
   },
   {
     "agent_facing": false,
-    "cli": "hpc-agent campaign budget --campaign-id <id>",
+    "cli": "hpc-agent campaign budget [--experiment-dir <dir>] --campaign-id <campaign_id> [--max-jobs <max_jobs>] [--max-tasks <max_tasks>] [--max-walltime-sec <max_walltime_sec>]",
     "idempotent": true,
     "input_schema": null,
     "name": "campaign-budget",
@@ -120,7 +120,7 @@
   },
   {
     "agent_facing": false,
-    "cli": "hpc-agent campaign converged --campaign-id <id>",
+    "cli": "hpc-agent campaign converged [--experiment-dir <dir>] --campaign-id <campaign_id> [--max-iters <max_iters>] [--metric <metric>] [--target <target>] [--direction <direction>] [--plateau-window <plateau_window>] [--plateau-tolerance <plateau_tolerance>] [--plateau-mode <plateau_mode>]",
     "idempotent": true,
     "input_schema": null,
     "name": "campaign-converged",
@@ -131,7 +131,7 @@
   },
   {
     "agent_facing": false,
-    "cli": "hpc-agent campaign-health [--campaign-id <id>] [--since-iso <ts>]",
+    "cli": "hpc-agent campaign health [--experiment-dir <dir>] [--campaign-id <campaign_id>] [--since-iso <since_iso>] [--profile <profile>] [--cluster <cluster>]",
     "idempotent": true,
     "input_schema": "campaign_health.input.json",
     "name": "campaign-health",
@@ -153,7 +153,7 @@
   },
   {
     "agent_facing": false,
-    "cli": "hpc-agent campaign replay --campaign-id <id> [--last-n <n>]",
+    "cli": "hpc-agent campaign replay [--experiment-dir <dir>] --campaign-id <campaign_id> [--last-n <last_n>]",
     "idempotent": true,
     "input_schema": null,
     "name": "campaign-replay",
@@ -164,7 +164,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent campaign status --campaign-id <id> [--experiment-dir <dir>]",
+    "cli": "hpc-agent campaign status [--experiment-dir <dir>] --campaign-id <campaign_id>",
     "idempotent": true,
     "input_schema": null,
     "name": "campaign-status",
@@ -441,7 +441,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent campaign init --campaign-id <id> --strategy <s>",
+    "cli": "hpc-agent campaign init [--experiment-dir <dir>] --campaign-id <campaign_id> [--goal <goal>] [--max-iters <max_iters>] [--metric <metric>] [--target <target>] [--direction <direction>] [--plateau-window <plateau_window>] [--plateau-tolerance <plateau_tolerance>] [--plateau-mode <plateau_mode>] [--max-jobs <max_jobs>] [--max-tasks <max_tasks>] [--max-walltime-sec <max_walltime_sec>] [--strategy-name <strategy_name>] [--strategy-params-json <strategy_params_json>]",
     "idempotent": true,
     "input_schema": null,
     "name": "campaign-init",

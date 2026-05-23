@@ -85,13 +85,13 @@ The verb partitions primitives into bands the reader can scan independently:
 
 | Primitive | Idempotent | Side effects | CLI |
 |---|---|---|---|
-| [campaign-advance](campaign-advance.md) | yes | _none_ | `hpc-agent campaign advance --campaign-id <id>` |
-| [campaign-budget](campaign-budget.md) | yes | _none_ | `hpc-agent campaign budget --campaign-id <id>` |
-| [campaign-converged](campaign-converged.md) | yes | _none_ | `hpc-agent campaign converged --campaign-id <id>` |
-| [campaign-health](campaign-health.md) | yes | _none_ | `hpc-agent campaign-health [--campaign-id <id>] [--since-iso <ts>]` |
+| [campaign-advance](campaign-advance.md) | yes | _none_ | `hpc-agent campaign advance [--experiment-dir <dir>] --campaign-id <campaign_id> [--max-iters <max_iters>] [--metric <metric>] [--target <target>] [--direction <direction>] [--plateau-window <plateau_window>] [--plateau-tolerance <plateau_tolerance>] [--plateau-mode <plateau_mode>] [--max-jobs <max_jobs>] [--max-tasks <max_tasks>] [--max-walltime-sec <max_walltime_sec>]` |
+| [campaign-budget](campaign-budget.md) | yes | _none_ | `hpc-agent campaign budget [--experiment-dir <dir>] --campaign-id <campaign_id> [--max-jobs <max_jobs>] [--max-tasks <max_tasks>] [--max-walltime-sec <max_walltime_sec>]` |
+| [campaign-converged](campaign-converged.md) | yes | _none_ | `hpc-agent campaign converged [--experiment-dir <dir>] --campaign-id <campaign_id> [--max-iters <max_iters>] [--metric <metric>] [--target <target>] [--direction <direction>] [--plateau-window <plateau_window>] [--plateau-tolerance <plateau_tolerance>] [--plateau-mode <plateau_mode>]` |
+| [campaign-health](campaign-health.md) | yes | _none_ | `hpc-agent campaign health [--experiment-dir <dir>] [--campaign-id <campaign_id>] [--since-iso <since_iso>] [--profile <profile>] [--cluster <cluster>]` |
 | [campaign-list](campaign-list.md) | yes | _none_ | `hpc-agent campaign list [--experiment-dir <dir>]` |
-| [campaign-replay](campaign-replay.md) | yes | _none_ | `hpc-agent campaign replay --campaign-id <id> [--last-n <n>]` |
-| [campaign-status](campaign-status.md) | yes | _none_ | `hpc-agent campaign status --campaign-id <id> [--experiment-dir <dir>]` |
+| [campaign-replay](campaign-replay.md) | yes | _none_ | `hpc-agent campaign replay [--experiment-dir <dir>] --campaign-id <campaign_id> [--last-n <last_n>]` |
+| [campaign-status](campaign-status.md) | yes | _none_ | `hpc-agent campaign status [--experiment-dir <dir>] --campaign-id <campaign_id>` |
 | [capabilities](capabilities.md) | yes | _none_ | `hpc-agent capabilities` |
 | [clusters-describe](clusters-describe.md) | yes | _none_ | `hpc-agent clusters describe <name> [--strict]` |
 | [clusters-list](clusters-list.md) | yes | _none_ | `hpc-agent clusters list` |
@@ -149,7 +149,7 @@ The verb partitions primitives into bands the reader can scan independently:
 | [build-executor](build-executor.md) | no | writes-file: `<output_dir>/<name>.py` | `hpc-agent build-executor --name <stem> [--output-dir <dir>] [--type plain] [--force]` |
 | [build-submit-spec](build-submit-spec.md) | yes | _none_ | `hpc-agent build-submit-spec --spec <path>` |
 | [build-tasks-py](build-tasks-py.md) | yes | writes-sidecar: `<experiment>/.hpc/tasks.py` | `hpc-agent build-tasks-py --spec <path>` |
-| [campaign-init](campaign-init.md) | yes | writes-sidecar: `<experiment>/.hpc/campaigns/<id>/manifest.json` | `hpc-agent campaign init --campaign-id <id> --strategy <s>` |
+| [campaign-init](campaign-init.md) | yes | writes-sidecar: `<experiment>/.hpc/campaigns/<id>/manifest.json` | `hpc-agent campaign init [--experiment-dir <dir>] --campaign-id <campaign_id> [--goal <goal>] [--max-iters <max_iters>] [--metric <metric>] [--target <target>] [--direction <direction>] [--plateau-window <plateau_window>] [--plateau-tolerance <plateau_tolerance>] [--plateau-mode <plateau_mode>] [--max-jobs <max_jobs>] [--max-tasks <max_tasks>] [--max-walltime-sec <max_walltime_sec>] [--strategy-name <strategy_name>] [--strategy-params-json <strategy_params_json>]` |
 | [classify-axis](classify-axis.md) | yes | writes-sidecar: `<experiment>/.hpc/axes.yaml` | `hpc-agent classify-axis --spec <path>` |
 | [export-package](export-package.md) | yes | writes-sidecar: `<experiment>/src/*.py`; writes-sidecar: `<experiment>/.hpc/.build-cache.json` | `hpc-agent export-package` |
 | [interview](interview.md) | yes | file_write: `<campaign_dir>/{interview.json,meta.json}` | `hpc-agent interview` |
