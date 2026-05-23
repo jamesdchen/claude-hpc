@@ -141,7 +141,10 @@ def simulate_drain(
     )
     insert_idx = 0
     for j in pending_real:
-        if j.priority > hypothetical_priority:
+        # SLURM tie-breaks equal priorities by submit time; a fresh
+        # submit is always LAST among ties, so equal-priority real
+        # pendings rank AHEAD of the hypothetical (>= not >).
+        if j.priority >= hypothetical_priority:
             insert_idx += 1
         else:
             break

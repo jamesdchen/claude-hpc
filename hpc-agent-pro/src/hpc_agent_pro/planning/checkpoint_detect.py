@@ -62,7 +62,7 @@ def _result_dir_candidates(experiment_dir: Path, *, profile: str, cluster: str) 
         return out
     for sidecar in sorted(runs_dir.glob("*.json")):
         try:
-            data = json.loads(sidecar.read_text())
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         if data.get("profile") != profile:

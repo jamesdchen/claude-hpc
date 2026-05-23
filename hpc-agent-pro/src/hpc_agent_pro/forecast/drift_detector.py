@@ -61,7 +61,18 @@ def append_run(experiment_dir: Path, *, summary: dict[str, Any]) -> Path:
     """
     path = history_path(experiment_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # O_APPEND is only atomic up to PIPE_BUF (~4 KB); training-run
+    # summaries with feature-importance lists routinely exceed that and
+    # would interleave bytes with a concurrent appender, producing
+    # corrupt lines that the reader silently drops. Serialize with an
+    # advisory file lock.
+    try:
+        import fcntl  # noqa: PLC0415 — POSIX-only
+    except ImportError:
+        fcntl = None  # type: ignore[assignment]
     with path.open("a", encoding="utf-8") as f:
+        if fcntl is not None:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         f.write(json.dumps(summary, sort_keys=True) + "\n")
     return path
 

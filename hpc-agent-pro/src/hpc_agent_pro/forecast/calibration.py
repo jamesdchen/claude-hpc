@@ -402,7 +402,7 @@ def record_prediction_sidecar(
     import os as _os
 
     tmp = path.with_suffix(path.suffix + f".tmp.{_os.getpid()}")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
     return path
 
@@ -411,7 +411,7 @@ def read_prediction_sidecar(experiment_dir: Path, run_id: str) -> dict[str, Any]
     """Read the prediction sidecar, or ``None`` if missing/corrupt."""
     path = prediction_sidecar_path(experiment_dir, run_id)
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return None
     try:

@@ -211,7 +211,14 @@ def predict_start_time(
                 overhead_sec_p10 = _predict_overhead(p10_path, features, lgb)
             if p90_path is not None and p90_path.is_file():
                 overhead_sec_p90 = _predict_overhead(p90_path, features, lgb)
-        except (ImportError, ValueError, OSError):
+        except Exception:  # noqa: BLE001 — lightgbm.basic.LightGBMError isn't a subclass of any std exception we'd otherwise list
+            # Reset every overhead we may have partially populated so the
+            # returned envelope is internally consistent with
+            # ``method == "floor_only_cold_start"`` (otherwise a p10
+            # predicted before a p90 model crash would leak through).
+            overhead_sec = 0
+            overhead_sec_p10 = None
+            overhead_sec_p90 = None
             method = "floor_only_cold_start"
 
     predicted_dt = pess_dt + timedelta(seconds=overhead_sec)

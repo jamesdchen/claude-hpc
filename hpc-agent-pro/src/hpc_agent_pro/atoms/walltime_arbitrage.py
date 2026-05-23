@@ -48,4 +48,8 @@ def arbitrage_walltime(walltime_sec: int) -> int:
     """
     if walltime_sec < _FLOOR_SEC:
         return walltime_sec
-    return ((walltime_sec - _OFFSET_SEC) // _BOUNDARY_SEC) * _BOUNDARY_SEC
+    # Clamp to at least one ``_BOUNDARY_SEC`` so a future reconfigure of
+    # _FLOOR_SEC / _OFFSET_SEC can't push the trimmed ask to 0 (or
+    # negative), which downstream would silently submit "no walltime
+    # ask" and inherit the partition's default.
+    return max(_BOUNDARY_SEC, ((walltime_sec - _OFFSET_SEC) // _BOUNDARY_SEC) * _BOUNDARY_SEC)
