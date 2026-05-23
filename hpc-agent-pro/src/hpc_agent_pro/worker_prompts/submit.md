@@ -31,6 +31,16 @@ Branch on `action`:
 | `interview` | 2 | `.hpc/tasks.py` exists, no run history | Skip executor-discovery + axes interview (tasks.py already encodes the axis); jump to Step 4b (planner). |
 | `fresh` | 3 | Nothing exists | Full interview from Step 1. |
 
+## Step 0: Build the `src/` package
+
+The experiment repo commits **nothing generated** — `src/` is `.gitignore`d. Build it from the notebooks before anything else, so discovery, the elision gate, and the deploy bundle all see a current package:
+
+```bash
+hpc-agent export-package --experiment-dir .
+```
+
+`export-package` globs `notebooks/{pipeline,executors,scripts}/*.ipynb`, exports each to `src/<module>.py` (strict-AST for `@register_run` executors, `# export`-marker for pipeline libraries), and content-hash-caches against `.hpc/.build-cache.json` — a no-op when nothing changed. The built `src/` rides the `submit-flow` rsync into the deploy bundle; **the cluster node never builds** (it stays stdlib-only). On a `spec_invalid` envelope (an output-path collision, a bad module name), surface it and stop — the notebooks need a rename.
+
 ## Step 1: Discover Executors
 
 Invoke [discover-executors](../../docs/primitives/discover-executors.md). The primitive scans `executors/`, `scripts/`, `src/` (in order, falling back to repo root), filters utilities, and classifies each executor by contract.
