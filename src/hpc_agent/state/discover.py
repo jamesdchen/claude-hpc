@@ -86,6 +86,7 @@ def _discover_reducers_result_post(infos: list[ReducerInfo]) -> dict[str, object
         ]
     }
 
+
 # Module names that signal a CLI framework. Matched against any ``import X``
 # or ``from X import ...`` statement at the top level of the script.
 _CLI_FRAMEWORKS = frozenset({"argparse", "click", "typer", "fire"})
