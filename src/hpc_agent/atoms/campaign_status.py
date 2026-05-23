@@ -24,9 +24,7 @@ if TYPE_CHECKING:
             "reduce_metrics on each, and emits the history dict-list."
         ),
         experiment_dir_arg=True,
-        args=(
-            CliArg("--campaign-id", type=str, required=True),
-        ),
+        args=(CliArg("--campaign-id", type=str, required=True),),
         group="campaign",
     ),
     agent_facing=True,
