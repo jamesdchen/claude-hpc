@@ -74,7 +74,7 @@ include = ["hpc_agent_pro*"]
 hpc_agent_pro = [
     "schemas/*.json",
     "slash_commands/commands/*.md",
-    "slash_commands/skills/*/*.md",
+    "worker_prompts/*.md",
 ]
 
 [tool.pytest.ini_options]

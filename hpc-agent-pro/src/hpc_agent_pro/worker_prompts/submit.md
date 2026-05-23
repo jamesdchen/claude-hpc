@@ -1,12 +1,6 @@
----
-name: hpc-submit
-description: "Submit a parameter-grid experiment to a SLURM/SGE cluster via SSH and record it in the journal. End-to-end pipeline (rsync + deploy + qsub + record) in one CLI call."
-allowed-tools: Bash Read Write
----
-
 Agent-facing composition over the **[submit-flow](../../docs/primitives/submit-flow.md) workflow atom** (full pre-flight + rsync + deploy + qsub + record pipeline in one CLI call). For just the journal-write half (when the agent has already qsubbed), use the [submit-spec](../../docs/primitives/submit-spec.md) primitive directly. Both are idempotent on `run_id`: a replay returns `data.deduped: true` and emits no cluster-side side effects.
 
-Throughout this skill, "invoke <primitive>" means call the primitive's `backed_by.cli` or `backed_by.python` entry point; see `docs/primitives/<name>.md` for the full contract. For envelope/exit-code shapes see `docs/reference/cli-spec.md`.
+Throughout this procedure, "invoke <primitive>" means call the primitive's `backed_by.cli` or `backed_by.python` entry point; see `docs/primitives/<name>.md` for the full contract. For envelope/exit-code shapes see `docs/reference/cli-spec.md`.
 
 ## Setup
 
@@ -30,9 +24,9 @@ hpc-agent suggest-setup-action --experiment-dir .
 
 Branch on `action`:
 
-| `action` | Priority | Meaning | Skill behavior |
+| `action` | Priority | Meaning | Procedure behavior |
 |---|---|---|---|
-| `monitor` | 0 | At least one in-flight run on the journal | Hand off to `hpc-status` skill with the candidate list. |
+| `monitor` | 0 | At least one in-flight run on the journal | Stop and report; the caller switches to the status workflow. |
 | `reuse` | 1 | Per-experiment sidecars exist | Each sidecar carries the full v2 config snapshot — resources/env/constraints/runtime. Reuse keeps `tasks.py` byte-identical so `cmd_sha` matches. |
 | `interview` | 2 | `.hpc/tasks.py` exists, no run history | Skip executor-discovery + axes interview (tasks.py already encodes the axis); jump to Step 4b (planner). |
 | `fresh` | 3 | Nothing exists | Full interview from Step 1. |
@@ -45,11 +39,11 @@ Map flag set per contract:
 - **New-contract** (`info.has_compute_function == true`): if `.hpc/tasks.py` exists, read `FLAGS[<module>]` for the per-executor flag list. If first submit, capture intended flags during Step 6b interview.
 - **Old-contract** (`info.has_main_guard` only): run `python3 <info.path> --help` to map the CLI interface.
 
-If `discover_executors` returns empty, the slash command surfaces a scaffolding sub-interview to the user; that dialog is human UX (it lives in the slash) but the actual work it does — copy `hpc_agent/mapreduce/templates/scaffolds/executor_template.py` to a user-chosen path, then walk through `compute(args)` — is what `hpc-build-executor` skill encodes.
+If `discover_executors` returns empty, scaffolding requires an interactive sub-interview which a headless worker cannot run — record the boundary in `decisions` and stop for the caller to handle.
 
 ## Step 2: Parse user intent
 
-The slash command parses the user's natural-language request into a list of `(executor_id, axis_shape)` tuples. This skill receives the result; flags `--no-canary` and `campaign_id=<slug>` thread through verbatim.
+The caller has already parsed the user's natural-language request into a list of `(executor_id, axis_shape)` tuples; the result arrives via the invocation `fields`. Flags `--no-canary` and `campaign_id=<slug>` thread through verbatim.
 
 For multi-executor submissions sharing `(ssh_target, remote_path)`, build a **batch spec** — `{"specs": [<per-spec>...], "rsync_excludes": [...], "skip_preflight": ...}`; `submit-flow` auto-routes it to the batched path (one rsync + one deploy + N qsubs). Heterogeneous batches raise `spec_invalid`. Why batch rather than N parallel submits: see [submit-flow.md](../../docs/primitives/submit-flow.md).
 
@@ -66,7 +60,7 @@ Read `compute()` / the `@register_run` function and its call graph — the same 
 
 ### 3b: Classify the `DataAxis`
 
-The experiment declares nothing about parallelism — you classify it. The one question: **does the loop carry state, and is the state transition associative?** (Full model: `hpc_agent/template/axis.py`. The same classification reference lives in [build-tasks-py.md](../../docs/primitives/build-tasks-py.md) so an integrator driving `build-tasks-py` directly — without this skill — gets the identical guidance.)
+The experiment declares nothing about parallelism — you classify it. The one question: **does the loop carry state, and is the state transition associative?** (Full model: `hpc_agent/template/axis.py`. The same classification reference lives in [build-tasks-py.md](../../docs/primitives/build-tasks-py.md) so an integrator driving `build-tasks-py` directly — without this procedure — gets the identical guidance.)
 
 | Observation in `run()` | `DataAxis` | Halo |
 |---|---|---|
@@ -84,11 +78,11 @@ Inference is **never trusted unverified** — classifying data dependencies is r
 
 Before scaffolding a planner-driven `tasks.py`, prove the classification on a fixture: `hpc_agent.template.check_elision` (or `assert_elision_equivalent`) runs the experiment once whole and once split N ways and asserts the results agree. If it fails, the axis is misclassified — widen the halo or fall back to `Sequential()`. This gate is what makes the inference safe: a misclassified axis produces a job that runs fine and returns plausible-but-wrong numbers, and nothing else catches it. Do not skip it, and recommend the experiment repo wire `assert_elision_equivalent` into its CI as a required check.
 
-If the projected task count exceeds `constraints.max_tasks` or ~1000, the slash command surfaces a confirm prompt before proceeding.
+If the projected task count exceeds `constraints.max_tasks` or ~1000, record a `magnitude_warning` in `decisions` / `anomalies` so the caller can confirm with the user before proceeding.
 
 ## Step 4: Auto-Configure Environment
 
-Resolve in order: cluster (interactive or `--cluster`); `SSH_TARGET` + `REMOTE_PATH` from cluster config; environment classification from `info.imports`:
+Resolve in order: cluster (from `fields` or `data.latest_run`); `SSH_TARGET` + `REMOTE_PATH` from cluster config; environment classification from `info.imports`:
 
 | Imports detected | Classification | Environment |
 |---|---|---|
@@ -96,7 +90,7 @@ Resolve in order: cluster (interactive or `--cluster`); `SSH_TARGET` + `REMOTE_P
 | `sklearn`/`xgboost`/`lightgbm` | CPU/ML | Load python modules |
 | `numpy`/`pandas` only | CPU/lightweight | Load python modules |
 
-For DL executors with `conda_envs` listed in `clusters.yaml` → present the options; without → ask. Resource defaults: CPU/ML 1×16G×4h; GPU/DL 4×16G×6h×2gpu (gpu_type=first in cluster's `gpu_types`).
+For DL executors with `conda_envs` listed in `clusters.yaml` → record the candidates as a `decisions` entry for the caller to confirm with the user; the caller re-invokes with the picked env in `fields`. Resource defaults: CPU/ML 1×16G×4h; GPU/DL 4×16G×6h×2gpu (gpu_type=first in cluster's `gpu_types`).
 
 Build rsync excludes from `.gitignore` patterns + the standard set (`__pycache__/`, `*.pyc`, `.git/`, `.claude/`, `.mypy_cache/`) + result directories. `.hpc/` rides rsync — the cluster needs `tasks.py` and the in-flight `runs/<run_id>.json`; `submit-flow` protects the framework-deployed `.hpc/` files from `--delete` itself (see [submit-flow.md](../../docs/primitives/submit-flow.md)).
 
@@ -114,31 +108,31 @@ It reads the cluster's scheduler constraints from `clusters.yaml`, packs the gri
 
 For GPU profiles, invoke [score-submit-plan](../../docs/primitives/score-submit-plan.md). For CPU-only, skip.
 
-Optional pre-check: [best-submit-window](../../docs/primitives/best-submit-window.md) (`hpc-agent best-submit-window --profile <p> --cluster <c> --within-hours 24 --top-k 5`) surfaces low-traffic windows. Advisory; the slash command decides whether to surface "submit now vs wait" to the user.
+Optional pre-check: [best-submit-window](../../docs/primitives/best-submit-window.md) (`hpc-agent best-submit-window --profile <p> --cluster <c> --within-hours 24 --top-k 5`) surfaces low-traffic windows. Advisory; record the "submit now vs wait" choice in `decisions` if non-trivial so the caller surfaces it to the user.
 
 Three branches on `score-submit-plan`'s envelope:
 
 ### 4c-A: `needs_canary: true` (cold start)
 
-No runtime priors exist. Don't try to score — submit a 1-task canary first using `data.canary_plan.constraint`. Run through Steps 5–10 with `--no-canary` (we **are** the canary). Wait for terminal; capture `gpu_type`, `node`, `elapsed_sec`, `exit_code` from sacct/qacct. On success, append a sample via `hpc_agent.state.runtime_prior.append_sample`. On SEGV: STOP and surface to user (do NOT auto-retry on a different node — the failure is informative; re-running blindly may mask whether the workload itself is buggy). On timeout: bump walltime 2× and retry the canary ONCE. After two timeouts surface to user.
+No runtime priors exist. Don't try to score — submit a 1-task canary first using `data.canary_plan.constraint`. Run through Steps 5–10 with `--no-canary` (we **are** the canary). Wait for terminal; capture `gpu_type`, `node`, `elapsed_sec`, `exit_code` from sacct/qacct. On success, append a sample via `hpc_agent.state.runtime_prior.append_sample`. On SEGV: STOP and record `canary_segv` in `decisions` for the caller to surface to the user (do NOT auto-retry on a different node — the failure is informative; re-running blindly may mask whether the workload itself is buggy). On timeout: bump walltime 2× and retry the canary ONCE. After two timeouts record `canary_timeout` in `decisions` and stop.
 
 After a *successful* canary, re-invoke score-submit-plan and proceed to 4c-B.
 
 ### 4c-B: `needs_canary: false` (priors exist)
 
-`score-submit-plan` scores the candidates and runs its adversarial-backfill mode — walltime / footprint shrink recommendations, a probed `(walltime × mem × constraint)` lattice, and the closed-loop `walltime_drift` calibration. The full rubric and what each output field means are in [score-submit-plan.md](../../docs/primitives/score-submit-plan.md). The skill's job is to act on its envelope:
+`score-submit-plan` scores the candidates and runs its adversarial-backfill mode — walltime / footprint shrink recommendations, a probed `(walltime × mem × constraint)` lattice, and the closed-loop `walltime_drift` calibration. The full rubric and what each output field means are in [score-submit-plan.md](../../docs/primitives/score-submit-plan.md). The procedure's job is to act on its envelope:
 
-**Auto-pick rule** (per-candidate): when `recommended_tuple.predicted_eta_sec is not None`, use the tuple's walltime/mem/cpus/constraint automatically — SLURM has confirmed a fitting backfill window. Surface `rationale` to the audit file so the choice is replayable.
+**Auto-pick rule** (per-candidate): when `recommended_tuple.predicted_eta_sec is not None`, use the tuple's walltime/mem/cpus/constraint automatically — SLURM has confirmed a fitting backfill window. Record `rationale` in the audit file so the choice is replayable.
 
-**Auto-apply rule** (cluster-wide): apply `array_reshape.recommended_max_array_size` automatically when present. Do NOT auto-apply `walltime_split` — confirm with the user that the executor checkpoints before chaining (`requires_checkpointing: true` would otherwise kill work at every segment boundary).
+**Auto-apply rule** (cluster-wide): apply `array_reshape.recommended_max_array_size` automatically when present. Do NOT auto-apply `walltime_split` — record `walltime_split_pending` in `decisions` and stop; the caller must confirm the executor checkpoints before chaining (`requires_checkpointing: true` would otherwise kill work at every segment boundary).
 
 After submission, write a prediction sidecar via `hpc_agent.forecast.calibration.record_prediction_sidecar` so post-completion ingestion can validate the calibration.
 
-For each chosen candidate's `stressed_nodes`, the SLASH command (not the skill) decides per-node whether to soft-exclude using `co_tenants` context. The skill receives the resulting `--exclude=<node1>,...` flag and adds it to the sbatch invocation.
+For each chosen candidate's `stressed_nodes`, record the `co_tenants` context in `decisions` per node so the caller can decide whether to soft-exclude. The caller re-invokes with the resulting `--exclude=<node1>,...` flag in `fields` and the procedure adds it to the sbatch invocation.
 
 ### 4c-C: planner errors
 
-If `plan-submit` envelope is `ok: false`, fall back to static-constraint flow: take `gpu_constraint` and `constraints.max_walltime` from `clusters.yaml`, proceed without exclude list. Surface the planner error verbatim — the user knows quality awareness is degraded.
+If `plan-submit` envelope is `ok: false`, fall back to static-constraint flow: take `gpu_constraint` and `constraints.max_walltime` from `clusters.yaml`, proceed without exclude list. Record the planner error verbatim in `anomalies` — quality awareness is degraded.
 
 ### Audit file
 
@@ -169,7 +163,7 @@ Don't hand-author the summary. Once Step 6c emits the resolved spec via [build-s
 hpc-agent summarize-submit-plan --spec /tmp/submit_spec.json
 ```
 
-The envelope's `data` carries `{headline, body, confirm_prompt}`. Print `headline` and `body` verbatim, then ask `confirm_prompt`. For multi-job submissions, call once per spec and concatenate bodies under one combined header. The primitive flips to a magnitude-warning prompt automatically when `total_tasks > 1000`.
+The envelope's `data` carries `{headline, body, confirm_prompt}`. Surface `headline`, `body`, and `confirm_prompt` in the worker `result` so the caller can show them to the user. For multi-job submissions, call once per spec and concatenate bodies under one combined header. The primitive flips to a magnitude-warning prompt automatically when `total_tasks > 1000`.
 
 ## Step 6: Scaffold (or reuse) `.hpc/tasks.py` and write the per-run sidecar
 
@@ -219,7 +213,7 @@ hpc-agent find-prior-run --experiment-dir . --cmd-sha "$CMD_SHA"
 
 Branch on envelope's `{found, is_orphan}`:
 - `found=False` → fresh; continue to 6d.
-- `found=True, is_orphan=False` → real prior. Slash command asks user "Resume or fresh?"
+- `found=True, is_orphan=False` → real prior. Record in `decisions` and surface to the caller — only the user can choose resume-vs-fresh.
 - `found=True, is_orphan=True` → half-baked sidecar. Suggest `prune-orphan-sidecars` or proceed and let `submit_flow_batch`'s auto-prune handle it.
 
 ### 6d: Write sidecar + build submit-flow spec
@@ -232,7 +226,7 @@ Write the per-run sidecar via `write_run_sidecar(..., wave_map=wave_map)`. Pass 
 
 Cache marker: `~/.claude/hpc/<repo_hash>/preflight-<cluster>.json` (TTL 24h). If marker exists, `all_ok=true`, < 24h old → log `preflight: cached <N>m ago — OK` and skip to Step 7.
 
-Otherwise invoke [check-preflight](../../docs/primitives/check-preflight.md) with `--cluster <name>`. On `data.all_ok == true`: write/update marker, continue. On any check failure: do NOT write marker, surface failing checks verbatim, stop.
+Otherwise invoke [check-preflight](../../docs/primitives/check-preflight.md) with `--cluster <name>`. On `data.all_ok == true`: write/update marker, continue. On any check failure: do NOT write marker, record `setup_required` in `decisions` with the failing checks verbatim and stop — the user fixes their environment with `hpc-agent setup --cluster <name>` and the caller re-invokes.
 
 ## Step 6c: Pre-submit campaign validation
 
@@ -244,16 +238,16 @@ hpc-agent validate-campaign --spec validate_campaign.input.json --experiment-dir
 
 Branch on `data.overall`:
 - `pass` → proceed.
-- `warn` → surface warnings; proceed unless user explicitly fixes first.
-- `fail` → do NOT proceed. List `error`-severity findings with `code`/`message`/`suggested_fix`, apply fixes, re-run. **No `--force` flag by design** — edit `.hpc/playbook.yaml` if a rule is wrong.
+- `warn` → record warnings in `anomalies`; proceed.
+- `fail` → do NOT proceed. Record the `error`-severity findings with `code`/`message`/`suggested_fix` in `decisions` and stop. **No `--force` flag by design** — the caller edits `.hpc/playbook.yaml` if a rule is wrong, then re-invokes.
 
 ## Step 6d: Predict start time
 
 Invoke [predict-start-time](../../docs/primitives/predict-start-time.md). Inputs: squeue + sshare snapshots (gather via SSH first), partition info, your priority/walltime/constraint, candidate offsets `[0,1,3,6,12,24]`. Surface result:
 - `best_submit_offset_hours == 0` → submit now is optimal.
-- `> 0` → suggest "wait N hours, predicted total time M minutes vs submit-now's M' minutes" — slash command renders the user prompt.
+- `> 0` → record "wait N hours, predicted total time M minutes vs submit-now's M' minutes" in `decisions` so the caller can ask the user.
 
-Advisory, NOT a gate. The skill always proceeds; the predictor is decision support.
+Advisory, NOT a gate. The procedure always proceeds; the predictor is decision support.
 
 ## Step 7-8: Invoke `submit-flow`
 
@@ -278,7 +272,7 @@ Steps 7 (rsync), 7b (canary), 8 (qsub), 10 (record) are ONE CLI call. Spec shape
 hpc-agent submit-flow --spec spec.json --experiment-dir .
 ```
 
-- `data.deduped: true` → original cluster jobs running. Switch to `hpc-status` skill.
+- `data.deduped: true` → original cluster jobs running. Record `deduped` in `decisions`; the caller switches to the status workflow.
 - `data.deduped: false` → fresh. Capture `data.run_id`/`job_ids`/`canary_job_ids`.
 - Error envelopes: branch by `error_code` per submit-flow's contract.
 
@@ -292,7 +286,7 @@ hpc-agent verify-canary --experiment-dir . --canary-run-id "$CANARY_RUN_ID" --ex
 
 Branch:
 - `ok=True` → continue to main array submit.
-- `ok=False` → surface `stderr_tail` verbatim. `failure_kind` tags the category (`dispatcher_failed`/`import_error`/`oom_killed`/`missing_output`/`timeout`).
+- `ok=False` → record `stderr_tail` verbatim and the `failure_kind` (`dispatcher_failed`/`import_error`/`oom_killed`/`missing_output`/`timeout`) in `decisions`, stop.
 
 ## Step 8b: Verify the array is queued/running
 
@@ -307,21 +301,21 @@ ssh $SSH_TARGET 'qstat -j '"$JOB_IDS"' 2>&1 | head -40; qstat -u '"$USER"' | awk
 
 Classify each job ID as **healthy** (proceed) or **failed** (abort) per the state taxonomy in [scheduler-states.md](../../docs/reference/scheduler-states.md). A wave-2+ job pending on a dependency is healthy.
 
-On a failed state: surface the scheduler reason verbatim, tell the user which job ID is bad, stop. Do not run Step 9 or Step 10.
+On a failed state: record the scheduler reason verbatim and the bad job ID in `decisions`, stop. Do not run Step 9 or Step 10.
 
 ## Step 9-10: Cache + report
 
 Do not cache run config in conversational memory. `submit-flow` persists the full v2 config snapshot (executor, cluster, remote_path, env, resources) to the run sidecar; any later step recovers it with `hpc-agent load-context`. Conversational memory is lost on context compaction or a session restart — the sidecar is not.
 
-Report after submission and Step 8b verification: job ID, executor(s), grid dimensions, total tasks, cluster, verified scheduler state. Suggest `/monitor-hpc` to track progress.
+Report after submission and Step 8b verification: job ID, executor(s), grid dimensions, total tasks, cluster, verified scheduler state. The caller suggests `/monitor-hpc` to track progress.
 
 The journal write happens inside `submit-flow` via `runner.submit_and_record`. For multi-executor submissions (one sidecar per executor), invoke `submit-flow` once per submitted job — each call writes its own sidecar.
 
 ## Notes
 
-- **SSH env passthrough**: caller must forward `SSH_AUTH_SOCK` and `SSH_AGENT_PID` or every cluster call hangs on auth. Run `hpc-preflight` first.
+- **SSH env passthrough**: caller must forward `SSH_AUTH_SOCK` and `SSH_AGENT_PID` or every cluster call hangs on auth. The user runs `hpc-agent setup --cluster <name>` once per machine to probe the environment and populate the 24h cache marker Step 6b reads.
 - **Scheduler rate limits**: serialize submits to a single cluster; most schedulers cap at ~1/sec. Sleep 1s between back-to-back calls or expect `scheduler_throttled`.
 - **Idempotency**: `submit-flow` is replay-safe on `run_id`. If `data.deduped: true`, original cluster jobs are running — do NOT re-invoke.
-- **No cancel/abort**: hpc-agent has no kill primitive. If you decide an experiment is bad, stop monitoring; cluster jobs run to walltime.
+- **No cancel/abort**: hpc-agent has no kill primitive. If the user decides an experiment is bad, the caller stops monitoring; cluster jobs run to walltime.
 - `--dry-run` never touches the cluster and never writes to the journal — safe to run repeatedly.
 - The cluster-side template translates the scheduler's per-task index (`SGE_TASK_ID` / `SLURM_ARRAY_TASK_ID`) into `HPC_TASK_ID` (0-based) before exec'ing `$EXECUTOR`, which then imports `.hpc/tasks.py`, calls `tasks.resolve(HPC_TASK_ID)`, and runs the executor command from the sidecar with kwargs merged into the env.
