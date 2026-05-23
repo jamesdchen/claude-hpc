@@ -109,9 +109,12 @@ def compute_arrival_rate_per_hour(
         return None
     # snapshots is newest-first; reverse for chronological walk.
     chronological = list(reversed(snapshots))
-    pre_existing_pending_ids = {
-        j.job_id for j in chronological[0][1] if j.partition == partition and j.state == "PENDING"
-    }
+    # Anything present at the baseline — RUNNING included — is
+    # pre-existing. A job that's RUNNING at baseline and later gets
+    # requeued/preempted into PENDING is NOT a new arrival; gating only
+    # on the PENDING baseline double-counts those flips and inflates the
+    # arrival rate on preemptable partitions.
+    pre_existing_pending_ids = {j.job_id for j in chronological[0][1] if j.partition == partition}
     seen_arrivals: set[str] = set()
     for _, queue in chronological[1:]:
         for j in queue:

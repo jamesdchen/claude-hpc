@@ -402,7 +402,7 @@ def record_prediction_sidecar(
     import os as _os
 
     tmp = path.with_suffix(path.suffix + f".tmp.{_os.getpid()}")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
     return path
 

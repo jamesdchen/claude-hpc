@@ -86,7 +86,14 @@ def write_cache(
         "fetched_at": now.isoformat(timespec="seconds"),
         "fairshare_by_user": fairshare_by_user,
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    # Atomic temp-and-rename — a SIGINT or concurrent writer could
+    # otherwise leave a half-written cache that the reader (silently)
+    # discards as malformed JSON, triggering redundant SSH probes.
+    import os as _os
+
+    tmp = path.with_suffix(path.suffix + f".tmp.{_os.getpid()}")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
     return path
 
 
