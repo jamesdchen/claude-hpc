@@ -1413,48 +1413,11 @@ def cmd_build_template(args: argparse.Namespace) -> int:
 # ─── subcommand: run ───────────────────────────────────────────────────────
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    """Run a workflow end to end in a fresh-context worker.
-
-    The code-orchestrated entrypoint: validates the fields, renders the
-    canonical worker prompt, invokes a worker, and returns its parsed
-    report. The spawn is emitted by code here — no PreToolUse hook
-    mediates this path. See hpc_agent._internal.run_workflow.
-    """
-    from hpc_agent._internal.run_workflow import run_workflow
-    from hpc_agent.atoms.spawn_prompt import SpawnContractError
-
-    try:
-        fields = json.loads(args.fields_json)
-    except json.JSONDecodeError as exc:
-        return _err(
-            error_code="spec_invalid",
-            message=f"--fields-json is not valid JSON: {exc}",
-            category="user",
-            retry_safe=False,
-        )
-    if not isinstance(fields, dict):
-        return _err(
-            error_code="spec_invalid",
-            message="--fields-json must be a JSON object",
-            category="user",
-            retry_safe=False,
-        )
-    try:
-        report, exit_code = run_workflow(
-            workflow=args.workflow,
-            experiment_dir=str(args.experiment_dir),
-            fields=fields,
-        )
-    except SpawnContractError as exc:
-        return _err(
-            error_code="spec_invalid",
-            message=str(exc),
-            category="user",
-            retry_safe=False,
-        )
-    _ok({"report": report.model_dump(), "worker_exit_code": exit_code})
-    return EXIT_OK
+# cmd_run now lives in :mod:`hpc_agent.cli.spawn` (Tier 3 CLI-only
+# orchestrator — no @primitive backing). Re-exported at the bottom of
+# this module so ``from hpc_agent.agent_cli import cmd_run`` keeps
+# resolving for existing tests and the ``set_defaults(func=cmd_run)``
+# argparse wiring in :mod:`hpc_agent.cli.spawn`.
 
 
 # ─── subcommand: describe ──────────────────────────────────────────────────
@@ -1565,6 +1528,15 @@ def _register_legacy_subcommands(
     group.
     """
     _ = nested_groups  # reserved for partial-group migrations; unused today.
+
+    # Tier 3 CLI-only orchestrators (no @primitive backing) — registered
+    # via their per-domain module so each lives next to its handler. The
+    # registry walk in :mod:`hpc_agent.cli.parser` cannot pick these up
+    # because they have no primitive entry, so registration happens here
+    # at the top of the legacy fallback.
+    from hpc_agent.cli.spawn import register as _register_spawn
+
+    _register_spawn(sub)
 
     # capabilities
     p_cap = sub.add_parser(
@@ -2622,35 +2594,10 @@ def _register_legacy_subcommands(
     )
     p_bt.set_defaults(func=cmd_build_template)
 
-    # run
-    p_run = sub.add_parser(
-        "run",
-        help=(
-            "Run a workflow (submit / status / aggregate) end to end in a "
-            "fresh-context worker — the code-orchestrated entrypoint. "
-            "Renders the canonical prompt, invokes a worker, returns its "
-            "parsed report. Campaign is a loop; use hpc-campaign-driver."
-        ),
-    )
-    _add_experiment_dir(p_run)
-    p_run.add_argument(
-        "--workflow",
-        required=True,
-        # campaign is excluded: it is a loop driven tick-by-tick by
-        # hpc-campaign-driver, not a single run.
-        choices=["submit", "status", "aggregate"],
-        help="Which workflow the fresh-context worker will run.",
-    )
-    p_run.add_argument(
-        "--fields-json",
-        type=str,
-        default="{}",
-        help=(
-            "Inline JSON object of the invocation's resolved fields "
-            "(interview answers). Default: '{}'."
-        ),
-    )
-    p_run.set_defaults(func=cmd_run)
+    # run — registered via the Tier 3 module hpc_agent.cli.spawn (called
+    # near the top of this function so the verb appears alongside legacy
+    # siblings without contention with the registry walk in
+    # hpc_agent.cli.parser).
 
     # describe
     p_describe = sub.add_parser(
@@ -2797,6 +2744,8 @@ def main(argv: list[str] | None = None) -> int:
         # values. Wrap so callers see a uniform shape.
         return _err_from_hpc(errors.HpcError(f"{type(exc).__name__}: {exc}"))
 
+
+from hpc_agent.cli.spawn import cmd_run  # noqa: F401, E402
 
 if __name__ == "__main__":
     sys.exit(main())
