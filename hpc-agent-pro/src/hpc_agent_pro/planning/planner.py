@@ -528,7 +528,16 @@ def _eta_via_test_only_with_resources(
     # We omit --array because the ETA only depends on the resource ask
     # for a single task, and the combination of --wrap and --array can
     # be rejected by some SLURM configurations.
-    constraint_flag = "" if constraint == "<cpu-only>" else f"--constraint={constraint!r}"
+    # ``shlex.quote`` (not ``!r``) — ``repr()`` switches to double-quoted
+    # output when the string contains an apostrophe, and bash double
+    # quotes still allow ``$(...)`` command substitution. A candidate
+    # value like ``"a100'$(curl … | sh)'"`` would have been executed
+    # remotely under the old f-string.
+    import shlex as _shlex
+
+    constraint_flag = (
+        "" if constraint == "<cpu-only>" else f"--constraint={_shlex.quote(constraint)}"
+    )
     time_flag = _format_walltime_for_sbatch(walltime_sec)
     cmd = (
         f"sbatch --test-only --time={time_flag} --mem={int(mem_mb)}M "
