@@ -173,9 +173,7 @@ class TestWalltimeSplitEscalation:
         # NOT auto-applied — the spec's walltime_sec is untouched.
         assert result.refined_spec["walltime_sec"] == 14400
 
-        confirm_decisions = [
-            d for d in result.decisions if d["point"] == "walltime_split_confirm"
-        ]
+        confirm_decisions = [d for d in result.decisions if d["point"] == "walltime_split_confirm"]
         assert len(confirm_decisions) == 1
         d = confirm_decisions[0]
         assert d["outcome"] == "pending"

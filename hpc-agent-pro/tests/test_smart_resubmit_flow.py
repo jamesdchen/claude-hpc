@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # -----------------------------------------------------------------------------
 # plan-resubmit-overrides — wire-model round-trip
 # -----------------------------------------------------------------------------
@@ -75,9 +74,7 @@ def test_plan_resubmit_overrides_primitive_serializes_via_model_dump(tmp_path):
         cold_start=False,
         daisy_chain_required=False,
     )
-    spec = PlanResubmitOverridesSpec(
-        profile="p", cluster="c", base_overrides={"mem_mb": 16_000}
-    )
+    spec = PlanResubmitOverridesSpec(profile="p", cluster="c", base_overrides={"mem_mb": 16_000})
     with patch.object(
         resubmit_planner,
         "plan_resubmit_overrides",
@@ -145,7 +142,9 @@ def test_smart_resubmit_flow_calls_both_halves(tmp_path):
 
     with (
         patch("hpc_agent.state.journal.load_run", return_value=record) as mock_load,
-        patch.object(srf_mod, "plan_resubmit_overrides_primitive", return_value=refined) as mock_plan,
+        patch.object(
+            srf_mod, "plan_resubmit_overrides_primitive", return_value=refined
+        ) as mock_plan,
         patch(
             "hpc_agent.ops.recover.runner.resubmit_failed",
             return_value=(record_after, False, "rs_abc123"),
@@ -179,6 +178,7 @@ def test_smart_resubmit_flow_calls_both_halves(tmp_path):
 def test_smart_resubmit_flow_raises_when_no_journal_record(tmp_path):
     """A missing run_id surfaces as SpecInvalid — caller's bug, not internal."""
     from hpc_agent import errors
+
     from hpc_agent_pro import smart_resubmit_flow as srf_mod
     from hpc_agent_pro._schema_models.workflows.smart_resubmit_flow import (
         SmartResubmitFlowSpec,
@@ -190,9 +190,11 @@ def test_smart_resubmit_flow_raises_when_no_journal_record(tmp_path):
         category="system_oom",
         base_overrides=None,
     )
-    with patch("hpc_agent.state.journal.load_run", return_value=None):
-        with pytest.raises(errors.SpecInvalid, match="no journal record"):
-            srf_mod.smart_resubmit_flow(tmp_path, spec=spec)
+    with (
+        patch("hpc_agent.state.journal.load_run", return_value=None),
+        pytest.raises(errors.SpecInvalid, match="no journal record"),
+    ):
+        srf_mod.smart_resubmit_flow(tmp_path, spec=spec)
 
 
 # -----------------------------------------------------------------------------

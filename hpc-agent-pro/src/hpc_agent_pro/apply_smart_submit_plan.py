@@ -106,8 +106,7 @@ def apply_smart_submit_plan(
     candidates = envelope.get("candidates") or []
     if not isinstance(candidates, list):
         raise errors.SpecInvalid(
-            "score_submit_plan_envelope.candidates must be a list; got "
-            f"{type(candidates).__name__}"
+            f"score_submit_plan_envelope.candidates must be a list; got {type(candidates).__name__}"
         )
     pick = _find_auto_pick_candidate(candidates)
     if pick is not None:

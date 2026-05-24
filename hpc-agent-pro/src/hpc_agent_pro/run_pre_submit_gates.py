@@ -197,8 +197,5 @@ def run_pre_submit_gates(
 
     # Overall verdict: ``skipped`` only if every gate was skipped;
     # otherwise ``ok`` (we already returned ``blocked`` on any failure).
-    if all(g.status == "skipped" for g in gates.values()):
-        overall = "skipped"
-    else:
-        overall = "ok"
+    overall = "skipped" if all(g.status == "skipped" for g in gates.values()) else "ok"
     return RunPreSubmitGatesResult(gates=gates, overall=overall)

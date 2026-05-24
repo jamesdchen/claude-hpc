@@ -4,13 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from hpc_agent_pro._schema_models.workflows.run_pre_submit_gates import (
     RunPreSubmitGatesSpec,
 )
 from hpc_agent_pro.run_pre_submit_gates import run_pre_submit_gates
-
 
 # -----------------------------------------------------------------------------
 # Helpers — fake envelopes for each composed primitive.
