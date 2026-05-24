@@ -56,6 +56,10 @@ primitive_modules: tuple[str, ...] = (
     "hpc_agent_pro.atoms.walltime_drift",
     # validate — scheduler --test-only probe wrapper.
     "hpc_agent_pro.planning.validate",
+    # plan-resubmit-overrides — promoted free function → pro primitive.
+    "hpc_agent_pro.planning.resubmit_planner",
+    # smart-resubmit-flow — workflow composing pro's planner + core's resubmit-failed.
+    "hpc_agent_pro.smart_resubmit_flow",
 )
 
 
@@ -506,3 +510,10 @@ def register_cli(subparsers: Any) -> None:
     p_bsw.add_argument("--within-hours", type=int, default=24)
     p_bsw.add_argument("--top-k", type=int, default=5)
     p_bsw.set_defaults(func=cmd_best_submit_window)
+
+    # NOTE: ``plan-resubmit-overrides`` and ``smart-resubmit-flow`` are
+    # registered automatically via the registry walk in
+    # ``hpc_agent.cli.parser._register_from_registry`` because their
+    # primitives declare a :class:`CliShape` (rather than the legacy
+    # ``cli="<string>"`` form used by the other pro atoms above).
+    # No explicit ``add_parser`` block is needed for those.

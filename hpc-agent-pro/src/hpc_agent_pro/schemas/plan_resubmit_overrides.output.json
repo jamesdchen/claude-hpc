@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/plan_resubmit_overrides.output.json",
+  "title": "plan-resubmit-overrides output data",
+  "type": "object",
+  "required": [
+    "overrides"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "overrides": {
+      "description": "The adjusted override dict to hand to ``resubmit-failed``.",
+      "title": "Overrides",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "rationales": {
+      "default": {},
+      "description": "One short-string explanation per knob the planner touched.",
+      "title": "Rationales",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "cold_start": {
+      "default": false,
+      "description": "True when the (profile, cluster) pair has fewer than MIN_PRIOR_SAMPLES successful samples.",
+      "title": "Cold Start",
+      "type": "boolean"
+    },
+    "daisy_chain_required": {
+      "default": false,
+      "description": "Advisory flag: the post-arbitrage walltime ask exceeds the cluster's hard ceiling.",
+      "title": "Daisy Chain Required",
+      "type": "boolean"
+    }
+  }
+}
