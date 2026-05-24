@@ -37,8 +37,8 @@ import subprocess
 from typing import TYPE_CHECKING, Any
 
 from hpc_agent import errors
-from hpc_agent._internal.primitive import SideEffect, primitive
-from hpc_agent._internal.time import utcnow_iso
+from hpc_agent._kernel.registry.primitive import SideEffect, primitive
+from hpc_agent.infra.time import utcnow_iso
 
 if TYPE_CHECKING:
     from pathlib import Path

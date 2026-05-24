@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from hpc_agent._internal.time import parse_iso_utc, utcnow
+from hpc_agent.infra.time import parse_iso_utc, utcnow
 
 __all__ = [
     "format_walltime_for_sbatch",

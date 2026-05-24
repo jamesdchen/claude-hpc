@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from hpc_agent import errors
-from hpc_agent._internal.primitive import primitive
+from hpc_agent._kernel.registry.primitive import primitive
 from hpc_agent.state.runtime_prior import roll_up_quantiles as _roll_up_quantiles
 
 if TYPE_CHECKING:

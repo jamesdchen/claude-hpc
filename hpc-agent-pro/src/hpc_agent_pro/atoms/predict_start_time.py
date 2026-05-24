@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hpc_agent import errors
-from hpc_agent._internal.primitive import primitive
+from hpc_agent._kernel.registry.primitive import primitive
 
 from hpc_agent_pro._schema_models.queries.predict_start_time import (
     PredictStartTimeResult,

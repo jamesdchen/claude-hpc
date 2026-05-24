@@ -127,7 +127,7 @@ def recommend_resubmit_window(
     # The earlier formulation ``submit_now_wait - best.predicted_wait_sec``
     # ignored the wait-until-submit interval, so a 6h delay to save 90min
     # of queue wait got reported as "savings = 90min" instead of "loss = 4.5h".
-    from hpc_agent._internal.time import parse_iso_utc_or_none, utcnow
+    from hpc_agent.infra.time import parse_iso_utc_or_none, utcnow
 
     best_submit_dt = parse_iso_utc_or_none(best.submit_iso)
     if best_submit_dt is None:

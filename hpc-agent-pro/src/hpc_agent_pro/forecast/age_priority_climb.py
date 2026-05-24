@@ -55,7 +55,7 @@ def _to_dt(iso: str) -> datetime | None:
     # naive (legacy journals) and aware (current writers) ISO strings,
     # and sorting a mixed list crashes with TypeError. Routing through
     # parse_iso_utc_or_none guarantees every datetime is in UTC.
-    from hpc_agent._internal.time import parse_iso_utc_or_none
+    from hpc_agent.infra.time import parse_iso_utc_or_none
 
     return parse_iso_utc_or_none(iso)
 

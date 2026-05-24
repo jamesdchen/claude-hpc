@@ -2,7 +2,7 @@
 
 Discovered by the host ``hpc-agent`` package through the
 ``hpc_agent.plugins`` entry-point group (see
-``hpc_agent._internal.plugins``). The host resolves the entry point via
+``hpc_agent._kernel.registry.plugins``). The host resolves the entry point via
 ``ep.load()`` and reads two optional attributes off the result with
 ``getattr``:
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 # decorators self-register into the shared registry.
 #
 # ORDERING mirrors the relative order of the moved entries in the public
-# package's ``hpc_agent._internal.primitive._PRIMITIVE_MODULES`` tuple:
+# package's ``hpc_agent._kernel.registry.primitive._PRIMITIVE_MODULES`` tuple:
 # atoms / leaf modules precede any composite that references them. None
 # of the moved primitives declare ``composes=``, so the order is not
 # load-critical here, but keeping it faithful avoids surprises if a
@@ -73,7 +73,7 @@ slash_command_assets = files("hpc_agent_pro") / "slash_commands"
 #
 # Worker prompts are the deterministic text the spawn pipeline inlines
 # into the cacheable prefix shipped to ``claude -p --bare`` workers (see
-# ``hpc_agent.atoms.spawn_prompt._procedure_body``). They are NOT Claude
+# ``hpc_agent._kernel.extension.spawn_prompt._procedure_body``). They are NOT Claude
 # Code skills — the headless worker has no Skill tool, so the procedure
 # travels inside the prompt. A plugin overlays a procedure by exposing
 # this attribute; the first plugin to provide ``<workflow>.md`` wins,
