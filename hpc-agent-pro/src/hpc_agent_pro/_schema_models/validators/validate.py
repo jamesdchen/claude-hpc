@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from hpc_agent._schema_models._shared import Scheduler
+from hpc_agent._wire._shared import Scheduler
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class ValidateSpec(BaseModel):
-    """Kwargs contract for ``hpc_agent.planning.validate.validate_submission``.
+    """Kwargs contract for ``hpc_agent_pro.planning.validate.validate_submission``.
 
     Probes the scheduler's --test-only mode for the resource ask and
     returns the predicted submission timing. No submit side effect.

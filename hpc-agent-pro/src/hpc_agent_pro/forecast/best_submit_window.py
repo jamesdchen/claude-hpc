@@ -23,8 +23,8 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 from hpc_agent import errors
-from hpc_agent._internal.primitive import primitive
-from hpc_agent._internal.time import utcnow
+from hpc_agent._kernel.registry.primitive import primitive
+from hpc_agent.infra.time import utcnow
 
 from hpc_agent_pro._schema_models.queries.best_submit_window import BestSubmitWindowSpec
 from hpc_agent_pro.forecast.queue_wait_baseline import predict_queue_wait

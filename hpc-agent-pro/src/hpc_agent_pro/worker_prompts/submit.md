@@ -62,7 +62,7 @@ For multi-executor submissions sharing `(ssh_target, remote_path)`, build a **ba
 The task list lives in user-written `.hpc/tasks.py` (`total()` + `resolve(task_id)`). Step 6 scaffolds it once per experiment; from then on it is committed and reused on every submit. There are two shapes, and Step 3 decides which:
 
 - **Cartesian grid** — each task is one independent cell of a parameter grid. `tasks_example.py` Pattern 1; scaffolded deterministically by [build-tasks-py](../../docs/primitives/build-tasks-py.md) at Step 6b. The 80% case.
-- **Planner-driven** — the executor iterates a *totally-ordered series* (a walk-forward backtest, an online-learning scan) and you want to fan that series out. Splitting a *stateful* series computation is only correct if each chunk replays the right warm-up; hpc-agent owns that via `hpc_agent.template.plan_tasks`. Emitted by [build-tasks-py](../../docs/primitives/build-tasks-py.md) when the spec carries a `data_axis` (Step 3b's classification).
+- **Planner-driven** — the executor iterates a *totally-ordered series* (a walk-forward backtest, an online-learning scan) and you want to fan that series out. Splitting a *stateful* series computation is only correct if each chunk replays the right warm-up; hpc-agent owns that via `hpc_agent.incorporation.template.plan_tasks`. Emitted by [build-tasks-py](../../docs/primitives/build-tasks-py.md) when the spec carries a `data_axis` (Step 3b's classification).
 
 ### 3a: Detect a series axis
 
@@ -70,7 +70,7 @@ Read `compute()` / the `@register_run` function and its call graph — the same 
 
 ### 3b: Classify the `DataAxis`
 
-The experiment declares nothing about parallelism — you classify it. The one question: **does the loop carry state, and is the state transition associative?** (Full model: `hpc_agent/template/axis.py`. The same classification reference lives in [build-tasks-py.md](../../docs/primitives/build-tasks-py.md) so an integrator driving `build-tasks-py` directly — without this procedure — gets the identical guidance.)
+The experiment declares nothing about parallelism — you classify it. The one question: **does the loop carry state, and is the state transition associative?** (Full model: `hpc_agent/incorporation/template/axis.py`. The same classification reference lives in [build-tasks-py.md](../../docs/primitives/build-tasks-py.md) so an integrator driving `build-tasks-py` directly — without this procedure — gets the identical guidance.)
 
 | Observation in `run()` | `DataAxis` | Halo |
 |---|---|---|
@@ -86,7 +86,7 @@ Inference is **never trusted unverified** — classifying data dependencies is r
 
 ### 3c: Serial-elision gate (mandatory for a non-`Sequential` axis)
 
-Before scaffolding a planner-driven `tasks.py`, prove the classification on a fixture: `hpc_agent.template.check_elision` (or `assert_elision_equivalent`) runs the experiment once whole and once split N ways and asserts the results agree. If it fails, the axis is misclassified — widen the halo or fall back to `Sequential()`. This gate is what makes the inference safe: a misclassified axis produces a job that runs fine and returns plausible-but-wrong numbers, and nothing else catches it. Do not skip it, and recommend the experiment repo wire `assert_elision_equivalent` into its CI as a required check.
+Before scaffolding a planner-driven `tasks.py`, prove the classification on a fixture: `hpc_agent.incorporation.template.check_elision` (or `assert_elision_equivalent`) runs the experiment once whole and once split N ways and asserts the results agree. If it fails, the axis is misclassified — widen the halo or fall back to `Sequential()`. This gate is what makes the inference safe: a misclassified axis produces a job that runs fine and returns plausible-but-wrong numbers, and nothing else catches it. Do not skip it, and recommend the experiment repo wire `assert_elision_equivalent` into its CI as a required check.
 
 If the projected task count exceeds `constraints.max_tasks` or ~1000, record a `magnitude_warning` in `decisions` / `anomalies` so the caller can confirm with the user before proceeding.
 
@@ -136,7 +136,7 @@ After a *successful* canary, re-invoke score-submit-plan and proceed to 4c-B.
 
 **Auto-apply rule** (cluster-wide): apply `array_reshape.recommended_max_array_size` automatically when present. Do NOT auto-apply `walltime_split` — record `walltime_split_pending` in `decisions` and stop; the caller must confirm the executor checkpoints before chaining (`requires_checkpointing: true` would otherwise kill work at every segment boundary).
 
-After submission, write a prediction sidecar via `hpc_agent.forecast.calibration.record_prediction_sidecar` so post-completion ingestion can validate the calibration.
+After submission, write a prediction sidecar via `hpc_agent_pro.forecast.calibration.record_prediction_sidecar` so post-completion ingestion can validate the calibration.
 
 For each chosen candidate's `stressed_nodes`, record the `co_tenants` context in `decisions` per node so the caller can decide whether to soft-exclude. The caller re-invokes with the resulting `--exclude=<node1>,...` flag in `fields` and the procedure adds it to the sbatch invocation.
 

@@ -21,12 +21,12 @@ classifiers = [
 ]
 dependencies = [
     # The host package — this plugin imports hpc_agent.errors,
-    # hpc_agent._internal.*, hpc_agent.infra.*, hpc_agent.state.* and
-    # the public _schema_models shared types at runtime. Pinned to a
+    # hpc_agent._kernel.*, hpc_agent.infra.*, hpc_agent.state.* and
+    # the public _wire shared types at runtime. Pinned to a
     # compatible host range — the plugin depends on hpc_agent internals
     # (the @primitive seam, infra.inspect, state.runtime_prior) that are
     # only contract-stable within a minor series.
-    "hpc-agent>=0.4,<0.5",
+    "hpc-agent>=0.4",
     # Pydantic v2 Spec / Result models for the moved primitives.
     "pydantic>=2.6",
     # Cross-file $ref resolution for the copied JSON schemas
@@ -62,7 +62,7 @@ Repository = "https://github.com/jamesdchen/hpc-agent"
 
 # Local dev only: resolve the host package from the sibling directory
 # in the monorepo. The built wheel still declares the registry
-# dependency ``hpc-agent>=0.3,<0.4`` — this table is not packaged.
+# dependency ``hpc-agent>=0.4`` — this table is not packaged.
 [tool.uv.sources]
 hpc-agent = { path = "..", editable = true }
 

@@ -37,8 +37,8 @@ from typing import Any
 # invocations need the explicit insert).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from hpc_agent._internal.time import parse_iso_utc_or_none
 from hpc_agent.infra.inspect import read_cluster_history
+from hpc_agent.infra.time import parse_iso_utc_or_none
 from hpc_agent.state.runtime_prior import read_samples
 
 from hpc_agent_pro.forecast.queue_simulator import SimJob, simulate_distribution

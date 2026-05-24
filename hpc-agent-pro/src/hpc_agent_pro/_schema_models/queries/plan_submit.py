@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hpc_agent._schema_models._shared import Scheduler
+from hpc_agent._wire._shared import Scheduler
 from pydantic import BaseModel, ConfigDict, Field
 
 

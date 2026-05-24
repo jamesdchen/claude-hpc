@@ -34,7 +34,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hpc_agent._internal.time import parse_iso_utc, utcnow_iso
+from hpc_agent.infra.time import parse_iso_utc, utcnow_iso
 from hpc_agent.state.runtime_prior import coerce_pos_int as _coerce_pos_int
 
 __all__ = [

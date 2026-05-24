@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hpc_agent._internal.primitive import SideEffect, primitive
+from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent.infra.clusters import load_clusters_config
 
 from hpc_agent_pro._schema_models.validators.validate import ValidateResult, ValidateSpec
@@ -87,7 +87,7 @@ def validate_submission(experiment_dir: Path, *, spec: ValidateSpec) -> Validate
     else:
         from datetime import datetime, timezone
 
-        from hpc_agent._internal.time import utcnow
+        from hpc_agent.infra.time import utcnow
 
         ts = utcnow().timestamp() + int(eta_sec)
         estimated_start_iso = datetime.fromtimestamp(ts, tz=timezone.utc).strftime(

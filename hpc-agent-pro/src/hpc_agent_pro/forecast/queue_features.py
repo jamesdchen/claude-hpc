@@ -43,7 +43,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from hpc_agent._internal.time import parse_iso_utc_or_none, utcnow
+from hpc_agent.infra.time import parse_iso_utc_or_none, utcnow
 
 if TYPE_CHECKING:
     from hpc_agent.infra.inspect import ClusterSnapshot, NodeSnapshot
