@@ -8,7 +8,7 @@ other category we silently re-queue at the current time — even when
 the queue-wait baseline says the next hour is much cheaper.
 
 :func:`recommend_resubmit_window` closes that gap.  It is pure and
-opt-in: callers (currently :func:`hpc_agent.agent_cli.cmd_resubmit` when
+opt-in: callers (currently :func:`hpc_agent.cli.recover.cmd_resubmit` when
 ``consult_forecast: true`` is set on the spec) compare the "submit
 now" predicted wait against the best window in the next horizon and
 get back a single recommendation dict.  The advisor never blocks the

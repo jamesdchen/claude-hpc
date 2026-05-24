@@ -94,7 +94,7 @@ slash_command_assets = files("hpc_agent_pro") / "slash_commands"
 worker_prompt_assets = files("hpc_agent_pro") / "worker_prompts"
 
 
-# ─── CLI helpers (mirrored from hpc_agent.agent_cli) ───────────────────────
+# ─── CLI helpers (mirrored from hpc_agent.cli._helpers) ───────────────────
 
 
 def _add_experiment_dir(parser: argparse.ArgumentParser) -> None:
@@ -123,15 +123,15 @@ def _add_profile_cluster_cmdsha(
 
 # ─── subcommand dispatchers ────────────────────────────────────────────────
 #
-# Each ``cmd_*`` adapter reuses the public package's ``agent_cli`` output
-# helpers (``_ok``, ``_load_spec``, ``_validate_against_schema``,
+# Each ``cmd_*`` adapter reuses the public package's ``cli._helpers``
+# output helpers (``_ok``, ``_load_spec``, ``_validate_against_schema``,
 # ``_require_ssh_agent``, ``EXIT_OK``) and the public ``errors`` module so
 # the envelope contract is identical to the in-tree subcommands.
 
 
 def cmd_predict_start_time(args: argparse.Namespace) -> int:
     from hpc_agent import errors
-    from hpc_agent.agent_cli import EXIT_OK, _load_spec, _ok
+    from hpc_agent.cli._helpers import EXIT_OK, _load_spec, _ok
 
     from hpc_agent_pro._schema_models.queries.predict_start_time import PredictStartTimeSpec
     from hpc_agent_pro.atoms.predict_start_time import predict_start_time_primitive
@@ -151,7 +151,7 @@ def cmd_predict_start_time(args: argparse.Namespace) -> int:
 
 
 def cmd_inspect_cluster(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok, _require_ssh_agent
+    from hpc_agent.cli._helpers import EXIT_OK, _ok, _require_ssh_agent
 
     from hpc_agent_pro.commands.inspect_cluster import inspect_cluster
 
@@ -171,7 +171,7 @@ def cmd_inspect_cluster(args: argparse.Namespace) -> int:
 
 
 def cmd_runtime_prior(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok
+    from hpc_agent.cli._helpers import EXIT_OK, _ok
 
     from hpc_agent_pro.commands.read_runtime_prior import roll_up_quantiles
 
@@ -186,7 +186,7 @@ def cmd_runtime_prior(args: argparse.Namespace) -> int:
 
 
 def cmd_plan_submit(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok, _require_ssh_agent
+    from hpc_agent.cli._helpers import EXIT_OK, _ok, _require_ssh_agent
 
     from hpc_agent_pro.planning.planner import plan_submit
 
@@ -212,7 +212,7 @@ def cmd_plan_submit(args: argparse.Namespace) -> int:
 
 
 def cmd_walltime_drift(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok
+    from hpc_agent.cli._helpers import EXIT_OK, _ok
 
     from hpc_agent_pro.atoms.walltime_drift import walltime_drift
 
@@ -230,7 +230,7 @@ def cmd_walltime_drift(args: argparse.Namespace) -> int:
 
 
 def cmd_house_edge(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok
+    from hpc_agent.cli._helpers import EXIT_OK, _ok
 
     from hpc_agent_pro.atoms.house_edge import house_edge
 
@@ -249,7 +249,7 @@ def cmd_house_edge(args: argparse.Namespace) -> int:
 def cmd_predict_queue_wait(args: argparse.Namespace) -> int:
     from typing import Any as _Any
 
-    from hpc_agent.agent_cli import EXIT_OK, _ok, _validate_against_schema
+    from hpc_agent.cli._helpers import EXIT_OK, _ok, _validate_against_schema
 
     from hpc_agent_pro._schema_models.queries.predict_queue_wait import PredictQueueWaitSpec
     from hpc_agent_pro.forecast.queue_wait_baseline import predict_queue_wait
@@ -272,7 +272,7 @@ def cmd_predict_queue_wait(args: argparse.Namespace) -> int:
 
 
 def cmd_best_submit_window(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok, _validate_against_schema
+    from hpc_agent.cli._helpers import EXIT_OK, _ok, _validate_against_schema
 
     from hpc_agent_pro._schema_models.queries.best_submit_window import BestSubmitWindowSpec
     from hpc_agent_pro.forecast.best_submit_window import best_submit_windows
@@ -304,15 +304,15 @@ def register_cli(subparsers: Any) -> None:
 
     *subparsers* is argparse's ``_SubParsersAction`` from the host CLI.
     Each ``add_parser`` block is a faithful copy of the corresponding
-    block in ``hpc_agent.agent_cli`` so the plugin subcommands present
-    an identical interface to the ones the public CLI used to ship.
+    block in the core ``hpc_agent.cli`` modules so the plugin subcommands
+    present an identical interface to the ones the public CLI used to ship.
 
     Coverage note: ``inspect-cluster``, ``read-runtime-prior`` (CLI name
     ``runtime-prior``), ``plan-submit``, ``predict-start-time``,
     ``predict-queue-wait``, ``best-submit-window``, ``walltime-drift``
     and ``house-edge`` are wired here. The ``validate`` and
     ``recommend-wait-alternative`` primitives have no standalone CLI
-    subcommand in the public ``agent_cli`` (no ``add_parser`` block,
+    subcommand in the core ``hpc_agent.cli`` tree (no ``add_parser`` block,
     no ``cli=`` on the decorator), so none is added here either —
     matching the public surface.
     """
