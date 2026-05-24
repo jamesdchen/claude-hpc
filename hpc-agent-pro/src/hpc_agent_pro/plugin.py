@@ -56,6 +56,14 @@ primitive_modules: tuple[str, ...] = (
     "hpc_agent_pro.atoms.walltime_drift",
     # validate — scheduler --test-only probe wrapper.
     "hpc_agent_pro.planning.validate",
+    # plan-resubmit-overrides — promoted free function → pro primitive.
+    "hpc_agent_pro.planning.resubmit_planner",
+    # smart-resubmit-flow — workflow composing pro's planner + core's resubmit-failed.
+    "hpc_agent_pro.smart_resubmit_flow",
+    # apply-smart-submit-plan — code-ified Step 4c-B of submit.md.
+    "hpc_agent_pro.apply_smart_submit_plan",
+    # run-pre-submit-gates — code-ified Steps 6b/6c/6d of submit.md.
+    "hpc_agent_pro.run_pre_submit_gates",
 )
 
 
@@ -86,7 +94,7 @@ slash_command_assets = files("hpc_agent_pro") / "slash_commands"
 worker_prompt_assets = files("hpc_agent_pro") / "worker_prompts"
 
 
-# ─── CLI helpers (mirrored from hpc_agent.agent_cli) ───────────────────────
+# ─── CLI helpers (mirrored from hpc_agent.cli._helpers) ───────────────────
 
 
 def _add_experiment_dir(parser: argparse.ArgumentParser) -> None:
@@ -115,15 +123,15 @@ def _add_profile_cluster_cmdsha(
 
 # ─── subcommand dispatchers ────────────────────────────────────────────────
 #
-# Each ``cmd_*`` adapter reuses the public package's ``agent_cli`` output
-# helpers (``_ok``, ``_load_spec``, ``_validate_against_schema``,
+# Each ``cmd_*`` adapter reuses the public package's ``cli._helpers``
+# output helpers (``_ok``, ``_load_spec``, ``_validate_against_schema``,
 # ``_require_ssh_agent``, ``EXIT_OK``) and the public ``errors`` module so
 # the envelope contract is identical to the in-tree subcommands.
 
 
 def cmd_predict_start_time(args: argparse.Namespace) -> int:
     from hpc_agent import errors
-    from hpc_agent.agent_cli import EXIT_OK, _load_spec, _ok
+    from hpc_agent.cli._helpers import EXIT_OK, _load_spec, _ok
 
     from hpc_agent_pro._schema_models.queries.predict_start_time import PredictStartTimeSpec
     from hpc_agent_pro.atoms.predict_start_time import predict_start_time_primitive
@@ -143,7 +151,7 @@ def cmd_predict_start_time(args: argparse.Namespace) -> int:
 
 
 def cmd_inspect_cluster(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok, _require_ssh_agent
+    from hpc_agent.cli._helpers import EXIT_OK, _ok, _require_ssh_agent
 
     from hpc_agent_pro.commands.inspect_cluster import inspect_cluster
 
@@ -163,7 +171,7 @@ def cmd_inspect_cluster(args: argparse.Namespace) -> int:
 
 
 def cmd_runtime_prior(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok
+    from hpc_agent.cli._helpers import EXIT_OK, _ok
 
     from hpc_agent_pro.commands.read_runtime_prior import roll_up_quantiles
 
@@ -178,7 +186,7 @@ def cmd_runtime_prior(args: argparse.Namespace) -> int:
 
 
 def cmd_plan_submit(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok, _require_ssh_agent
+    from hpc_agent.cli._helpers import EXIT_OK, _ok, _require_ssh_agent
 
     from hpc_agent_pro.planning.planner import plan_submit
 
@@ -204,7 +212,7 @@ def cmd_plan_submit(args: argparse.Namespace) -> int:
 
 
 def cmd_walltime_drift(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok
+    from hpc_agent.cli._helpers import EXIT_OK, _ok
 
     from hpc_agent_pro.atoms.walltime_drift import walltime_drift
 
@@ -222,7 +230,7 @@ def cmd_walltime_drift(args: argparse.Namespace) -> int:
 
 
 def cmd_house_edge(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok
+    from hpc_agent.cli._helpers import EXIT_OK, _ok
 
     from hpc_agent_pro.atoms.house_edge import house_edge
 
@@ -241,7 +249,7 @@ def cmd_house_edge(args: argparse.Namespace) -> int:
 def cmd_predict_queue_wait(args: argparse.Namespace) -> int:
     from typing import Any as _Any
 
-    from hpc_agent.agent_cli import EXIT_OK, _ok, _validate_against_schema
+    from hpc_agent.cli._helpers import EXIT_OK, _ok, _validate_against_schema
 
     from hpc_agent_pro._schema_models.queries.predict_queue_wait import PredictQueueWaitSpec
     from hpc_agent_pro.forecast.queue_wait_baseline import predict_queue_wait
@@ -264,7 +272,7 @@ def cmd_predict_queue_wait(args: argparse.Namespace) -> int:
 
 
 def cmd_best_submit_window(args: argparse.Namespace) -> int:
-    from hpc_agent.agent_cli import EXIT_OK, _ok, _validate_against_schema
+    from hpc_agent.cli._helpers import EXIT_OK, _ok, _validate_against_schema
 
     from hpc_agent_pro._schema_models.queries.best_submit_window import BestSubmitWindowSpec
     from hpc_agent_pro.forecast.best_submit_window import best_submit_windows
@@ -296,15 +304,15 @@ def register_cli(subparsers: Any) -> None:
 
     *subparsers* is argparse's ``_SubParsersAction`` from the host CLI.
     Each ``add_parser`` block is a faithful copy of the corresponding
-    block in ``hpc_agent.agent_cli`` so the plugin subcommands present
-    an identical interface to the ones the public CLI used to ship.
+    block in the core ``hpc_agent.cli`` modules so the plugin subcommands
+    present an identical interface to the ones the public CLI used to ship.
 
     Coverage note: ``inspect-cluster``, ``read-runtime-prior`` (CLI name
     ``runtime-prior``), ``plan-submit``, ``predict-start-time``,
     ``predict-queue-wait``, ``best-submit-window``, ``walltime-drift``
     and ``house-edge`` are wired here. The ``validate`` and
     ``recommend-wait-alternative`` primitives have no standalone CLI
-    subcommand in the public ``agent_cli`` (no ``add_parser`` block,
+    subcommand in the core ``hpc_agent.cli`` tree (no ``add_parser`` block,
     no ``cli=`` on the decorator), so none is added here either —
     matching the public surface.
     """
@@ -506,3 +514,11 @@ def register_cli(subparsers: Any) -> None:
     p_bsw.add_argument("--within-hours", type=int, default=24)
     p_bsw.add_argument("--top-k", type=int, default=5)
     p_bsw.set_defaults(func=cmd_best_submit_window)
+
+    # NOTE: ``plan-resubmit-overrides``, ``smart-resubmit-flow``,
+    # ``apply-smart-submit-plan``, and ``run-pre-submit-gates`` are
+    # registered automatically via the registry walk in
+    # ``hpc_agent.cli.parser._register_from_registry`` because their
+    # primitives declare a :class:`CliShape` (rather than the legacy
+    # ``cli="<string>"`` form used by the other pro atoms above).
+    # No explicit ``add_parser`` block is needed for those.

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/run_pre_submit_gates.output.json",
+  "title": "run-pre-submit-gates output data",
+  "type": "object",
+  "required": [
+    "gates",
+    "overall"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gates": {
+      "description": "Per-gate outcome.",
+      "title": "Gates",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status"],
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": ["ok", "skipped", "failed"],
+            "type": "string"
+          },
+          "envelope": {
+            "anyOf": [
+              {"type": "object", "additionalProperties": true},
+              {"type": "null"}
+            ]
+          }
+        }
+      }
+    },
+    "overall": {
+      "enum": ["ok", "blocked", "skipped"],
+      "title": "Overall",
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/plan_resubmit_overrides.input.json",
+  "title": "plan-resubmit-overrides input spec",
+  "type": "object",
+  "required": [
+    "profile",
+    "cluster"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "profile": {
+      "description": "Runtime-prior bucket key (profile).",
+      "minLength": 1,
+      "title": "Profile",
+      "type": "string"
+    },
+    "cluster": {
+      "description": "Runtime-prior bucket key (cluster).",
+      "minLength": 1,
+      "title": "Cluster",
+      "type": "string"
+    },
+    "base_overrides": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The caller's requested overrides (typically ``{mem_mb, walltime_sec}``). ``None`` is treated as an empty dict.",
+      "title": "Base Overrides"
+    }
+  }
+}

@@ -40,6 +40,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from hpc_agent import errors
+from hpc_agent._kernel.registry.primitive import primitive
+from hpc_agent.cli._dispatch import CliShape, SchemaRef
 from hpc_agent.infra.clusters import (
     get_auto_daisy_chain,
     get_cold_start_mem_buffer,
@@ -50,6 +53,10 @@ from hpc_agent.infra.clusters import (
 )
 from hpc_agent.state.runtime_prior import read_samples
 
+from hpc_agent_pro._schema_models.queries.plan_resubmit_overrides import (
+    PlanResubmitOverridesResult,
+    PlanResubmitOverridesSpec,
+)
 from hpc_agent_pro.atoms.walltime_arbitrage import arbitrage_walltime
 from hpc_agent_pro.planning.daisy_chain import should_daisy_chain
 
@@ -60,6 +67,7 @@ __all__ = [
     "MIN_PRIOR_SAMPLES",
     "PlannedResubmitOverrides",
     "plan_resubmit_overrides",
+    "plan_resubmit_overrides_primitive",
 ]
 
 
@@ -182,4 +190,49 @@ def plan_resubmit_overrides(
         rationales=rationales,
         cold_start=cold_start,
         daisy_chain_required=daisy_chain_required,
+    )
+
+
+@primitive(
+    name="plan-resubmit-overrides",
+    verb="query",
+    side_effects=[],
+    error_codes=[errors.SpecInvalid],
+    idempotent=True,
+    cli=CliShape(
+        help=(
+            "Apply pro's survival atoms (cold-start mem buffer, walltime "
+            "arbitrage, daisy-chain detection) to a resubmit's override "
+            "dict. Returns refined overrides + per-knob rationales."
+        ),
+        spec_arg=True,
+        spec_model=PlanResubmitOverridesSpec,
+        experiment_dir_arg=True,
+        schema_ref=SchemaRef(input="plan_resubmit_overrides"),
+    ),
+    agent_facing=True,
+)
+def plan_resubmit_overrides_primitive(
+    experiment_dir: Path,
+    *,
+    spec: PlanResubmitOverridesSpec,
+) -> PlanResubmitOverridesResult:
+    """Wire-model adapter around :func:`plan_resubmit_overrides`.
+
+    The free function predates the registry; this thin wrapper promotes
+    it to a registered pro primitive so ``smart-resubmit-flow`` can
+    declare ``composes=["plan-resubmit-overrides", "resubmit-failed"]``
+    and resolve both via the merged registry.
+    """
+    planned = plan_resubmit_overrides(
+        experiment_dir,
+        profile=spec.profile,
+        cluster=spec.cluster,
+        base_overrides=spec.base_overrides,
+    )
+    return PlanResubmitOverridesResult(
+        overrides=dict(planned.overrides),
+        rationales=dict(planned.rationales),
+        cold_start=planned.cold_start,
+        daisy_chain_required=planned.daisy_chain_required,
     )

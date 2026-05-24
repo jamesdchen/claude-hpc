@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/smart_resubmit_flow.output.json",
+  "title": "smart-resubmit-flow output data",
+  "type": "object",
+  "required": [
+    "refined",
+    "resubmit"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "refined": {
+      "description": "The planner's verdict — refined overrides + rationales + cold-start/daisy flags.",
+      "title": "Refined",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "resubmit": {
+      "description": "Serialized resubmit-failed bookkeeping.",
+      "title": "Resubmit",
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

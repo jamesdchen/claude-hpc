@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/apply_smart_submit_plan.output.json",
+  "title": "apply-smart-submit-plan output data",
+  "type": "object",
+  "required": [
+    "refined_spec",
+    "decisions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "refined_spec": {
+      "description": "The submit spec with auto-applied refinements layered in.",
+      "title": "Refined Spec",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "decisions": {
+      "description": "One entry per planner signal the workflow acted on or escalated.",
+      "title": "Decisions",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  }
+}

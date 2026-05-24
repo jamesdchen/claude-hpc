@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/smart_resubmit_flow.input.json",
+  "title": "smart-resubmit-flow input spec",
+  "type": "object",
+  "required": [
+    "run_id",
+    "failed_task_ids",
+    "category"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "description": "The run_id of the existing run to resubmit.",
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "failed_task_ids": {
+      "description": "Per-task ids inside the run that need re-attempting.",
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 1,
+      "title": "Failed Task Ids",
+      "type": "array"
+    },
+    "category": {
+      "description": "Failure category that drives retry policy.",
+      "title": "Category",
+      "type": "string"
+    },
+    "base_overrides": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-supplied overrides; threaded through pro's planner before hand-off.",
+      "title": "Base Overrides"
+    }
+  }
+}
