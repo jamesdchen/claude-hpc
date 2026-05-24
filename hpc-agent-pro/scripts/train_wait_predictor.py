@@ -100,8 +100,15 @@ def build_training_rows(
 
     rows: list[tuple[dict[str, Any], int]] = []
     for job in completed_jobs:
+        # ``_snapshot_time`` produces tz-aware UTC datetimes; sacct ISO
+        # timestamps are commonly naive (no offset). Comparing naive to
+        # aware raises TypeError. Coerce naive inputs to UTC explicitly.
         submit_dt = datetime.fromisoformat(job["submit_iso"])
+        if submit_dt.tzinfo is None:
+            submit_dt = submit_dt.replace(tzinfo=timezone.utc)
         start_dt = datetime.fromisoformat(job["start_iso"])
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
         snap_path = _nearest_snapshot_before(snapshots, submit_dt)
         if snap_path is None:
             continue
@@ -132,7 +139,11 @@ def build_training_rows(
         floor_pess_iso = floor_pess.hypothetical_starts_at_iso or submit_dt.isoformat()
         floor_opt_iso = floor_opt.hypothetical_starts_at_iso or floor_pess_iso
         floor_pess_dt = datetime.fromisoformat(floor_pess_iso)
+        if floor_pess_dt.tzinfo is None:
+            floor_pess_dt = floor_pess_dt.replace(tzinfo=timezone.utc)
         floor_opt_dt = datetime.fromisoformat(floor_opt_iso)
+        if floor_opt_dt.tzinfo is None:
+            floor_opt_dt = floor_opt_dt.replace(tzinfo=timezone.utc)
         floor_pess_sec = int((floor_pess_dt - submit_dt).total_seconds())
         floor_opt_sec = int((floor_opt_dt - submit_dt).total_seconds())
         overhead_sec = int((start_dt - floor_pess_dt).total_seconds())
