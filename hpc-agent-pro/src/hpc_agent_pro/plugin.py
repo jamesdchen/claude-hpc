@@ -62,6 +62,8 @@ primitive_modules: tuple[str, ...] = (
     "hpc_agent_pro.smart_resubmit_flow",
     # apply-smart-submit-plan — code-ified Step 4c-B of submit.md.
     "hpc_agent_pro.apply_smart_submit_plan",
+    # run-pre-submit-gates — code-ified Steps 6b/6c/6d of submit.md.
+    "hpc_agent_pro.run_pre_submit_gates",
 )
 
 
@@ -513,9 +515,10 @@ def register_cli(subparsers: Any) -> None:
     p_bsw.add_argument("--top-k", type=int, default=5)
     p_bsw.set_defaults(func=cmd_best_submit_window)
 
-    # NOTE: ``plan-resubmit-overrides``, ``smart-resubmit-flow``, and
-    # ``apply-smart-submit-plan`` are registered automatically via the
-    # registry walk in ``hpc_agent.cli.parser._register_from_registry``
-    # because their primitives declare a :class:`CliShape` (rather than
-    # the legacy ``cli="<string>"`` form used by the other pro atoms
-    # above). No explicit ``add_parser`` block is needed for those.
+    # NOTE: ``plan-resubmit-overrides``, ``smart-resubmit-flow``,
+    # ``apply-smart-submit-plan``, and ``run-pre-submit-gates`` are
+    # registered automatically via the registry walk in
+    # ``hpc_agent.cli.parser._register_from_registry`` because their
+    # primitives declare a :class:`CliShape` (rather than the legacy
+    # ``cli="<string>"`` form used by the other pro atoms above).
+    # No explicit ``add_parser`` block is needed for those.

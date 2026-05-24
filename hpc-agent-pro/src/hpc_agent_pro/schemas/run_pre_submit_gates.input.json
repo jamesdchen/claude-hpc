@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/run_pre_submit_gates.input.json",
+  "title": "run-pre-submit-gates input spec",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "preflight": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Inputs for check-preflight; null means skip.",
+      "title": "Preflight"
+    },
+    "validate_campaign": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Inputs for validate-campaign; null means skip.",
+      "title": "Validate Campaign"
+    },
+    "predict_start_time": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Inputs for predict-start-time; null means skip.",
+      "title": "Predict Start Time"
+    }
+  }
+}
