@@ -24,15 +24,15 @@
     "base_overrides": {
       "anyOf": [
         {
-          "type": "object",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "type": "object"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "The caller's requested overrides (typically ``{mem_mb, walltime_sec}``). ``None`` is treated as an empty dict.",
+      "description": "The caller's requested overrides (typically ``{mem_mb, walltime_sec}``). ``None`` is treated as an empty dict: the planner still emits a cold-start verdict but has nothing to adjust.",
       "title": "Base Overrides"
     }
   }

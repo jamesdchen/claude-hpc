@@ -26,22 +26,38 @@
       "type": "array"
     },
     "category": {
-      "description": "Failure category that drives retry policy.",
+      "description": "Failure category that drives retry policy (same set ``resubmit-failed`` accepts).",
+      "enum": [
+        "gpu_oom",
+        "system_oom",
+        "segv",
+        "walltime",
+        "node_failure",
+        "queue_stall",
+        "code_bug",
+        "unknown",
+        "import_error",
+        "file_not_found",
+        "permission_denied",
+        "disk_full",
+        "python_traceback",
+        "preempted"
+      ],
       "title": "Category",
       "type": "string"
     },
     "base_overrides": {
       "anyOf": [
         {
-          "type": "object",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "type": "object"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Caller-supplied overrides; threaded through pro's planner before hand-off.",
+      "description": "Optional caller-supplied overrides (typically ``{mem_mb, walltime_sec}``). Threaded through pro's planner before being handed to ``resubmit-failed``.",
       "title": "Base Overrides"
     }
   }

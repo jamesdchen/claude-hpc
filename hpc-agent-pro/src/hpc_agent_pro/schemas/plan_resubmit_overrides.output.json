@@ -9,29 +9,28 @@
   "additionalProperties": false,
   "properties": {
     "overrides": {
-      "description": "The adjusted override dict to hand to ``resubmit-failed``.",
+      "additionalProperties": true,
+      "description": "The adjusted override dict to hand to ``resubmit-failed``. Keys in ``base_overrides`` the planner did not touch pass through unchanged.",
       "title": "Overrides",
-      "type": "object",
-      "additionalProperties": true
+      "type": "object"
     },
     "rationales": {
-      "default": {},
-      "description": "One short-string explanation per knob the planner touched.",
-      "title": "Rationales",
-      "type": "object",
       "additionalProperties": {
         "type": "string"
-      }
+      },
+      "description": "One short-string explanation per knob the planner touched. Suitable for surfacing in the resubmit response envelope.",
+      "title": "Rationales",
+      "type": "object"
     },
     "cold_start": {
       "default": false,
-      "description": "True when the (profile, cluster) pair has fewer than MIN_PRIOR_SAMPLES successful samples.",
+      "description": "True when the (profile, cluster) pair has fewer than ``MIN_PRIOR_SAMPLES`` successful samples — the survival atoms only fire on cold-start.",
       "title": "Cold Start",
       "type": "boolean"
     },
     "daisy_chain_required": {
       "default": false,
-      "description": "Advisory flag: the post-arbitrage walltime ask exceeds the cluster's hard ceiling.",
+      "description": "Advisory flag: the post-arbitrage walltime ask exceeds the cluster's hard scheduler ceiling, so segmented submission is required.",
       "title": "Daisy Chain Required",
       "type": "boolean"
     }
