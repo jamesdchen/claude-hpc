@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/apply_smart_submit_plan.input.json",
+  "title": "apply-smart-submit-plan input spec",
+  "type": "object",
+  "required": [
+    "submit_spec",
+    "score_submit_plan_envelope"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "submit_spec": {
+      "description": "The base submit spec the agent has built so far.",
+      "title": "Submit Spec",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "score_submit_plan_envelope": {
+      "description": "The verbatim ``data`` field of a prior ``score-submit-plan`` envelope.",
+      "title": "Score Submit Plan Envelope",
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}
