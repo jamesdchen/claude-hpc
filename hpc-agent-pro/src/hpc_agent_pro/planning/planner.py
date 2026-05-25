@@ -467,7 +467,14 @@ def _eta_via_des(
         )
     except Exception:  # noqa: BLE001 — defensive
         return None
-    if out.method != "des":
+    # ``des_no_profiles`` is the degraded-DES tag (simulation ran but
+    # the arrival stream was empty because no profiles were persisted).
+    # The wait estimate is still DES-derived — just with lower
+    # confidence — so accept it as a DES-path result here. Callers
+    # that need the strict ``method == "des"`` discrimination should
+    # branch on the full ``PredictionResult`` instead of using this
+    # convenience wrapper.
+    if out.method not in ("des", "des_no_profiles"):
         return None
     return out.predicted_wait_sec
 

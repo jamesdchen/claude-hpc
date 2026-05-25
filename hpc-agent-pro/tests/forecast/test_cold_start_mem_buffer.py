@@ -20,6 +20,7 @@ quantile-based prior takes over (≥5 samples per GPU type).
 from __future__ import annotations
 
 import pytest
+from hpc_agent import errors
 from hpc_agent.infra.clusters import get_cold_start_mem_buffer, get_nfs_data_dir
 
 from hpc_agent_pro.forecast.backfill import recommend_mem_mb
@@ -49,11 +50,11 @@ class TestGetColdStartMemBuffer:
 
     def test_negative_rejected(self):
         """Negative would *shrink* the ask — not a survival headroom."""
-        with pytest.raises(ValueError, match="non-negative"):
+        with pytest.raises(errors.SpecInvalid, match="non-negative"):
             get_cold_start_mem_buffer({"cold_start_mem_buffer": -0.1})
 
     def test_non_numeric_rejected(self):
-        with pytest.raises(ValueError, match="must be a number"):
+        with pytest.raises(errors.SpecInvalid, match="must be a number"):
             get_cold_start_mem_buffer({"cold_start_mem_buffer": "lots"})
 
     def test_explicit_default_kwarg(self):
@@ -75,11 +76,11 @@ class TestGetNfsDataDir:
 
     def test_empty_string_rejected(self):
         """Empty string is a configuration error, not "disabled"."""
-        with pytest.raises(ValueError, match="non-empty string"):
+        with pytest.raises(errors.SpecInvalid, match="non-empty string"):
             get_nfs_data_dir({"nfs_data_dir": ""})
 
     def test_non_string_rejected(self):
-        with pytest.raises(ValueError, match="non-empty string"):
+        with pytest.raises(errors.SpecInvalid, match="non-empty string"):
             get_nfs_data_dir({"nfs_data_dir": ["/path"]})
 
 
