@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 # ``worker_prompts/``, etc.).
 MANIFEST = PluginManifest(
     name="hpc-agent-pro",
-    version="0.6.0",
+    version="0.1.0",
     primitives=(
         "read-runtime-prior",
         "best-submit-window",
