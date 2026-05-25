@@ -9,7 +9,7 @@ JSON summary: number of samples, MAE, MAPE, p50/p95 of the residual.
 Used as a calibration target — the residual is the signal that tells
 us when to layer MULTIFACTOR priority, refine the actual-over-ask
 distribution, etc. Phase 4 leaves the calibration loop deferred (see
-``docs/internals/queue-wait-predictor.md``); this script is the data source.
+``hpc-agent-pro/docs/queue-wait-predictor.md``); this script is the data source.
 
 Usage::
 

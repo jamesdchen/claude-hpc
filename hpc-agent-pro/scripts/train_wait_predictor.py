@@ -12,10 +12,12 @@ Run periodically (e.g. nightly cron). The model file is loaded by
 inference time; updates to the model take effect on the next
 forecast call.
 
-Optional dep: ``lightgbm`` (declared in
-``pyproject.toml`` ``forecasting`` extra). When absent the trainer
-exits with a clear error message; the predictor still works (it
-falls back to floor-only predictions).
+Hard dep: ``lightgbm`` (this plugin IS the forecasting code, so the
+library that backs the residual regression is a required runtime
+dependency declared in ``hpc-agent-pro/pyproject.toml``). The lazy
+import + clear-error fallback inside :func:`fit_and_persist` remains
+as defence-in-depth against an installation that mistakenly skipped
+the dependency.
 """
 
 from __future__ import annotations
