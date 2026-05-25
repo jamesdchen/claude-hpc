@@ -3,9 +3,13 @@
 Discovered by the host ``hpc-agent`` package through the
 ``hpc_agent.plugins`` entry-point group (see
 ``hpc_agent._kernel.registry.plugins``). The host resolves the entry point via
-``ep.load()`` and reads two optional attributes off the result with
+``ep.load()`` and reads optional attributes off the result with
 ``getattr``:
 
+* ``MANIFEST`` (Item 5) — :class:`PluginManifest` instance declaring
+  the plugin's name, version, registered primitives, worker-prompt
+  overlays, and CLI-registration flag. Projected into the host
+  capabilities envelope under ``plugins``.
 * ``primitive_modules`` — dotted module paths the host imports (after
   the core primitive modules) so their ``@primitive`` decorators
   register.
@@ -13,8 +17,8 @@ Discovered by the host ``hpc-agent`` package through the
   ``_SubParsersAction`` so the plugin can add CLI subcommands.
 
 This module *is* the plugin object: the entry point points straight at
-the module, and ``getattr(module, "primitive_modules")`` /
-``getattr(module, "register_cli")`` resolve to the names defined here.
+the module, and ``getattr(module, ...)`` resolves to the names defined
+here.
 """
 
 from __future__ import annotations
@@ -23,8 +27,44 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from hpc_agent._wire.plugin_manifest import PluginManifest
+
 if TYPE_CHECKING:
     import argparse
+
+
+# ─── manifest ─────────────────────────────────────────────────────────────
+#
+# Item-5 self-description. The host's
+# ``hpc_agent._kernel.registry.plugins.get_plugin_manifests`` walks every
+# loaded plugin's ``MANIFEST`` attribute and ``hpc-agent capabilities``
+# surfaces the result under the envelope's ``plugins`` field. The
+# ``scripts/lint_plugin_manifests.py`` lint reconciles the declarations
+# against the live registry (every name in ``primitives`` must register
+# at import time, every overlay must exist on disk under
+# ``worker_prompts/``, etc.).
+MANIFEST = PluginManifest(
+    name="hpc-agent-pro",
+    version="0.6.0",
+    primitives=(
+        "read-runtime-prior",
+        "best-submit-window",
+        "predict-queue-wait",
+        "score-submit-plan",
+        "inspect-cluster",
+        "house-edge",
+        "predict-start-time",
+        "recommend-wait-alternative",
+        "walltime-drift",
+        "validate",
+        "plan-resubmit-overrides",
+        "smart-resubmit-flow",
+        "apply-smart-submit-plan",
+        "run-pre-submit-gates",
+    ),
+    worker_prompt_overlays=("submit",),
+    cli_register=True,
+)
 
 
 # ─── primitive modules ─────────────────────────────────────────────────────
