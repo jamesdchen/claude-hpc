@@ -258,4 +258,20 @@ def _predict_des(
         p90_wait_sec=int(round(sim_out.p90_wait_sec)),
         n_replications=n_replications,
     )
+    # Profiles drive arrival + residual sampling. With none persisted the
+    # simulation still produces a number, but it's a degraded one — the
+    # arrival stream is empty so the wait estimate undercounts. The
+    # ``des_no_profiles`` tag is declared in the ``Method`` Literal for
+    # exactly this case so consumers can branch (e.g. lower the
+    # confidence floor, surface a "go run runtime-prior first" hint).
+    # Confidence is also forced to ``low`` because the simulation can't
+    # see contention from other users.
+    if not profiles:
+        from dataclasses import replace as _dc_replace
+
+        return _retag_method(
+            _dc_replace(base, confidence="low"),
+            "des_no_profiles",
+            "DES ran with no persisted user profiles; arrival stream is empty",
+        )
     return base
