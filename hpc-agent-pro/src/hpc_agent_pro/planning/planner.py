@@ -130,7 +130,10 @@ def plan_submit(
     """
     clusters = load_clusters_config()
     if cluster not in clusters:
-        raise KeyError(f"unknown cluster {cluster!r}; check clusters.yaml")
+        # The @primitive decorator declares ``errors.ClusterUnknown`` —
+        # raising a bare KeyError here would surface as exit 3 /
+        # error_code=internal instead of the documented exit 1 / user.
+        raise errors.ClusterUnknown(f"unknown cluster {cluster!r}; check clusters.yaml")
     cfg = clusters[cluster]
     scheduler = (cfg.get("scheduler") or "slurm").lower()
     gpu_types: list[str] = list(cfg.get("gpu_types") or [])
