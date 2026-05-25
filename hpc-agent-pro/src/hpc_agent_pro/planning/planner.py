@@ -467,7 +467,14 @@ def _eta_via_des(
         )
     except Exception:  # noqa: BLE001 — defensive
         return None
-    if out.method != "des":
+    # ``des_no_profiles`` is the degraded-DES tag (simulation ran but
+    # the arrival stream was empty because no profiles were persisted).
+    # The wait estimate is still DES-derived — just with lower
+    # confidence — so accept it as a DES-path result here. Callers
+    # that need the strict ``method == "des"`` discrimination should
+    # branch on the full ``PredictionResult`` instead of using this
+    # convenience wrapper.
+    if out.method not in ("des", "des_no_profiles"):
         return None
     return out.predicted_wait_sec
 
@@ -528,7 +535,16 @@ def _eta_via_test_only_with_resources(
     # We omit --array because the ETA only depends on the resource ask
     # for a single task, and the combination of --wrap and --array can
     # be rejected by some SLURM configurations.
-    constraint_flag = "" if constraint == "<cpu-only>" else f"--constraint={constraint!r}"
+    # ``shlex.quote`` (not ``!r``) — ``repr()`` switches to double-quoted
+    # output when the string contains an apostrophe, and bash double
+    # quotes still allow ``$(...)`` command substitution. A candidate
+    # value like ``"a100'$(curl … | sh)'"`` would have been executed
+    # remotely under the old f-string.
+    import shlex as _shlex
+
+    constraint_flag = (
+        "" if constraint == "<cpu-only>" else f"--constraint={_shlex.quote(constraint)}"
+    )
     time_flag = _format_walltime_for_sbatch(walltime_sec)
     cmd = (
         f"sbatch --test-only --time={time_flag} --mem={int(mem_mb)}M "

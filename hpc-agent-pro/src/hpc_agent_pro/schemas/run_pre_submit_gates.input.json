@@ -8,43 +8,43 @@
     "preflight": {
       "anyOf": [
         {
-          "type": "object",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "type": "object"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Inputs for check-preflight; null means skip.",
+      "description": "Inputs for ``check-preflight``. Shape: ``{cluster: str | None}``. ``None`` means skip the preflight gate.",
       "title": "Preflight"
     },
     "validate_campaign": {
       "anyOf": [
         {
-          "type": "object",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "type": "object"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Inputs for validate-campaign; null means skip.",
+      "description": "Inputs for ``validate-campaign`` (any field of ``ValidateCampaignSpec``; profile + cluster required). ``None`` means skip the campaign-validation gate.",
       "title": "Validate Campaign"
     },
     "predict_start_time": {
       "anyOf": [
         {
-          "type": "object",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "type": "object"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Inputs for predict-start-time; null means skip.",
+      "description": "Inputs for ``predict-start-time`` (any field of ``PredictStartTimeSpec``). ``None`` means skip the start-time forecast.",
       "title": "Predict Start Time"
     }
   }

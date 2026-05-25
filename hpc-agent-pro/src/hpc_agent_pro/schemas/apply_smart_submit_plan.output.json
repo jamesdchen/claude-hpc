@@ -4,25 +4,24 @@
   "title": "apply-smart-submit-plan output data",
   "type": "object",
   "required": [
-    "refined_spec",
-    "decisions"
+    "refined_spec"
   ],
   "additionalProperties": false,
   "properties": {
     "refined_spec": {
+      "additionalProperties": true,
       "description": "The submit spec with auto-applied refinements layered in.",
       "title": "Refined Spec",
-      "type": "object",
-      "additionalProperties": true
+      "type": "object"
     },
     "decisions": {
-      "description": "One entry per planner signal the workflow acted on or escalated.",
-      "title": "Decisions",
-      "type": "array",
+      "description": "One entry per planner signal the workflow acted on (or escalated). Shape: ``{point, outcome, why, ...}``. ``outcome='pending'`` marks an escalation that the caller must confirm before proceeding.",
       "items": {
-        "type": "object",
-        "additionalProperties": true
-      }
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Decisions",
+      "type": "array"
     }
   }
 }

@@ -61,7 +61,11 @@ class WindowCandidate:
     name="best-submit-window",
     verb="query",
     side_effects=[],
-    error_codes=[errors.HpcError],
+    # No typed errors raised — purely deterministic query over the
+    # in-memory profile. Declaring the abstract ``HpcError`` base would
+    # be uninformative (every wire error inherits it); leave empty so
+    # the catalog reflects reality.
+    error_codes=[],
     idempotent=True,
     cli="hpc-agent best-submit-window --profile <p> --cluster <c> [--within-hours N] [--top-k K]",  # noqa: E501
     agent_facing=True,

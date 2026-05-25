@@ -10,31 +10,57 @@
   "additionalProperties": false,
   "properties": {
     "gates": {
-      "description": "Per-gate outcome.",
-      "title": "Gates",
-      "type": "object",
       "additionalProperties": {
-        "type": "object",
-        "required": ["status"],
-        "additionalProperties": false,
-        "properties": {
-          "status": {
-            "enum": ["ok", "skipped", "failed"],
-            "type": "string"
-          },
-          "envelope": {
-            "anyOf": [
-              {"type": "object", "additionalProperties": true},
-              {"type": "null"}
-            ]
-          }
-        }
-      }
+        "$ref": "#/$defs/_GateOutcome"
+      },
+      "description": "Per-gate outcome keyed by gate name (``check-preflight``, ``validate-campaign``, ``predict-start-time``).",
+      "title": "Gates",
+      "type": "object"
     },
     "overall": {
-      "enum": ["ok", "blocked", "skipped"],
+      "description": "``ok`` when every non-skipped gate passed; ``blocked`` when any gate failed (and the rest short-circuited); ``skipped`` when every gate was skipped.",
+      "enum": [
+        "ok",
+        "blocked",
+        "skipped"
+      ],
       "title": "Overall",
       "type": "string"
+    }
+  },
+  "$defs": {
+    "_GateOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "skipped",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "envelope": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The gate's structured output (when status==ok) or failure detail (when status==failed).",
+          "title": "Envelope"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "_GateOutcome",
+      "type": "object"
     }
   }
 }

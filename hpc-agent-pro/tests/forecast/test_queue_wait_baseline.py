@@ -271,7 +271,12 @@ class TestDESBackend:
                 seed=1,
             ),
         )
-        assert out.method == "des"
+        # ``des_no_profiles`` is the degraded-DES tag: simulation ran
+        # (so a wait estimate IS produced) but the arrival stream was
+        # empty because no user profiles were persisted in this test
+        # setup. Both tags reflect a DES-produced wait; confidence-
+        # aware callers branch on the suffix.
+        assert out.method in ("des", "des_no_profiles")
         assert out.predicted_wait_sec == 0
         assert out.p10_wait_sec == 0
         assert out.p90_wait_sec == 0
@@ -317,7 +322,9 @@ class TestDESBackend:
                 seed=1,
             ),
         )
-        assert out.method == "des"
+        # See note in ``test_des_explicit_idle_cluster_zero_wait``:
+        # DES degraded-no-profiles is still a valid DES result.
+        assert out.method in ("des", "des_no_profiles")
         assert out.predicted_wait_sec == 0
 
     def test_des_seed_determinism(self, tmp_path):

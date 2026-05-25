@@ -10,16 +10,16 @@
   "additionalProperties": false,
   "properties": {
     "submit_spec": {
-      "description": "The base submit spec the agent has built so far.",
+      "additionalProperties": true,
+      "description": "The base submit spec the agent has built so far — a dict matching ``SubmitFlowSpec``. The workflow returns it refined in place; the original is not mutated.",
       "title": "Submit Spec",
-      "type": "object",
-      "additionalProperties": true
+      "type": "object"
     },
     "score_submit_plan_envelope": {
-      "description": "The verbatim ``data`` field of a prior ``score-submit-plan`` envelope.",
+      "additionalProperties": true,
+      "description": "The verbatim ``data`` field of a prior ``score-submit-plan`` (a.k.a. ``plan-submit``) envelope. Field names track :class:`PlanSubmitResult` — see ``hpc_agent_pro._schema_models.queries.plan_submit``.",
       "title": "Score Submit Plan Envelope",
-      "type": "object",
-      "additionalProperties": true
+      "type": "object"
     }
   }
 }
