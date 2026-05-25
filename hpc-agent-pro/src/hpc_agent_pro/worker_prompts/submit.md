@@ -193,7 +193,7 @@ If `tp.exists()`, read it as-is — never regenerate. To change the axis, the us
 
 ### 6b: Scaffold from canonical example (first submit only)
 
-If `tp.exists()` is False, walk through `hpc_agent/mapreduce/templates/scaffolds/tasks_example.py` (top-level `FLAGS: dict[str, list[Flag]]`, eager-materialized `_TASKS = [...]`, three commented-out usage patterns inline). Generate via [build-tasks-py](../../docs/primitives/build-tasks-py.md) — don't hand-author it. Refuses to overwrite without `--force`.
+If `tp.exists()` is False, walk through `hpc_agent/models/mapreduce/templates/scaffolds/tasks_example.py` (top-level `FLAGS: dict[str, list[Flag]]`, eager-materialized `_TASKS = [...]`, three commented-out usage patterns inline). Generate via [build-tasks-py](../../docs/primitives/build-tasks-py.md) — don't hand-author it. Refuses to overwrite without `--force`.
 
 **Planner-driven axis (Step 3b).** When Step 3 classified a non-trivial `DataAxis`, pass it to [build-tasks-py](../../docs/primitives/build-tasks-py.md) in the spec's `data_axis` field: `{kind, chunks, series_length, halo_expr?, monoid?}`. The primitive then emits a `plan_tasks`-driven `tasks.py` deterministically — the `axes` become the sweep, the series axis is partitioned per the classification. The agent classifies; it never hand-writes `tasks.py`. `series_length` is the integer you probed at Step 3a; `halo_expr` (for `bounded_halo`) is a plain arithmetic expression over `params`, e.g. `params['train_window'] * 48`. The serial-elision gate (Step 3c) must have passed before the file is committed.
 
@@ -203,7 +203,7 @@ Copy the dispatcher:
 ```python
 import shutil
 from hpc_agent import _PACKAGE_ROOT
-shutil.copy(_PACKAGE_ROOT / "mapreduce" / "templates" / "scaffolds" / "cli_dispatcher.py", experiment_dir / ".hpc" / "cli.py")
+shutil.copy(_PACKAGE_ROOT / "models" / "mapreduce" / "templates" / "scaffolds" / "cli_dispatcher.py", experiment_dir / ".hpc" / "cli.py")
 ```
 
 Commit `.hpc/tasks.py` + `.hpc/cli.py`. No push — user controls upstream.
