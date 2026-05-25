@@ -330,7 +330,7 @@ def plan_submit(
             chain_decision: bool
             if chain_override is False:
                 # Kill switch — never chain on this cluster.
-                raise ValueError(_daisy_chain_error_message(walltime_user_ask_sec, max_wt))
+                raise errors.SpecInvalid(_daisy_chain_error_message(walltime_user_ask_sec, max_wt))
             elif chain_override is True:
                 # Cluster explicitly opts in regardless of detection.
                 chain_decision = True
@@ -345,7 +345,9 @@ def plan_submit(
                     experiment_dir, profile=profile, cluster=cluster
                 )
                 if not chain_decision:
-                    raise ValueError(_daisy_chain_error_message(walltime_user_ask_sec, max_wt))
+                    raise errors.SpecInvalid(
+                        _daisy_chain_error_message(walltime_user_ask_sec, max_wt)
+                    )
             if chain_decision:
                 plan = compute_daisy_chain_plan(int(walltime_user_ask_sec), max_walltime_sec=max_wt)
                 daisy_chain_segments = plan.n_segments
