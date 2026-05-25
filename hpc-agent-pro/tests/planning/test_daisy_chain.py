@@ -16,6 +16,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
+from hpc_agent import errors
 from hpc_agent.infra import inspect as ins
 from hpc_agent.infra.inspect import ClusterSnapshot, NodeSnapshot
 
@@ -251,6 +252,9 @@ class TestPlanSubmitDaisyChain:
 
     def test_chain_blocked_when_no_checkpoint_signal(self, tmp_path, monkeypatch):
         # No past runs / no checkpoints -> detection False -> error.
+        # Raises ``errors.SpecInvalid`` (post wave-2 typed-error migration)
+        # so the CLI dispatcher returns exit 1 (user) with
+        # ``error_code=spec_invalid`` instead of exit 3 (internal).
         cfg = _write_clusters(tmp_path, max_walltime_sec=86400)
         monkeypatch.setenv("HPC_CLUSTERS_CONFIG", str(cfg))
         with (
@@ -258,7 +262,7 @@ class TestPlanSubmitDaisyChain:
                 "hpc_agent_pro.planning.planner.inspect_cluster",
                 return_value=_fake_snapshot(),
             ),  # noqa: E501
-            pytest.raises(ValueError, match="no checkpoint files detected"),
+            pytest.raises(errors.SpecInvalid, match="no checkpoint files detected"),
         ):
             planner.plan_submit(
                 tmp_path,
@@ -271,6 +275,8 @@ class TestPlanSubmitDaisyChain:
 
     def test_kill_switch_never_chains(self, tmp_path, monkeypatch):
         # auto_daisy_chain: false explicit -> error even when checkpoints exist.
+        # Raises ``errors.SpecInvalid`` (post wave-2 typed-error migration);
+        # see test_chain_blocked_when_no_checkpoint_signal for rationale.
         cfg = _write_clusters(tmp_path, max_walltime_sec=86400, auto_daisy_chain=False)
         monkeypatch.setenv("HPC_CLUSTERS_CONFIG", str(cfg))
         _seed_checkpoint(tmp_path, profile="p", cluster="discovery", run_id="r1")
@@ -279,7 +285,7 @@ class TestPlanSubmitDaisyChain:
                 "hpc_agent_pro.planning.planner.inspect_cluster",
                 return_value=_fake_snapshot(),
             ),  # noqa: E501
-            pytest.raises(ValueError, match="exceeds cluster max"),
+            pytest.raises(errors.SpecInvalid, match="exceeds cluster max"),
         ):
             planner.plan_submit(
                 tmp_path,

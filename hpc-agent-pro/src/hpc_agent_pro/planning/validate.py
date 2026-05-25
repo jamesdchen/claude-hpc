@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent.infra.clusters import load_clusters_config
 
@@ -30,6 +31,7 @@ __all__ = ["validate_submission"]
     name="validate",
     verb="validate",
     side_effects=[SideEffect("ssh", "<cluster> (scheduler --test-only probe)")],
+    error_codes=[errors.ClusterUnknown, errors.SshUnreachable],
     idempotent=True,
     agent_facing=True,
 )
@@ -51,15 +53,19 @@ def validate_submission(experiment_dir: Path, *, spec: ValidateSpec) -> Validate
 
     Errors raise no exceptions for cluster-side failures (scheduler
     throttled, ssh timeout); they surface as ``predicted_eta_sec=None``
-    with a descriptive ``reason``. Hard failures (config missing, profile
-    unknown) propagate as ``ValueError``.
+    with a descriptive ``reason``. Hard failures (cluster name not in
+    ``clusters.yaml``) raise :class:`errors.ClusterUnknown` so the CLI
+    dispatcher returns exit 1 (user) with ``error_code=cluster_unknown``,
+    matching the main package's wave-2 typed-error contract.
     """
     cfg = load_clusters_config()
     # load_clusters_config returns a flat {cluster_name: {...}} dict;
     # planner.py and resubmit_planner.py both index it directly.
     cluster_cfg = cfg.get(spec.cluster)
     if cluster_cfg is None:
-        raise ValueError(f"unknown cluster {spec.cluster!r}; not in clusters.yaml")
+        raise errors.ClusterUnknown(
+            f"unknown cluster {spec.cluster!r}; not in clusters.yaml"
+        )
     scheduler = cluster_cfg.get("scheduler", "slurm")
 
     # Re-export the planner's probe to keep behaviour identical (mem
