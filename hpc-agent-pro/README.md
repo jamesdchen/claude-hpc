@@ -38,6 +38,23 @@ pip install hpc-agent-pro
 
 The plugin is discovered automatically; no configuration required.
 
+### Optional: snapshot cron (for the LightGBM-residual predictor)
+
+The `predict-start-time` primitive's LightGBM-residual model needs
+queue-snapshot history (~7-14 days before useful). To accumulate it
+automatically, install the snapshot + training cron:
+
+```bash
+hpc-agent-pro/scripts/install_cron.sh <ssh-target> <experiment-dir> <hpc-agent-repo-dir>
+```
+
+The script installs two crontab entries (snapshot every 5 minutes,
+training daily at 03:00). Idempotent — re-running detects existing
+entries and skips. Requires the `forecasting` extra
+(`pip install 'hpc-agent-pro[forecasting]'`). The predictor still
+works in floor-only mode (no LightGBM residual) when no model has been
+trained.
+
 ## Development
 
 This package lives in the `hpc-agent` monorepo under `hpc-agent-pro/`,
