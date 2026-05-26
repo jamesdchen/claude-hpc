@@ -136,7 +136,7 @@ def predict_start_time(
     """Predict the start time of a hypothetical job submitted *at_iso*.
 
     *model_path* points to a serialized LightGBM model produced by
-    ``scripts/train_wait_predictor.py``. When absent the predictor
+    ``hpc_agent_pro._cron.train_wait_predictor``. When absent the predictor
     returns the pessimistic floor as the predicted start (no
     residual). The two floors are always computed regardless.
     """

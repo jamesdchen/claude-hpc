@@ -1,13 +1,15 @@
 """LightGBM trainer for the queue-wait residual regression.
 
 Walks ``<experiment_dir>/.hpc/squeue_snapshots/`` (written by
-``snapshot_squeue.py``) and a sacct history of completed jobs to
-produce ``(features, observed_overhead)`` training rows. Fits a
-LightGBM regressor on the rows; persists the model + the feature
-list + a summary of training quality to
+:mod:`hpc_agent_pro._cron.snapshot_squeue`) and a sacct history of
+completed jobs to produce ``(features, observed_overhead)`` training
+rows. Fits a LightGBM regressor on the rows; persists the model + the
+feature list + a summary of training quality to
 ``<experiment_dir>/.hpc/wait_predictor/``.
 
-Run periodically (e.g. nightly cron). The model file is loaded by
+Invoked nightly by the cron entry that ``hpc-agent install-cron`` writes
+(``python -m hpc_agent_pro._cron.train_wait_predictor``). The model
+file is loaded by
 :func:`hpc_agent_pro.forecast.predict_start.predict_start_time` at
 inference time; updates to the model take effect on the next
 forecast call.
@@ -25,16 +27,13 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
-from hpc_agent_pro.forecast.drain_simulator import simulate_drain  # noqa: E402
-from hpc_agent_pro.forecast.squeue_priority_field import parse_squeue_priority_field  # noqa: E402
-from hpc_agent_pro.forecast.wait_features import extract_features  # noqa: E402
+from hpc_agent_pro.forecast.drain_simulator import simulate_drain
+from hpc_agent_pro.forecast.squeue_priority_field import parse_squeue_priority_field
+from hpc_agent_pro.forecast.wait_features import extract_features
 
 
 def _read_snapshot(path: Path) -> str:

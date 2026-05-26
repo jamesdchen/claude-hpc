@@ -38,6 +38,37 @@ pip install hpc-agent-pro
 
 The plugin is discovered automatically; no configuration required.
 
+### Optional: snapshot cron (for the LightGBM-residual predictor)
+
+The `predict-start-time` primitive's LightGBM-residual model needs
+queue-snapshot history (~7-14 days before useful). Two ways to install
+the snapshot + training cron:
+
+```bash
+# Standalone — derive ssh-target yourself
+hpc-agent install-cron --ssh-target alice@cluster.example.edu --experiment-dir .
+
+# Folded into setup — when hpc-agent-pro is loaded, `hpc-agent setup
+# --cluster <name> --install-cron` invokes install-cron with the
+# ssh-target derived from clusters.yaml (one command).
+hpc-agent setup --cluster hoffman2 --install-cron
+```
+
+Without `--install-cron`, `hpc-agent setup --cluster <name>` still
+surfaces the suggested command in its envelope (the host detects this
+plugin via the registry; if you have hpc-agent-pro installed and run
+`setup` against a cluster, the envelope's `data.pro_cron` field shows
+what to run next).
+
+The primitive installs two crontab entries idempotently — snapshot
+every 5 minutes, training daily at 03:00 — both fingerprinted by their
+target module so re-running detects existing entries and skips. The
+three cron-invoked modules (`snapshot_squeue`, `train_wait_predictor`,
+`extract_sacct_history`) live under `hpc_agent_pro._cron/` and ship
+in this wheel, so the cron lines work in any pip-installed environment
+— no source checkout required. The predictor still works in floor-only
+mode (no LightGBM residual) when no model has been trained.
+
 ## Development
 
 This package lives in the `hpc-agent` monorepo under `hpc-agent-pro/`,
