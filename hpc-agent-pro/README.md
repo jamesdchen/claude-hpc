@@ -41,12 +41,24 @@ The plugin is discovered automatically; no configuration required.
 ### Optional: snapshot cron (for the LightGBM-residual predictor)
 
 The `predict-start-time` primitive's LightGBM-residual model needs
-queue-snapshot history (~7-14 days before useful). To accumulate it
-automatically, install the snapshot + training cron:
+queue-snapshot history (~7-14 days before useful). Two ways to install
+the snapshot + training cron:
 
 ```bash
+# Standalone — derive ssh-target yourself
 hpc-agent install-cron --ssh-target alice@cluster.example.edu --experiment-dir .
+
+# Folded into setup — when hpc-agent-pro is loaded, `hpc-agent setup
+# --cluster <name> --install-cron` invokes install-cron with the
+# ssh-target derived from clusters.yaml (one command).
+hpc-agent setup --cluster hoffman2 --install-cron
 ```
+
+Without `--install-cron`, `hpc-agent setup --cluster <name>` still
+surfaces the suggested command in its envelope (the host detects this
+plugin via the registry; if you have hpc-agent-pro installed and run
+`setup` against a cluster, the envelope's `data.pro_cron` field shows
+what to run next).
 
 The primitive installs two crontab entries idempotently — snapshot
 every 5 minutes, training daily at 03:00 — both fingerprinted by their
