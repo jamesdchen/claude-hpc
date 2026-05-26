@@ -61,6 +61,7 @@ MANIFEST = PluginManifest(
         "smart-resubmit-flow",
         "apply-smart-submit-plan",
         "run-pre-submit-gates",
+        "install-cron",
     ),
     worker_prompt_overlays=("submit",),
     cli_register=True,
@@ -104,6 +105,11 @@ primitive_modules: tuple[str, ...] = (
     "hpc_agent_pro.apply_smart_submit_plan",
     # run-pre-submit-gates — code-ified Steps 6b/6c/6d of submit.md.
     "hpc_agent_pro.run_pre_submit_gates",
+    # install-cron — installs the wait-predictor snapshot + training
+    # crontab entries; ships the three cron-invoked modules under
+    # ``hpc_agent_pro._cron/`` so the cron lines work in any
+    # pip-installed environment.
+    "hpc_agent_pro._cron.install",
 )
 
 

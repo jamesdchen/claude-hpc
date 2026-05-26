@@ -1,6 +1,6 @@
 """Track training-quality metrics across runs to detect model drift.
 
-The trainer (``scripts/train_wait_predictor.py``) writes a fresh
+The trainer (``hpc_agent_pro._cron.train_wait_predictor``) writes a fresh
 ``training_summary.json`` on every run. This module appends each
 summary to a rolling history and surfaces a "drift signal" when the
 recent validation MAE departs significantly from the recent baseline.

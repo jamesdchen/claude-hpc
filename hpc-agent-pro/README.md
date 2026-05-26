@@ -45,15 +45,17 @@ queue-snapshot history (~7-14 days before useful). To accumulate it
 automatically, install the snapshot + training cron:
 
 ```bash
-hpc-agent-pro/scripts/install_cron.sh <ssh-target> <experiment-dir> <hpc-agent-repo-dir>
+hpc-agent install-cron --ssh-target alice@cluster.example.edu --experiment-dir .
 ```
 
-The script installs two crontab entries (snapshot every 5 minutes,
-training daily at 03:00). Idempotent — re-running detects existing
-entries and skips. Requires the `forecasting` extra
-(`pip install 'hpc-agent-pro[forecasting]'`). The predictor still
-works in floor-only mode (no LightGBM residual) when no model has been
-trained.
+The primitive installs two crontab entries idempotently — snapshot
+every 5 minutes, training daily at 03:00 — both fingerprinted by their
+target module so re-running detects existing entries and skips. The
+three cron-invoked modules (`snapshot_squeue`, `train_wait_predictor`,
+`extract_sacct_history`) live under `hpc_agent_pro._cron/` and ship
+in this wheel, so the cron lines work in any pip-installed environment
+— no source checkout required. The predictor still works in floor-only
+mode (no LightGBM residual) when no model has been trained.
 
 ## Development
 

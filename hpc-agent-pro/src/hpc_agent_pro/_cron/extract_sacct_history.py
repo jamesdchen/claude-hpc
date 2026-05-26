@@ -2,7 +2,7 @@
 
 Walks ``sacct -P --format=JobID,Submit,Start,Priority,Partition,User,
 TimeLimit`` for a recent window and writes a JSON file in the shape
-``scripts/train_wait_predictor.py`` expects::
+:mod:`hpc_agent_pro._cron.train_wait_predictor` expects::
 
     [
       {
@@ -22,7 +22,7 @@ training rows.
 
 Usage::
 
-    python scripts/extract_sacct_history.py \\
+    python -m hpc_agent_pro._cron.extract_sacct_history \\
         --ssh-target alice@cluster \\
         --since-days 30 \\
         --out completed_jobs.json
@@ -32,13 +32,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
-from hpc_agent.infra.parsing import parse_sacct_pipe_row, parse_walltime_to_sec  # noqa: E402
+from hpc_agent.infra.parsing import parse_sacct_pipe_row, parse_walltime_to_sec
 
 _SACCT_FORMAT = "JobID,Submit,Start,Priority,Partition,User,TimeLimit"
 

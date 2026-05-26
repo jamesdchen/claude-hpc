@@ -1,10 +1,13 @@
 """Snapshot writer for the queue-wait predictor's training data.
 
-Run via cron every 5 minutes::
+Invoked by the cron entry that ``hpc-agent install-cron`` writes::
 
-    */5 * * * *  python scripts/snapshot_squeue.py \
+    */5 * * * *  python -m hpc_agent_pro._cron.snapshot_squeue \
                      --ssh-target alice@cluster \
                      --experiment-dir /home/alice/exp
+
+Run standalone the same way (``python -m hpc_agent_pro._cron.snapshot_squeue
+--help``) if you want a one-off snapshot outside cron.
 
 Writes a column-projected, gzipped squeue snapshot to
 ``<experiment_dir>/.hpc/squeue_snapshots/<YYYYMMDDTHHMMSS>.tsv.gz``.

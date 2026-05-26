@@ -2,7 +2,7 @@
 
 Builds time-series features for the LGBM predictor by walking
 ``<experiment_dir>/.hpc/squeue_snapshots/`` (written by
-``scripts/snapshot_squeue.py``).
+``hpc_agent_pro._cron.snapshot_squeue``).
 
 Two helpers:
 
