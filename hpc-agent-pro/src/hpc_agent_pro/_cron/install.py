@@ -182,8 +182,12 @@ def install_cron(
     if "installed" in (snap_status, train_status):
         _write_crontab(crontab)
 
+    # The @primitive envelope adds top-level ``ok``; the dict returned
+    # here lands under ``data``. Including ``"ok": True`` inside would
+    # produce ``{"ok": True, "data": {"ok": True, ...}}`` — a redundant
+    # inner duplicate that also leaks into the setup primitive when it
+    # ``**``-spreads this dict.
     return {
-        "ok": True,
         "python_interpreter": python,
         "experiment_dir": str(exp_dir),
         "ssh_target": ssh_target,
