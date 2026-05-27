@@ -63,9 +63,7 @@ def validate_submission(experiment_dir: Path, *, spec: ValidateSpec) -> Validate
     # planner.py and resubmit_planner.py both index it directly.
     cluster_cfg = cfg.get(spec.cluster)
     if cluster_cfg is None:
-        raise errors.ClusterUnknown(
-            f"unknown cluster {spec.cluster!r}; not in clusters.yaml"
-        )
+        raise errors.ClusterUnknown(f"unknown cluster {spec.cluster!r}; not in clusters.yaml")
     scheduler = cluster_cfg.get("scheduler", "slurm")
 
     # Re-export the planner's probe to keep behaviour identical (mem

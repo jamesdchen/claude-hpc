@@ -41,9 +41,7 @@ _SACCT_MODULE = "hpc_agent_pro._cron.extract_sacct_history"
 def _read_crontab() -> str:
     """Return the current user's crontab as a string. Empty on no crontab."""
     try:
-        result = subprocess.run(
-            ["crontab", "-l"], capture_output=True, text=True, encoding="utf-8"
-        )
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError as exc:
         raise errors.SpecInvalid(
             "crontab binary not on PATH — install cron (e.g. `apt install cron`) "
@@ -72,9 +70,7 @@ def _python_bin() -> str:
     return sys.executable
 
 
-def _install_line(
-    crontab: str, line: str, fingerprint: str
-) -> tuple[str, str]:
+def _install_line(crontab: str, line: str, fingerprint: str) -> tuple[str, str]:
     """Return ``(new_crontab, status)`` after maybe-appending ``line``.
 
     ``status`` is ``"installed"`` if the line was added, or
@@ -161,18 +157,18 @@ def install_cron(
         f'"{python}" -m {_SNAPSHOT_MODULE} '
         f'--ssh-target "{ssh_target}" '
         f'--experiment-dir "{exp_dir}" '
-        f'>> .hpc/snapshot_squeue.log 2>&1'
+        f">> .hpc/snapshot_squeue.log 2>&1"
     )
     train_line = (
         f'0 3 * * * cd "{exp_dir}" && '
         f'"{python}" -m {_SACCT_MODULE} '
         f'--ssh-target "{ssh_target}" --since-days 30 '
-        f'--out completed_jobs.json && '
+        f"--out completed_jobs.json && "
         f'"{python}" -m {_TRAIN_MODULE} '
-        f'--completed-jobs completed_jobs.json '
-        f'--slot-counts slot_counts.json '
+        f"--completed-jobs completed_jobs.json "
+        f"--slot-counts slot_counts.json "
         f'--experiment-dir "{exp_dir}" '
-        f'>> .hpc/train_wait_predictor.log 2>&1'
+        f">> .hpc/train_wait_predictor.log 2>&1"
     )
 
     crontab = _read_crontab()
