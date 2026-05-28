@@ -21,7 +21,7 @@ import pytest
 
 def test_plan_resubmit_overrides_primitive_wraps_existing_function(tmp_path):
     """The primitive delegates to the existing free function and packs the result."""
-    from hpc_agent_pro._schema_models.queries.plan_resubmit_overrides import (
+    from hpc_agent_pro._wire.queries.plan_resubmit_overrides import (
         PlanResubmitOverridesResult,
         PlanResubmitOverridesSpec,
     )
@@ -63,7 +63,7 @@ def test_plan_resubmit_overrides_primitive_wraps_existing_function(tmp_path):
 
 def test_plan_resubmit_overrides_primitive_serializes_via_model_dump(tmp_path):
     """The result is a Pydantic model so model_dump emits JSON-able output."""
-    from hpc_agent_pro._schema_models.queries.plan_resubmit_overrides import (
+    from hpc_agent_pro._wire.queries.plan_resubmit_overrides import (
         PlanResubmitOverridesSpec,
     )
     from hpc_agent_pro.planning import resubmit_planner
@@ -116,10 +116,10 @@ def _make_run_record(run_id: str = "r123", profile: str = "ml_ridge", cluster: s
 def test_smart_resubmit_flow_calls_both_halves(tmp_path):
     """The workflow reads the journal, refines via pro's planner, then resubmits."""
     from hpc_agent_pro import smart_resubmit_flow as srf_mod
-    from hpc_agent_pro._schema_models.queries.plan_resubmit_overrides import (
+    from hpc_agent_pro._wire.queries.plan_resubmit_overrides import (
         PlanResubmitOverridesResult,
     )
-    from hpc_agent_pro._schema_models.workflows.smart_resubmit_flow import (
+    from hpc_agent_pro._wire.workflows.smart_resubmit_flow import (
         SmartResubmitFlowSpec,
     )
 
@@ -180,7 +180,7 @@ def test_smart_resubmit_flow_raises_when_no_journal_record(tmp_path):
     from hpc_agent import errors
 
     from hpc_agent_pro import smart_resubmit_flow as srf_mod
-    from hpc_agent_pro._schema_models.workflows.smart_resubmit_flow import (
+    from hpc_agent_pro._wire.workflows.smart_resubmit_flow import (
         SmartResubmitFlowSpec,
     )
 

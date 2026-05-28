@@ -179,7 +179,7 @@ def cmd_predict_start_time(args: argparse.Namespace) -> int:
     from hpc_agent import errors
     from hpc_agent.cli._helpers import EXIT_OK, _load_spec, _ok
 
-    from hpc_agent_pro._schema_models.queries.predict_start_time import PredictStartTimeSpec
+    from hpc_agent_pro._wire.queries.predict_start_time import PredictStartTimeSpec
     from hpc_agent_pro.atoms.predict_start_time import predict_start_time_primitive
 
     intent = _load_spec(args.spec, schema_name="predict_start_time")
@@ -297,7 +297,7 @@ def cmd_predict_queue_wait(args: argparse.Namespace) -> int:
 
     from hpc_agent.cli._helpers import EXIT_OK, _ok, _validate_against_schema
 
-    from hpc_agent_pro._schema_models.queries.predict_queue_wait import PredictQueueWaitSpec
+    from hpc_agent_pro._wire.queries.predict_queue_wait import PredictQueueWaitSpec
     from hpc_agent_pro.forecast.queue_wait_baseline import predict_queue_wait
 
     payload: dict[str, _Any] = {
@@ -320,7 +320,7 @@ def cmd_predict_queue_wait(args: argparse.Namespace) -> int:
 def cmd_best_submit_window(args: argparse.Namespace) -> int:
     from hpc_agent.cli._helpers import EXIT_OK, _ok, _validate_against_schema
 
-    from hpc_agent_pro._schema_models.queries.best_submit_window import BestSubmitWindowSpec
+    from hpc_agent_pro._wire.queries.best_submit_window import BestSubmitWindowSpec
     from hpc_agent_pro.forecast.best_submit_window import best_submit_windows
 
     raw = {

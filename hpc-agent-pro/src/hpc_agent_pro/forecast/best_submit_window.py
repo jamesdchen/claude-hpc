@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from hpc_agent._kernel.registry.primitive import primitive
 from hpc_agent.infra.time import utcnow
 
-from hpc_agent_pro._schema_models.queries.best_submit_window import BestSubmitWindowSpec
+from hpc_agent_pro._wire.queries.best_submit_window import BestSubmitWindowSpec
 from hpc_agent_pro.forecast.queue_wait_baseline import predict_queue_wait
 
 if TYPE_CHECKING:
@@ -92,7 +92,7 @@ def best_submit_windows(
     top_k = spec.top_k
 
     now = utcnow().replace(minute=0, second=0, microsecond=0)
-    from hpc_agent_pro._schema_models.queries.predict_queue_wait import PredictQueueWaitSpec
+    from hpc_agent_pro._wire.queries.predict_queue_wait import PredictQueueWaitSpec
 
     candidates: list[WindowCandidate] = []
     # Include the current hour (h=0) so "submit now" is a legitimate

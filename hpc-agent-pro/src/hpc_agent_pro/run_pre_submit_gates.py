@@ -27,7 +27,7 @@ from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import primitive
 from hpc_agent.cli._dispatch import CliShape, SchemaRef
 
-from hpc_agent_pro._schema_models.workflows.run_pre_submit_gates import (
+from hpc_agent_pro._wire.workflows.run_pre_submit_gates import (
     RunPreSubmitGatesResult,
     RunPreSubmitGatesSpec,
     _GateOutcome,
@@ -102,7 +102,7 @@ def _run_predict_start_time(
     """Invoke ``predict-start-time`` and map its result to an outcome."""
     if payload is None:
         return _GateOutcome(status="skipped", envelope=None)
-    from hpc_agent_pro._schema_models.queries.predict_start_time import (
+    from hpc_agent_pro._wire.queries.predict_start_time import (
         PredictStartTimeSpec,
     )
     from hpc_agent_pro.atoms.predict_start_time import predict_start_time_primitive

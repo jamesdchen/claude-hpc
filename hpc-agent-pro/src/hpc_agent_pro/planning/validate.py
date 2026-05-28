@@ -19,7 +19,7 @@ from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent.infra.clusters import load_clusters_config
 
-from hpc_agent_pro._schema_models.validators.validate import ValidateResult, ValidateSpec
+from hpc_agent_pro._wire.validators.validate import ValidateResult, ValidateSpec
 
 if TYPE_CHECKING:
     from pathlib import Path

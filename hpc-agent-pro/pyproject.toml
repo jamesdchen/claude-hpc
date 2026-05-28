@@ -92,7 +92,7 @@ line-length = 100
 select = ["E", "F", "I", "W", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/hpc_agent_pro/_schema_models/*.py" = ["E501"]
+"src/hpc_agent_pro/_wire/*.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.10"

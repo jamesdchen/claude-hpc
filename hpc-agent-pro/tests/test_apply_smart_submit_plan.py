@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from hpc_agent_pro._schema_models.workflows.apply_smart_submit_plan import (
+from hpc_agent_pro._wire.workflows.apply_smart_submit_plan import (
     ApplySmartSubmitPlanSpec,
 )
 from hpc_agent_pro.apply_smart_submit_plan import apply_smart_submit_plan

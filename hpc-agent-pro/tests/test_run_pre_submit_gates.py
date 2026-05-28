@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from hpc_agent_pro._schema_models.workflows.run_pre_submit_gates import (
+from hpc_agent_pro._wire.workflows.run_pre_submit_gates import (
     RunPreSubmitGatesSpec,
 )
 from hpc_agent_pro.run_pre_submit_gates import run_pre_submit_gates
@@ -42,7 +42,7 @@ def _make_validate_report(overall: str = "pass"):
 
 def _make_predict_result():
     """Build a PredictStartTimeResult-like model_dump output."""
-    from hpc_agent_pro._schema_models.queries.predict_start_time import (
+    from hpc_agent_pro._wire.queries.predict_start_time import (
         PredictStartTimeResult,
     )
 

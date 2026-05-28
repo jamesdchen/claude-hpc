@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import primitive
 
-from hpc_agent_pro._schema_models.queries.predict_start_time import (
+from hpc_agent_pro._wire.queries.predict_start_time import (
     PredictStartTimeResult,
     PredictStartTimeSpec,
 )
@@ -71,7 +71,7 @@ def predict_start_time_primitive(
     except ValueError as exc:
         raise errors.SpecInvalid(str(exc)) from exc
 
-    from hpc_agent_pro._schema_models.queries.predict_start_time import _CandidateOut
+    from hpc_agent_pro._wire.queries.predict_start_time import _CandidateOut
 
     return PredictStartTimeResult(
         best_submit_offset_hours=best.best_submit_offset_hours,

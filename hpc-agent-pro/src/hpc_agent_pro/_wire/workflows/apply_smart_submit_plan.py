@@ -10,7 +10,7 @@ to hand to the submit primitive, or — when the planner surfaced a
 must be confirmed before chaining.
 
 The shape of the score-submit-plan envelope is documented in
-:class:`hpc_agent_pro._schema_models.queries.plan_submit.PlanSubmitResult`.
+:class:`hpc_agent_pro._wire.queries.plan_submit.PlanSubmitResult`.
 Field names used here (``recommended_tuple.predicted_eta_sec``,
 ``array_reshape.recommended_max_array_size``, ``walltime_split``)
 match that source of truth.
@@ -38,7 +38,7 @@ class ApplySmartSubmitPlanSpec(BaseModel):
             "The verbatim ``data`` field of a prior ``score-submit-plan`` (a.k.a. "
             "``plan-submit``) envelope. Field names track "
             ":class:`PlanSubmitResult` — see "
-            "``hpc_agent_pro._schema_models.queries.plan_submit``."
+            "``hpc_agent_pro._wire.queries.plan_submit``."
         ),
     )
 

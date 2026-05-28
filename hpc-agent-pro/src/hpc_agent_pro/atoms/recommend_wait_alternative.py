@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 from hpc_agent._kernel.registry.primitive import primitive
 
-from hpc_agent_pro._schema_models.queries.recommend_wait_alternative import (
+from hpc_agent_pro._wire.queries.recommend_wait_alternative import (
     RecommendWaitAlternativeResult,
     RecommendWaitAlternativeSpec,
     _ForecastEntry,
