@@ -457,7 +457,7 @@ def _eta_via_des(
     not yet bootstrapped.
     """
     try:
-        from hpc_agent_pro._schema_models.queries.predict_queue_wait import PredictQueueWaitSpec
+        from hpc_agent_pro._wire.queries.predict_queue_wait import PredictQueueWaitSpec
         from hpc_agent_pro.forecast.queue_wait_baseline import predict_queue_wait
 
         out = predict_queue_wait(

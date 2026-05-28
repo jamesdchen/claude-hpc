@@ -24,10 +24,10 @@ from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent.cli._dispatch import CliShape, SchemaRef
 
-from hpc_agent_pro._schema_models.queries.plan_resubmit_overrides import (
+from hpc_agent_pro._wire.queries.plan_resubmit_overrides import (
     PlanResubmitOverridesSpec,
 )
-from hpc_agent_pro._schema_models.workflows.smart_resubmit_flow import (
+from hpc_agent_pro._wire.workflows.smart_resubmit_flow import (
     SmartResubmitFlowResult,
     SmartResubmitFlowSpec,
 )

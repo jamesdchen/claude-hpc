@@ -53,7 +53,7 @@ from hpc_agent.infra.clusters import (
 )
 from hpc_agent.state.runtime_prior import read_samples
 
-from hpc_agent_pro._schema_models.queries.plan_resubmit_overrides import (
+from hpc_agent_pro._wire.queries.plan_resubmit_overrides import (
     PlanResubmitOverridesResult,
     PlanResubmitOverridesSpec,
 )

@@ -17,7 +17,7 @@
     },
     "score_submit_plan_envelope": {
       "additionalProperties": true,
-      "description": "The verbatim ``data`` field of a prior ``score-submit-plan`` (a.k.a. ``plan-submit``) envelope. Field names track :class:`PlanSubmitResult` — see ``hpc_agent_pro._schema_models.queries.plan_submit``.",
+      "description": "The verbatim ``data`` field of a prior ``score-submit-plan`` (a.k.a. ``plan-submit``) envelope. Field names track :class:`PlanSubmitResult` — see ``hpc_agent_pro._wire.queries.plan_submit``.",
       "title": "Score Submit Plan Envelope",
       "type": "object"
     }

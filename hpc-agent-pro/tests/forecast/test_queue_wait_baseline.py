@@ -11,7 +11,7 @@ from hpc_agent.infra.inspect import (
 )
 from hpc_agent.state import runtime_prior as rp
 
-from hpc_agent_pro._schema_models.queries.predict_queue_wait import PredictQueueWaitSpec
+from hpc_agent_pro._wire.queries.predict_queue_wait import PredictQueueWaitSpec
 from hpc_agent_pro.forecast import queue_wait_baseline as qwb
 
 PROFILE = "ml_ridge"

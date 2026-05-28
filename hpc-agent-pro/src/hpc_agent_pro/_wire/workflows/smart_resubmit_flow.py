@@ -16,7 +16,7 @@ from typing import Any
 from hpc_agent._wire._shared import FailureCategoryResubmittable
 from pydantic import BaseModel, ConfigDict, Field
 
-from hpc_agent_pro._schema_models.queries.plan_resubmit_overrides import (
+from hpc_agent_pro._wire.queries.plan_resubmit_overrides import (
     PlanResubmitOverridesResult,
 )
 

@@ -29,7 +29,7 @@ from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import primitive
 from hpc_agent.cli._dispatch import CliShape, SchemaRef
 
-from hpc_agent_pro._schema_models.workflows.apply_smart_submit_plan import (
+from hpc_agent_pro._wire.workflows.apply_smart_submit_plan import (
     ApplySmartSubmitPlanResult,
     ApplySmartSubmitPlanSpec,
 )

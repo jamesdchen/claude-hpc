@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from hpc_agent_pro._schema_models.queries.best_submit_window import BestSubmitWindowSpec
+from hpc_agent_pro._wire.queries.best_submit_window import BestSubmitWindowSpec
 from hpc_agent_pro.forecast.best_submit_window import best_submit_windows
 from tests.conftest import seed_diurnal_dip
 
