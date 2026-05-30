@@ -238,28 +238,24 @@ def get_template_path(scheduler: str, template: str) -> Path:
     FileNotFoundError
         If the resolved template does not exist on disk.
     """
-    # B5-PR2: route through the backend registry instead of an inline
-    # ladder. ``template_ext`` is a class attribute on each backend
-    # (".sh" for SGE, ".slurm" for SLURM); this keeps the on-disk layout
-    # under the backend's authority.
-    from hpc_agent.infra.backends import template_ext_for
+    # Phase 2 (Option C): the runtime array scripts are no longer static
+    # files on disk — they are RENDERED from the scheduler profile (see
+    # ``hpc_agent.infra.backends.profile.render_script``). This forwarder
+    # preserves its "return a Path to a usable template file" contract by
+    # materialising the rendered script into a per-process cache dir.
+    # ``template`` is a basename like ``cpu_array`` / ``gpu_array``; the
+    # ``_array`` suffix maps to the profile script ``kind``.
+    import tempfile
 
+    from hpc_agent.infra.backends import get_backend_class, template_ext_for
+
+    backend_cls = get_backend_class(scheduler)
     ext = template_ext_for(scheduler)
-    # B7: templates moved to hpc_agent/models/mapreduce/templates/ as part
-    # of the package reorg. Resolve via the hpc_agent package root so this
-    # forwarder keeps working until the rest of __init__.py moves over.
-    import hpc_agent as _hpc_agent_pkg
+    kind = template.replace("_array", "")  # "cpu_array" -> "cpu"
+    rendered = backend_cls.render_script(kind=kind)
 
-    _hpc_agent_root = Path(_hpc_agent_pkg.__file__).resolve().parent
-    path = (
-        _hpc_agent_root
-        / "models"
-        / "mapreduce"
-        / "templates"
-        / "runtime"
-        / scheduler
-        / f"{template}{ext}"
-    )
-    if not path.exists():
-        raise FileNotFoundError(f"Template not found: {path}")
+    cache_dir = Path(tempfile.gettempdir()) / "hpc_agent_templates" / scheduler
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"{template}{ext}"
+    path.write_text(rendered, encoding="utf-8", newline="")
     return path
