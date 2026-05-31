@@ -222,30 +222,38 @@ def load_tasks_module(tasks_py_path: Path) -> ModuleType:
 
 
 def get_template_path(scheduler: str, template: str) -> Path:
-    """Return the absolute path to a job template shipped with hpc-agent.
+    """Deprecated. Materialise a rendered job script and return its path.
+
+    .. deprecated::
+        The runtime array scripts are no longer static files on disk —
+        they are *rendered* from the scheduler profile (Phase 2 / Option
+        C). Prefer the text directly::
+
+            from hpc_agent.infra.backends import get_backend_class
+            body = get_backend_class(scheduler).render_script(kind="cpu")
+
+        This shim is retained for back-compat: it renders the script and
+        writes it to a stable per-(scheduler, template) path under the temp
+        dir (overwritten in place — no unbounded accumulation), then
+        returns that path.
 
     Parameters
     ----------
     scheduler : ``"sge"`` or ``"slurm"``
-    template : template name without extension (e.g. ``"cpu_array"``, ``"gpu_array"``)
-
-    Returns
-    -------
-    Path to the template file.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the resolved template does not exist on disk.
+    template : template basename (e.g. ``"cpu_array"`` / ``"gpu_array"``);
+        the ``_array`` suffix maps to the profile script ``kind``.
     """
-    # Phase 2 (Option C): the runtime array scripts are no longer static
-    # files on disk — they are RENDERED from the scheduler profile (see
-    # ``hpc_agent.infra.backends.profile.render_script``). This forwarder
-    # preserves its "return a Path to a usable template file" contract by
-    # materialising the rendered script into a per-process cache dir.
-    # ``template`` is a basename like ``cpu_array`` / ``gpu_array``; the
-    # ``_array`` suffix maps to the profile script ``kind``.
     import tempfile
+    import warnings
+
+    warnings.warn(
+        "hpc_agent.get_template_path is deprecated; the runtime array scripts "
+        "are rendered from the scheduler profile. Use "
+        "hpc_agent.infra.backends.get_backend_class(scheduler).render_script("
+        'kind="cpu"|"gpu") instead.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     from hpc_agent.infra.backends import get_backend_class, template_ext_for
 

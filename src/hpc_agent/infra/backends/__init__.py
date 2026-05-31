@@ -481,15 +481,28 @@ def register_profile(profile: Any, *, remote: bool = True) -> type[HPCBackend]:
 
     After this, ``get_backend_class(profile.name)`` and
     ``get_backend(profile.name, ...)`` return a class bound to *profile*.
-    Idempotent: a name already mapped to an equivalent profile (e.g. the
-    golden ``slurm`` / ``sge`` registered via their dedicated remote
-    classes) is left untouched, so a resolver re-seeding a known family
-    does not clobber the hand-written backend.
+
+    Idempotent for an *equivalent* profile: a name already mapped to an
+    equal profile (e.g. the golden ``slurm`` / ``sge`` registered via
+    their dedicated remote classes, re-seeded by the resolver) is left
+    untouched. A name already mapped to a *different* profile raises
+    :class:`~hpc_agent.errors.SpecInvalid` rather than silently
+    overwriting — two clusters claiming the same scheduler label with
+    divergent profiles is a configuration error that would otherwise make
+    backend selection order-dependent. Give each distinct profile its own
+    ``name``.
     """
     _populate_registry()
     existing = _REGISTRY.get(profile.name)
-    if existing is not None and getattr(existing, "profile", None) == profile:
-        return existing
+    if existing is not None:
+        existing_profile = getattr(existing, "profile", None)
+        if existing_profile == profile:
+            return existing  # idempotent re-registration of the same profile
+        raise errors.SpecInvalid(
+            f"scheduler label {profile.name!r} is already registered with a "
+            "different profile; refusing to silently override it. Two clusters "
+            "with divergent schedulers must use distinct scheduler names."
+        )
     cls = build_backend_class(profile, remote=remote)
     _REGISTRY[profile.name] = cls
     return cls

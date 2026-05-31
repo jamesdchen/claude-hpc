@@ -675,6 +675,7 @@ def _submit_one_spec(
         job_env_keys=tuple(job_env_full.keys()),
         slurm_account=spec.slurm_account,
         slurm_cluster=spec.slurm_cluster,
+        scheduler_profile=spec.scheduler_profile,
     )
 
     canary_run_id: str | None = None

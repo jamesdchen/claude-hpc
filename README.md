@@ -257,12 +257,14 @@ Claude remembers your preferences (cluster, executor directory, environment, res
 
 ## Job Templates
 
-| Template | SGE | SLURM |
-|----------|-----|-------|
-| CPU array | `hpc_agent/models/mapreduce/templates/runtime/sge/cpu_array.sh` | `hpc_agent/models/mapreduce/templates/runtime/slurm/cpu_array.slurm` |
-| GPU array | `hpc_agent/models/mapreduce/templates/runtime/sge/gpu_array.sh` | `hpc_agent/models/mapreduce/templates/runtime/slurm/gpu_array.slurm` |
+The per-scheduler CPU/GPU array job scripts are **rendered from the scheduler profile** (`hpc_agent.infra.backends.profile.SchedulerProfile`) rather than shipped as static files — `deploy_runtime` renders them and transfers the bytes to `.hpc/templates/{cpu_array,gpu_array}.{sh,slurm}` on the cluster. The golden `SLURM_PROFILE` / `SGE_PROFILE` reproduce the historical templates exactly; a resolved profile (for a non-default cluster) carries its own script bodies.
 
-Templates are parameterized via environment variables injected at submission time. Resolve paths via `hpc_agent.get_template_path(scheduler, template)`. The GPU template is used when the configured resources include `gpus`; otherwise the CPU template is used.
+| Profile | Family | Rendered scripts |
+|---------|--------|------------------|
+| `SLURM_PROFILE` | slurm | `cpu_array.slurm`, `gpu_array.slurm` |
+| `SGE_PROFILE` | sge | `cpu_array.sh`, `gpu_array.sh` |
+
+Scripts are parameterized via environment variables injected at submission time. Render one in-process with `hpc_agent.infra.backends.get_backend_class(scheduler).render_script(kind="cpu"|"gpu")`. The GPU script is used when the configured resources include `gpus`; otherwise the CPU script is used. (`hpc_agent.get_template_path` is retained as a deprecated shim that materialises a rendered script to a temp path.)
 
 ## Supported Clusters
 

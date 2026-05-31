@@ -38,6 +38,7 @@ def build_remote_backend(
     job_env_keys: tuple[str, ...],
     slurm_account: str | None = None,
     slurm_cluster: str | None = None,
+    scheduler_profile: dict[str, object] | None = None,
 ) -> HPCBackend:
     """Construct the right ``HPCBackend`` for the requested scheduler.
 
@@ -45,10 +46,38 @@ def build_remote_backend(
     the local backends (which assume a local ``qsub``/``sbatch``
     binary) are never used here. ``submit-flow`` and ``resubmit-flow``
     are both laptop-driven.
+
+    When *scheduler_profile* is given (a pinned / resolved
+    :class:`~hpc_agent.infra.backends.profile.SchedulerProfile` dict from
+    a cluster's ``clusters.yaml`` entry), the backend is built *bound to
+    that profile* — the family it declares (``slurm`` / ``sge``) selects
+    the command grammar and its data (regex, scripts, error vocabulary)
+    overrides the golden default. This is how a non-default cluster's
+    customised scheduler reaches the engine. Without it, the golden
+    ``slurm`` / ``sge`` backends are used exactly as before.
     """
 
     def ssh(cmd: str):
         return ssh_run(cmd, ssh_target=ssh_target)
+
+    if scheduler_profile is not None:
+        from hpc_agent.infra.backends import build_backend_class
+        from hpc_agent.infra.backends.profile import SchedulerProfile
+
+        profile = SchedulerProfile.from_dict(scheduler_profile)
+        cls = build_backend_class(profile, remote=True)
+        # Mirror the SGE env-forwarding rule: `[]`/`None` mean "forward
+        # every job_env key"; only used by the sge family but harmless to
+        # pass for slurm (which ignores pass_env_keys).
+        keys = pass_env_keys if pass_env_keys else job_env_keys
+        return cls(
+            script=script,
+            ssh_run=ssh,
+            remote_repo=remote_path,
+            account=slurm_account or "",
+            cluster=slurm_cluster or "",
+            pass_env_keys=tuple(keys),
+        )
 
     if backend_name == "sge":
         # `[]`/`()` and `None` are EQUIVALENT here: both mean "forward every
