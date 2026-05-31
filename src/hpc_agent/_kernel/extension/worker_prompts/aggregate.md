@@ -33,14 +33,7 @@ If a value you need is absent here, derive it from the run sidecar on disk — n
 
    `poll-run-status` alone is **not** sufficient here: it refreshes the snapshot `last_status` but does NOT drive the lifecycle `status` to terminal. For a deliberate partial aggregate of a still-running run, pass `ensure_all_combined: false` instead (skips both the gate and combining waves still in flight).
 
-2. **Pull the run sidecar locally if missing** so `aggregate-flow` can read its `wave_map`, `result_dir_template`, `task_count`, and (if set) `aggregate_defaults`:
-
-   ```bash
-   mkdir -p .hpc/runs
-   rsync -az $SSH_TARGET:$REMOTE_PATH/.hpc/runs/<run_id>.json ./.hpc/runs/<run_id>.json
-   ```
-
-   `.hpc/tasks.py` is git-tracked locally; it should already be in your repo.
+2. **No manual sidecar pull.** `aggregate-flow` self-sources the per-run sidecar — it reads the cluster's wave partials directly and SSH-reads the remote sidecar for `aggregate_defaults` when the local copy is absent. Do **not** `rsync` the sidecar by hand; the worker reaches the cluster only through `hpc-agent`. (`.hpc/tasks.py` is git-tracked and already in your repo.)
 
 3. **Choose a mode**. The default is `mode: "auto"` and the right choice 90% of the time — it routes to `cluster-reduce` when the sidecar's `aggregate_defaults.aggregate_cmd` is set; otherwise to combiner-only. Overrides:
    - `mode: "cluster-reduce"` — force the cluster-side reducer; raise if no `aggregate_cmd` is available.

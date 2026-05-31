@@ -74,12 +74,18 @@ _WORKER_MODEL = "haiku"
 # that file: `--bare` skips settings.json outright, and the OAuth path runs
 # from an ephemeral CLAUDE_CONFIG_DIR with no project `.claude/`. So the
 # worker — the one surface that actually SSHes to a scheduler — is the only
-# place the deny never reaches. Re-apply it as a CLI fence on the spawn
-# itself. (Direct `ssh`/`rsync` are NOT yet fenced: aggregate.md still pulls
-# a sidecar with raw `rsync`, so a tighter `Bash(hpc-agent:*)`-only allowlist
-# is gated on de-freestyling that step.)
+# place the deny never reaches. Re-apply it as a CLI fence on the spawn, and
+# fence direct cluster transport too: every worker procedure now reaches the
+# cluster ONLY through `hpc-agent` (submit-flow/aggregate-flow/status do their
+# own ssh+rsync internally, as subprocesses of the binary — which this Bash
+# fence does not touch), so the LLM never needs raw `ssh`/`rsync`/`scp`, nor
+# `curl`/`wget`, which would only serve exfil. The worker still legitimately
+# shells `python3`/`git` (scaffold discovery, tasks.py commit), so this is a
+# direct-cluster-and-exfil deny — not yet a `Bash(hpc-agent:*)`-only allowlist
+# (that's gated on de-freestyling submit.md's remaining python/git steps).
 _WORKER_DISALLOWED_TOOLS = (
-    "Bash(scancel:*) Bash(qdel:*) Bash(qmod:*) Bash(qsub:*) Bash(sbatch:*)"
+    "Bash(scancel:*) Bash(qdel:*) Bash(qmod:*) Bash(qsub:*) Bash(sbatch:*) "
+    "Bash(ssh:*) Bash(rsync:*) Bash(scp:*) Bash(curl:*) Bash(wget:*)"
 )
 
 # OAuth worker auth is unsupported on macOS: the Claude Code OAuth token lives

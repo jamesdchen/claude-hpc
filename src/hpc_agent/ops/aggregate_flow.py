@@ -475,6 +475,24 @@ def aggregate_flow(
         sidecar_for_cmd = read_run_sidecar(experiment_dir, run_id) or {}
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         sidecar_for_cmd = {}
+    if not sidecar_for_cmd:
+        # Local sidecar absent: the caller no longer rsyncs it by hand —
+        # aggregate-flow owns its inputs. Self-source aggregate_defaults by
+        # SSH-reading the remote sidecar we already have access to. Best-effort:
+        # a remote read failure leaves the combiner-only fallback intact.
+        from hpc_agent.ops.aggregate.runner import _read_remote_sidecar
+
+        try:
+            sidecar_for_cmd = (
+                _read_remote_sidecar(
+                    ssh_target=record.ssh_target,
+                    remote_path=record.remote_path,
+                    run_id=run_id,
+                )
+                or {}
+            )
+        except (errors.HpcError, OSError, ValueError):
+            sidecar_for_cmd = {}
     resolved_aggregate_cmd = aggregate_cmd or (
         (sidecar_for_cmd.get("aggregate_defaults") or {}).get("aggregate_cmd")
     )

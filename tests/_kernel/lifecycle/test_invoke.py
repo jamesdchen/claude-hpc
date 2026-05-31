@@ -310,7 +310,7 @@ def test_worker_spawn_fences_destructive_cluster_ops(
         assert "--disallowedTools" in argv
         fenced = _disallowed_after_flag(argv)
         assert fenced == invoke_mod._WORKER_DISALLOWED_TOOLS
-        for op in ("scancel", "qdel", "qsub", "sbatch"):
+        for op in ("scancel", "qdel", "qsub", "sbatch", "ssh", "rsync", "scp"):
             assert f"Bash({op}:*)" in fenced
 
 
