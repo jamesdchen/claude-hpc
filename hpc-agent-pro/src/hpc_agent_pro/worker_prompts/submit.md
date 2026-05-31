@@ -149,23 +149,19 @@ If `plan-submit` envelope is `ok: false`, fall back to static-constraint flow: t
 
 ### Audit file
 
-After Step 8 returns job IDs, write the decision to `.hpc/runs/<run_id>.decision.json`:
+After Step 8 returns job IDs, use the **Write tool** (not shell `python` — the worker is invoke-only) to write `.hpc/runs/<run_id>.decision.json` with this shape:
 
-```python
-import json
-from pathlib import Path
-from datetime import datetime, timezone
-decision = {
-    "schema_version": 1,
-    "run_id": run_id,
-    "profile": profile,
-    "cluster": cluster,
-    "submitted_at": datetime.now(timezone.utc).isoformat(),
-    "candidates_considered": [...],
-    "chosen": {"constraint": ..., "walltime_sec": ..., "exclude_nodes": [...], "rationale": ...},
-    "job_ids": job_ids,
+```json
+{
+  "schema_version": 1,
+  "run_id": "<run_id>",
+  "profile": "<profile>",
+  "cluster": "<cluster>",
+  "submitted_at": "<ISO-8601 UTC>",
+  "candidates_considered": ["<...>"],
+  "chosen": {"constraint": "<...>", "walltime_sec": 0, "exclude_nodes": ["<...>"], "rationale": "<...>"},
+  "job_ids": ["<...>"]
 }
-Path(f".hpc/runs/{run_id}.decision.json").write_text(json.dumps(decision, indent=2, sort_keys=True))
 ```
 
 ## Step 5: Confirm Run Plan (via summarize-submit-plan)
