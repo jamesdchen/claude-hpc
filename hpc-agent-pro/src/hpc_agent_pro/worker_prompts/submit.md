@@ -13,8 +13,11 @@ Throughout this procedure, "invoke <primitive>" means call the primitive's `back
 
 If a value you need later is absent here, derive it from the run sidecar on disk — never from memory.
 
-Read cluster definitions:
-- `clusters.yaml`: resolve path via `python -c 'from hpc_agent import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "config" / "clusters.yaml")'`
+Read cluster definitions with the [clusters-describe](../../docs/primitives/clusters-describe.md) primitive — never resolve and parse `clusters.yaml` by hand:
+
+```bash
+hpc-agent clusters describe <cluster>
+```
 
 Call [suggest-setup-action](../../docs/primitives/suggest-setup-action.md) to figure out where in the priority ladder the experiment sits — it returns `{priority, action, run_id, candidates, reason}`:
 
@@ -179,18 +182,9 @@ The envelope's `data` carries `{headline, body, confirm_prompt}`. Surface `headl
 
 ### 6a: Reuse if `.hpc/tasks.py` exists
 
-```python
-from pathlib import Path
-from hpc_agent import RepoLayout, load_tasks_module
-from hpc_agent.state.run_sha import compute_cmd_sha
+The Setup-step `action` already told you whether tasks.py exists (`reuse`/`interview` ⇒ present, `fresh` ⇒ absent); confirm with the **Glob** tool for `.hpc/tasks.py` when unsure. Do **not** import `hpc_agent` internals to look — 6c's `compute-run-id` owns the `cmd_sha`, and 6b's `build-tasks-py` creates `.hpc/` itself.
 
-experiment_dir = Path.cwd()
-layout = RepoLayout(experiment_dir)
-_ = layout.hpc  # mkdir's .hpc/ + writes .gitignore on first read
-tp = layout.tasks
-```
-
-If `tp.exists()`, read it as-is — never regenerate. To change the axis, the user edits `.hpc/tasks.py` directly and re-runs. Skip to 6c.
+If it exists, read it as-is — never regenerate. To change the axis, the user edits `.hpc/tasks.py` directly and re-runs. Skip to 6c.
 
 ### 6b: Scaffold from canonical example (first submit only)
 
@@ -200,12 +194,7 @@ If `tp.exists()` is False, walk through `hpc_agent/models/mapreduce/templates/sc
 
 **Axis naming**: prefer experiment-prefixed axis names (`exp_horizon`, `ridge_alpha`) over bare ones (`horizon`, `alpha`) — a bare name whose uppercase form is a real env var (an axis `home` → `$HOME`) corrupts the executor's environment. `build-tasks-py` rejects names that collide with a reserved set at scaffold time; the mechanism and the recommended `HPC_KW_NAMESPACE_ONLY=1` default are in [build-tasks-py.md](../../docs/primitives/build-tasks-py.md).
 
-Copy the dispatcher:
-```python
-import shutil
-from hpc_agent import _PACKAGE_ROOT
-shutil.copy(_PACKAGE_ROOT / "models" / "mapreduce" / "templates" / "scaffolds" / "cli_dispatcher.py", experiment_dir / ".hpc" / "cli.py")
-```
+`build-tasks-py` also deploys the sibling dispatcher `.hpc/cli.py` in the same call — no separate copy step.
 
 Commit `.hpc/tasks.py` + `.hpc/cli.py`. No push — user controls upstream.
 
