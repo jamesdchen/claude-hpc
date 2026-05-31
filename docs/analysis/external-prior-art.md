@@ -100,7 +100,29 @@ strongest:
 - **Security footguns:** `SendableMixin` will `importlib.import_module` any class a
   db file names (protection explicitly disabled) and `Script` uses `eval`; never
   load untrusted db files/templates.
-- **Single-maintainer** GitLab project (bus factor).
+- **Bus factor (measured).** Alive and active — 4 years, 6,472 commits, releases
+  through 2026 (v0.14.3), commits last week — but **99.5% of all commits are one
+  author** (Louis Beal, CEA Grenoble / Univ. Grenoble Alpes, L_Sim — the BigDFT
+  group; sole `remotemanager` dev, ~457 of last-12-mo commits vs 9 from everyone
+  else). Well-maintained in *throughput*, single-point-of-failure in *resilience*.
+  This shape argues for **track-and-borrow + contribute upstream, not depend on**:
+  re-pull techniques as he hardens them (e.g. he fixed the SSH pipe-hang on
+  2026-05-22) without betting our uptime on one person.
+
+### The transport-seam question (revisited) → #209
+
+Pressed on whether `remotemanager`'s `CMD` solves our most-patched seam (`ssh_run`)
+better: **on hang-avoidance, yes** — its `_communicate_with_select` closes pipes on
+process-exit instead of waiting for EOF, so a backgrounded child can't wedge the
+read; ours catches that only via the blocking-`subprocess.run` timeout. **But three
+measured facts make borrow-the-technique, not adopt-the-library, correct:** (1)
+`from remotemanager.connection.cmd import CMD` transitively pulls in **44 internal
+modules** (the whole library, incl. the `eval`/arbitrary-import `SendableMixin`
+`CMD` inherits) — not separable; (2) ~18 of our 23 transport bugs are
+Windows/OpenSSH/ssh-agent/OAuth, a surface `remotemanager` (clean POSIX
+`Popen(shell=True)`) lacks entirely — adopting it *regresses* them; (3) bus factor
+above. So #209 vendors the ~60-line select-loop technique (MIT, attributed) behind
+our existing `ssh_argv` seam.
 
 ### Convergence = confirmation
 
@@ -182,8 +204,10 @@ live dependency. Not yet ticketed.
 | Local executor dry-run / smoke-exec gate before the cluster canary | [#205](https://github.com/jamesdchen/hpc-agent/issues/205) |
 | Centralize resource value-coercion (clamp + canonical walltime `HH:MM:SS`) — port P1 | [#206](https://github.com/jamesdchen/hpc-agent/issues/206) |
 | Confirm `cmd_sha` excludes code identity; opt-in invalidate-on-code-change — adapt P5 | [#207](https://github.com/jamesdchen/hpc-agent/issues/207) |
+| Vendor select-loop / close-pipes-on-exit into `ssh_run` (anti-hang); track `CMD`, don't depend — P3 | [#209](https://github.com/jamesdchen/hpc-agent/issues/209) |
 
 Smaller un-ticketed follow-ups from the audit: P2 (spurious-stderr allowlist),
-P7 (stage-input freshness via provenance), P8 (ranked state enum), P3 (streaming
-anti-hang, only if a streaming path lands), and the optional `docs/hpc-knowledge/`
-reference borrow from HPC-Skills.
+P7 (stage-input freshness via provenance), P8 (ranked state enum), and the optional
+`docs/hpc-knowledge/` reference borrow from HPC-Skills. A possible collaboration
+thread (contributing our Windows/ssh-agent hardening *upstream* to `remotemanager`,
+which lacks it) is noted but deliberately not ticketed.
