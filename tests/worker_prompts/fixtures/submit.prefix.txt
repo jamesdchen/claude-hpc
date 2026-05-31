@@ -47,8 +47,13 @@ When in doubt, prefer `anomalies`. **Do not invent new `decisions` point IDs** (
 
 If a value you need later is absent here, derive it from the run sidecar on disk — never from memory.
 
-Read cluster definitions:
-- `clusters.yaml`: resolve path via `python -c 'from hpc_agent import _PACKAGE_ROOT; print(_PACKAGE_ROOT / "config" / "clusters.yaml")'`
+Read cluster definitions with the [clusters-describe](../../docs/primitives/clusters-describe.md) primitive — never resolve and parse `clusters.yaml` by hand:
+
+```bash
+hpc-agent clusters describe <cluster>   # resolved block: host, user, scheduler, scratch, modules, conda_source, gpu_types
+```
+
+Run `hpc-agent clusters list` first if you don't yet know the cluster key.
 
 Call [suggest-setup-action](../../docs/primitives/suggest-setup-action.md) to figure out where in the priority ladder the experiment sits — it returns `{priority, action, run_id, candidates, reason}`:
 
@@ -209,18 +214,14 @@ The envelope's `data` carries `{headline, body, confirm_prompt}`. Surface `headl
 
 ### 6a: Reuse if `.hpc/tasks.py` exists
 
-```python
-from pathlib import Path
-from hpc_agent import RepoLayout, load_tasks_module
-from hpc_agent.state.run_sha import compute_cmd_sha
+The Setup-step `action` already told you whether tasks.py exists: `reuse` / `interview` ⇒ present, `fresh` ⇒ absent. Confirm with a plain file test — do **not** import `hpc_agent` internals (`RepoLayout`, `load_tasks_module`) to look, and do **not** import `hpc_agent.state.run_sha` to hash it; 6c's `compute-run-id` owns the `cmd_sha`:
 
-experiment_dir = Path("<experiment_dir>")  # the value from the invocation context (you cd'd here at the start); do not depend on the process cwd
-layout = RepoLayout(experiment_dir)
-_ = layout.hpc  # mkdir's .hpc/ + writes .gitignore on first read
-tp = layout.tasks
+```bash
+mkdir -p .hpc                                  # build-tasks-py (6b) also creates it; harmless if present
+test -f .hpc/tasks.py && echo reuse || echo scaffold
 ```
 
-If `tp.exists()`, read it as-is — never regenerate. To change the axis, the user edits `.hpc/tasks.py` directly and re-runs. Skip to 6c.
+If it exists, read it as-is — never regenerate. To change the axis, the user edits `.hpc/tasks.py` directly and re-runs. Skip to 6c.
 
 ### 6b: Scaffold from canonical example (first submit only)
 
@@ -272,15 +273,7 @@ The spec is a `WriteRunSidecarInput` JSON (see `schemas/write_run_sidecar.input.
 
 **`executor` MUST be the real per-task command** (e.g. `python train.py --seed $SEED` / `python3 .hpc/_hpc_dispatch.py`'s *resolved* target), NOT the job-script dispatcher command (`python3 .hpc/_hpc_dispatch.py`) itself — a dispatcher-as-executor sidecar makes the dispatcher run itself and the whole array self-recurses (#162). `write-run-sidecar` refuses dispatcher-shaped values at intake.
 
-**Write-first is a hard precondition, not a manual unblock (#171).** `submit-flow` (Step 7-8) now *refuses* to run when the per-run sidecar is absent, or present but "pending" with an empty/dispatcher-only `executor` — it raises a `spec_invalid` telling you to write the sidecar first. So do this step; never skip it expecting `submit-flow` to synthesize one from the job-script command. Confirm it landed before building the submit-flow spec:
-
-```python
-from hpc_agent.state.runs import read_run_sidecar
-sc = read_run_sidecar(experiment_dir, run_id)  # raises FileNotFoundError if Step 6d was skipped
-assert sc["executor"] and "_hpc_dispatch.py" not in sc["executor"], (
-    "sidecar executor must be the real per-task command, not the dispatcher (#162/#171)"
-)
-```
+**Write-first is a hard precondition, not a manual unblock (#171).** `submit-flow` (Step 7-8) now *refuses* to run when the per-run sidecar is absent, or present but "pending" with an empty/dispatcher-only `executor` — it raises a `spec_invalid` telling you to write the sidecar first. And `write-run-sidecar` itself **refuses dispatcher-shaped `executor` values at intake** (#162). So the "sidecar present + real per-task executor" invariant is enforced by the two primitives you just called — do **not** re-read the sidecar with `hpc_agent.state.runs` internals to re-assert it by hand. A non-error envelope from `write-run-sidecar` is the confirmation; if it errored, fix the spec and re-run before building the submit-flow spec.
 
 ## Step 6b: Pre-flight Gate (cached per cluster)
 
