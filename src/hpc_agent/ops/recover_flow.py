@@ -473,6 +473,23 @@ def _submit_resubmit_batches(
     except Exception:  # noqa: BLE001 — fall back to defaults on any failure
         pass
 
+    # Fall back to the per-run experiment_meta.json pin (the unified rule's
+    # source of truth) when clusters.yaml carried none — this is how an
+    # ad-hoc cluster, absent from clusters.yaml, still recovers with its
+    # resolved backend.
+    if scheduler_profile_pin is None:
+        try:
+            import json as _json
+
+            meta_p = Path(experiment_dir) / "experiment_meta.json"
+            if meta_p.is_file():
+                meta = _json.loads(meta_p.read_text(encoding="utf-8"))
+                mp = meta.get("scheduler_profile") if isinstance(meta, dict) else None
+                if isinstance(mp, dict):
+                    scheduler_profile_pin = mp
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
     plan = resubmit_plan(
         task_count=total_tasks,
         failed_task_ids=failed_task_ids,

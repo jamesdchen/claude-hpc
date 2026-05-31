@@ -367,18 +367,60 @@ def _author_profile_for_unknown_family(
     5. PIN: only once the canary passes, ``register_profile`` it and call
        ``pin_scheduler_profile`` so the validated profile becomes durable.
 
-    Until a live cluster + LLM are wired in, this raises
-    ``NotImplementedError`` with the above contract so callers fail loudly
-    and obviously rather than silently mis-resolving an unknown scheduler.
+    The deterministic mechanics (probe / seed / author / offline-validate /
+    canary) live in :mod:`hpc_agent.infra.scheduler_resolve`; this function
+    wires the injected *probe* (an ``ssh_run`` callable) and *llm* into that
+    loop and registers the result. ``remote_repo`` for the live canary is
+    taken from the cluster cfg (``scratch``); without it the canary is
+    skipped but the offline-validation gate still applies.
     """
-    raise NotImplementedError(
-        f"authoring a SchedulerProfile for unknown scheduler {scheduler!r} "
-        f"requires the live-cluster canary + LLM seam (probe -> seed-from-"
-        f"nearest-golden -> LLM fill -> canary submit 1 task -> verify "
-        f"job-id parse + alive + log path -> register + pin). Pin a "
-        f"'scheduler_profile' in clusters.yaml to resolve deterministically "
-        f"in the meantime."
+    # NB: ``errors`` is a local list variable in other functions of this
+    # module and the errors *module* is not imported at top level, so alias
+    # it locally to avoid the name collision.
+    from hpc_agent import errors as _errors
+
+    if probe is None:
+        raise _errors.SpecInvalid(
+            f"resolving unknown scheduler {scheduler!r} requires a 'probe' "
+            "(an ssh_run callable for the login node). Pin a 'scheduler_profile' "
+            "in clusters.yaml to resolve deterministically instead."
+        )
+    from hpc_agent.infra.scheduler_resolve import resolve_unknown_scheduler
+
+    cfg = cfg or {}
+    remote_repo = cfg.get("scratch") or cfg.get("remote_path")
+    profile = resolve_unknown_scheduler(
+        scheduler,
+        ssh_run=probe,
+        llm=llm,
+        remote_repo=remote_repo,
+        run_canary=bool(remote_repo),
     )
+    _register(profile)
+    return profile
+
+
+def _pin_resolved(profile, *, result_dir, cluster_name) -> None:
+    """Persist a freshly-resolved (non-pinned-path) profile per the unified rule.
+
+    Always pins to ``experiment_meta.json`` under *result_dir* (the per-run
+    source of truth that recover/status read); ADDITIONALLY caches it into a
+    writable ``clusters.yaml`` entry when *cluster_name* is given (so the
+    next experiment on that cluster skips re-resolution). Both writes are
+    best-effort — a failure must never break resolution itself.
+    """
+    import contextlib
+
+    if result_dir is not None:
+        with contextlib.suppress(OSError):
+            pin_scheduler_profile(result_dir, profile)
+    if cluster_name:
+        try:
+            from hpc_agent.infra.clusters import write_back_scheduler_profile
+
+            write_back_scheduler_profile(cluster_name, profile.to_dict())
+        except Exception:  # noqa: BLE001 — caching is strictly best-effort
+            pass
 
 
 def resolve_scheduler_profile(
@@ -386,6 +428,7 @@ def resolve_scheduler_profile(
     *,
     cfg: dict | None = None,
     result_dir: str | Path | None = None,
+    cluster_name: str | None = None,
     probe=None,
     llm=None,
 ):
@@ -410,15 +453,20 @@ def resolve_scheduler_profile(
        LLM-authoring + canary seam (``_author_profile_for_unknown_family``),
        which is the only path that needs a live cluster.
 
-    When *result_dir* is provided and a profile is resolved by a non-pinned
-    path, the resolved profile is PINNED into ``experiment_meta.json`` there
-    (best-effort) so it becomes durable.
+    When a profile is resolved by a non-pinned path (3 or 4), the unified
+    pin rule applies: it is ALWAYS written to ``experiment_meta.json`` under
+    *result_dir* (the per-run source of truth recover/status read), and
+    ADDITIONALLY cached into a writable ``clusters.yaml`` entry when
+    *cluster_name* is given (so the next experiment skips re-resolution).
+    Both writes are best-effort.
 
     Args:
       scheduler: the scheduler family/name (e.g. ``"slurm"``).
       cfg: the cluster config dict for this run (may carry the pin).
       result_dir: a per-run/per-task dir used to locate (and write)
         ``experiment_meta.json`` for the pin.
+      cluster_name: the clusters.yaml key for this cluster; when set, the
+        resolved profile is cached back into the writable clusters.yaml.
       probe: optional callable for live binary detection (unknown-family
         seam only).
       llm: optional LLM handle for profile authoring (unknown-family seam
@@ -452,18 +500,15 @@ def resolve_scheduler_profile(
     if fam in _KNOWN_SCHEDULER_FAMILIES:
         profile = _golden_profile_for_family(fam)
         _register(profile)
-        if result_dir is not None:
-            try:
-                pin_scheduler_profile(result_dir, profile)
-            except OSError:
-                # A best-effort pin must never break resolution itself.
-                pass
+        _pin_resolved(profile, result_dir=result_dir, cluster_name=cluster_name)
         return profile
 
-    # 4. Unknown family → live LLM-authoring + canary seam.
-    return _author_profile_for_unknown_family(
+    # 4. Unknown family → live LLM-authoring + canary seam, then pin.
+    profile = _author_profile_for_unknown_family(
         scheduler, cfg=cfg, result_dir=result_dir, probe=probe, llm=llm
     )
+    _pin_resolved(profile, result_dir=result_dir, cluster_name=cluster_name)
+    return profile
 
 
 # ---------------------------------------------------------------------------

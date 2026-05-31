@@ -230,9 +230,7 @@ class ClusterConfig(BaseModel):
         usable string.
         """
         if not isinstance(value, str) or not value.strip():
-            raise errors.SpecInvalid(
-                f"scheduler must be a non-empty string, got {value!r}"
-            )
+            raise errors.SpecInvalid(f"scheduler must be a non-empty string, got {value!r}")
         return value
 
     @model_validator(mode="after")
@@ -360,6 +358,53 @@ def load_clusters_config(path: Path | None = None) -> dict[str, Any]:
         # downstream `.get(...)` calls on the result don't AttributeError.
         result: dict[str, Any] = yaml.safe_load(f) or {}
     return result
+
+
+def writable_clusters_config_path() -> Path:
+    """The clusters.yaml path safe to WRITE (to cache a resolved profile).
+
+    Mirrors :func:`load_clusters_config`'s search but only ever returns a
+    *writable* user/env location — never the packaged read-only default
+    under ``hpc_agent/config/``. Returns ``HPC_CLUSTERS_CONFIG`` when set,
+    else ``~/.hpc-agent/clusters.yaml``.
+    """
+    env_path = os.environ.get("HPC_CLUSTERS_CONFIG")
+    if env_path:
+        return Path(env_path)
+    return Path("~/.hpc-agent/clusters.yaml").expanduser()
+
+
+def write_back_scheduler_profile(cluster_name: str, profile_dict: dict[str, Any]) -> bool:
+    """Best-effort: cache a resolved ``scheduler_profile`` into clusters.yaml.
+
+    Sets ``data[cluster_name]["scheduler_profile"] = profile_dict`` in the
+    writable config so a later experiment on the same cluster skips
+    re-resolution. Returns ``True`` on success; ``False`` (never raises)
+    when there is no writable target or the cluster has no existing entry to
+    attach to — an *ad-hoc* cluster (absent from clusters.yaml) relies on
+    the per-run ``experiment_meta.json`` pin instead, which is the source of
+    truth regardless.
+    """
+    try:
+        target = writable_clusters_config_path()
+        data: dict[str, Any] = {}
+        if target.is_file():
+            loaded = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+            if not isinstance(loaded, dict):
+                return False
+            data = loaded
+        entry = data.get(cluster_name)
+        if not isinstance(entry, dict):
+            # Only attach to an existing entry — inventing a cluster record
+            # from a resolve would be surprising and could mask a typo.
+            return False
+        entry["scheduler_profile"] = profile_dict
+        data[cluster_name] = entry
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(yaml.safe_dump(data, sort_keys=True), encoding="utf-8")
+        return True
+    except (OSError, yaml.YAMLError):
+        return False
 
 
 def remote_activation_prefix(cluster_cfg: dict[str, Any], *, conda_env: str | None = None) -> str:
