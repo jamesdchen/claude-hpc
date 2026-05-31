@@ -200,12 +200,11 @@ Commit `.hpc/tasks.py` + `.hpc/cli.py`. No push — user controls upstream.
 
 ### 6c: Compute `cmd_sha`, check for resume
 
-```python
-from hpc_agent.state.run_sha import compute_cmd_sha, compute_tasks_py_sha
-tasks = load_tasks_module(tp)
-cmd_sha = compute_cmd_sha(tasks)
-tasks_py_sha = compute_tasks_py_sha(tp)
+```bash
+hpc-agent compute-run-id --experiment-dir . --run-name "<run_name>"
 ```
+
+Returns `{run_id, cmd_sha}` — use `cmd_sha` for the resume check below. Never import `hpc_agent.state.run_sha` to hash it by hand.
 
 ```bash
 hpc-agent find-prior-run --experiment-dir . --cmd-sha "$CMD_SHA"
