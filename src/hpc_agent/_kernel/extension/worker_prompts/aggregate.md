@@ -20,7 +20,7 @@ When in doubt, prefer `anomalies`. **Do not invent new `decisions` point IDs** (
 
 Run `hpc-agent load-context --experiment-dir .` and treat its `data` as the ONLY source of truth for run / campaign state. Never rely on conversational memory or shell variables — a context compaction or a session restart erases them; the on-disk state does not.
 
-- `data.in_flight` — active runs with `run_id`, `ssh_target`, `remote_path`. These resolve the `$SSH_TARGET` / `$REMOTE_PATH` / `<run_id>` used in Step 2's rsync.
+- `data.in_flight` — active runs with `run_id`, `ssh_target`, `remote_path`. `aggregate-flow` reads these from the journal itself; you pass it `run_id`, not connection details.
 - `data.latest_run` — config snapshot of the newest run, including `result_dir_template`.
 
 If a value you need is absent here, derive it from the run sidecar on disk — never from memory.
@@ -93,15 +93,16 @@ If a value you need is absent here, derive it from the run sidecar on disk — n
 
 10. **Profile-specific aggregate command**: when the per-run sidecar's `aggregate_defaults.aggregate_cmd` is set and `mode != "auto"` skipped it, the atom already ran the user-defined cluster-side command. When `mode == "combiner-only"` was forced and the caller still wants the cluster-side command, record a `mode` decision with outcome `manual_pending` (note the pending command in `anomalies`) — it's an arbitrary user-defined command that the framework doesn't introspect.
 
-## Reduce where the data lives
+## Reduce where the data lives (why `mode: "auto"` is the default)
 
-Never move bulk result files just to reach a Python environment. If the reduction is trivial (a pandas concat, `optuna.tell()`, a JSON dump) but the host holding the data lacks the dependencies, install the dependencies on that host — a 30-second `pip install` beats minutes of small-file scp/rsync. Decide before any `scp`/`rsync` of results:
+You never move bulk result files yourself — `aggregate-flow` does all cluster I/O internally. Your only lever is the spec, and the principle behind it is: reduce where the data already sits, pull only the small result. That is exactly what `mode: "auto"` does — it routes to `cluster-reduce` (run the user's reducer on the cluster, pull the single KB-sized JSON output) when an `aggregate_cmd` is available, and only falls back to combiner-only otherwise.
 
-1. **Genuinely HPC-scale compute** (GPU, multi-node, hours of CPU) → run it on the cluster, aggregate on the cluster, pull only summaries.
-2. **Trivial compute** (pandas, sqlite, a scalar) → run it wherever the data already sits; install missing deps in place.
-3. **Data must actually move** → move the *small* side (params/code down, reduced output up). Never bulk-push raw chunks between clusters to reach an environment.
+So the decision encoded in the spec is:
 
-Anti-pattern: `scp -r results/tune/*_chunk_*.csv cluster-B:...` because cluster-B has the conda env and cluster-A does not — fix the environment, not the data location. Small-file scp/rsync is especially slow (per-file SSH handshake); if bulk movement is unavoidable, `tar` first. `mode: "auto"` routes around this by default — stay on it unless a debug case needs the raw files local.
+1. **Genuinely HPC-scale or bulk data** → stay on `mode: "auto"`; the reduction runs cluster-side and only the reduced output comes back. This is the 90% case.
+2. **You need the raw per-task files local** (debug, manual interpretation) → set `pull_summaries: true` with an explicit `summary_glob`. Opt-in precisely because pulling thousands of small files is slow.
+
+Don't override `mode` to force a local pull of bulk partials to reach a Python environment — that's the anti-pattern `cluster-reduce` exists to prevent. If the cluster-side reducer lacks a dependency, that's a fix to the user's cluster environment (their combiner/reducer script), surfaced via the envelope — not a reason to drag the data to where the deps are.
 
 ## Notes
 
