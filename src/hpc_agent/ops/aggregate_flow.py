@@ -421,11 +421,7 @@ def aggregate_flow(
     # uses (`_is_terminal` → `mark-run-terminal`). If the cluster shows the
     # run still genuinely running, `_is_terminal` returns None and the gate
     # below still fires — aggregate never reconciles a running run.
-    if (
-        spec.reconcile_terminal
-        and ensure_all_combined
-        and record.status not in TERMINAL_STATUSES
-    ):
+    if spec.reconcile_terminal and ensure_all_combined and record.status not in TERMINAL_STATUSES:
         refreshed = record_status(
             experiment_dir,
             run_id,

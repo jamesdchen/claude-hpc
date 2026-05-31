@@ -35,7 +35,11 @@ def _hook_command() -> str:
 def _rc(cmd: str) -> int:
     payload = json.dumps({"tool_input": {"command": cmd}})
     return subprocess.run(
-        ["bash", "-c", _hook_command()], input=payload, text=True, capture_output=True
+        ["bash", "-c", _hook_command()],
+        input=payload,
+        text=True,
+        capture_output=True,
+        timeout=30,
     ).returncode
 
 

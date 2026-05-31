@@ -12,7 +12,7 @@ from pathlib import Path
 
 from hpc_agent.state.discover import _discover_runs_result_post, discover_runs
 
-_SRC = '''
+_SRC = """
 from __future__ import annotations
 from hpc_agent.experiment_kit import register_run
 
@@ -20,7 +20,7 @@ from hpc_agent.experiment_kit import register_run
 @register_run
 def run(seed: int, lr: float) -> dict:
     return {"seed": seed, "lr": lr}
-'''
+"""
 
 
 def _write(d: Path) -> None:
