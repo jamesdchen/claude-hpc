@@ -96,6 +96,8 @@ def test_claude_cli_invoker_builds_the_right_call(
         "haiku",
         "--settings",
         '{"sandbox": {"enabled": false}}',
+        "--allowedTools",
+        invoke_mod._WORKER_ALLOWED_TOOLS,
         "--disallowedTools",
         invoke_mod._WORKER_DISALLOWED_TOOLS,
         "--append-system-prompt-file",
@@ -252,6 +254,8 @@ def test_oauth_invoker_builds_the_right_call(
         "haiku",
         "--settings",
         '{"sandbox": {"enabled": false}}',
+        "--allowedTools",
+        invoke_mod._WORKER_ALLOWED_TOOLS,
         "--disallowedTools",
         invoke_mod._WORKER_DISALLOWED_TOOLS,
         "--append-system-prompt-file",
@@ -304,9 +308,18 @@ def test_worker_spawn_fences_destructive_cluster_ops(
     oauth_argv = seen_oauth["argv"]
     assert isinstance(oauth_argv, list)
 
-    # Both spawns fence the same way, and the fence covers every op the
-    # interactive agent is denied plus direct scheduler submission.
+    # Both spawns carry the same strict fence: a default-deny allowlist
+    # (only hpc-agent + git Bash, plus read/write/search tools) AND a
+    # defense-in-depth denylist for cluster transport / scheduler / exfil.
     for argv in (bare_argv, oauth_argv):
+        assert "--allowedTools" in argv
+        allowed = argv[argv.index("--allowedTools") + 1]
+        assert allowed == invoke_mod._WORKER_ALLOWED_TOOLS
+        assert "Bash(hpc-agent:*)" in allowed
+        assert "Bash(git:*)" in allowed
+        # The worker can shell nothing else — no bare `Bash`, no python.
+        assert "Bash(python" not in allowed and " Bash " not in f" {allowed} "
+
         assert "--disallowedTools" in argv
         fenced = _disallowed_after_flag(argv)
         assert fenced == invoke_mod._WORKER_DISALLOWED_TOOLS

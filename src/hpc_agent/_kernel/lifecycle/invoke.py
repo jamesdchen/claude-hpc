@@ -65,24 +65,26 @@ _MISSING_CREDENTIAL_REMEDIATION = (
 # caller's interactive model.
 _WORKER_MODEL = "haiku"
 
-# Destructive / out-of-band cluster ops the worker must NEVER reach for
-# directly — job submission and cancellation belong to the audited,
-# idempotent `submit-flow` primitive, and hpc-agent has no kill verb by
-# design (it never cancels a run; the caller stops polling and lets it
-# expire). The interactive agent is already denied these via settings.json
-# (`Bash(scancel:*)`, `Bash(qdel:*)`), but BOTH worker spawn paths bypass
-# that file: `--bare` skips settings.json outright, and the OAuth path runs
-# from an ephemeral CLAUDE_CONFIG_DIR with no project `.claude/`. So the
-# worker — the one surface that actually SSHes to a scheduler — is the only
-# place the deny never reaches. Re-apply it as a CLI fence on the spawn, and
-# fence direct cluster transport too: every worker procedure now reaches the
-# cluster ONLY through `hpc-agent` (submit-flow/aggregate-flow/status do their
-# own ssh+rsync internally, as subprocesses of the binary — which this Bash
-# fence does not touch), so the LLM never needs raw `ssh`/`rsync`/`scp`, nor
-# `curl`/`wget`, which would only serve exfil. The worker still legitimately
-# shells `python3`/`git` (scaffold discovery, tasks.py commit), so this is a
-# direct-cluster-and-exfil deny — not yet a `Bash(hpc-agent:*)`-only allowlist
-# (that's gated on de-freestyling submit.md's remaining python/git steps).
+# Worker tool fence. BOTH spawn paths bypass settings.json (`--bare` skips it;
+# the OAuth path runs from an ephemeral CLAUDE_CONFIG_DIR with no project
+# `.claude/`), so the worker — the one surface that actually reaches a cluster —
+# is the only place the project's deny never lands. We fence it on the spawn.
+#
+# The worker procedures now reach the cluster ONLY through `hpc-agent` (which
+# does its own ssh+rsync internally, as subprocesses of the binary that a
+# Bash-*tool* fence does not touch). Every freestyle `python`/`json.load`/`grep`
+# step was removed: file reads use the Read tool, searches use Grep/Glob, run
+# discovery uses `hpc-agent discover-runs`, and the dispatcher copy folded into
+# `build-tasks-py`. So the worker's entire Bash surface is `hpc-agent` (verbs)
+# plus `git` (commit the scaffolded tasks.py/cli.py; never pushes).
+#
+# ``_WORKER_ALLOWED_TOOLS`` is the strict default-deny allowlist: only those two
+# Bash families plus the read/write/search tools. ``_WORKER_DISALLOWED_TOOLS``
+# is kept as belt-and-suspenders — in Claude Code a disallow beats an allow, so
+# direct cluster transport / scheduler / exfil commands stay blocked even if a
+# future allow rule widens. (Runtime enforcement is the CLI's; the tests here
+# assert the spawn argv carries both.)
+_WORKER_ALLOWED_TOOLS = "Bash(hpc-agent:*) Bash(git:*) Read Write Edit Grep Glob"
 _WORKER_DISALLOWED_TOOLS = (
     "Bash(scancel:*) Bash(qdel:*) Bash(qmod:*) Bash(qsub:*) Bash(sbatch:*) "
     "Bash(ssh:*) Bash(rsync:*) Bash(scp:*) Bash(curl:*) Bash(wget:*)"
@@ -315,8 +317,10 @@ class ClaudeCliInvoker:
                 # deterministic across platforms.
                 "--settings",
                 '{"sandbox": {"enabled": false}}',
-                # Re-apply the destructive-op deny that `--bare` drops from
-                # settings.json (see _WORKER_DISALLOWED_TOOLS).
+                # Strict tool fence the `--bare` worker would otherwise lack
+                # (see _WORKER_ALLOWED_TOOLS / _WORKER_DISALLOWED_TOOLS).
+                "--allowedTools",
+                _WORKER_ALLOWED_TOOLS,
                 "--disallowedTools",
                 _WORKER_DISALLOWED_TOOLS,
             ],
@@ -389,10 +393,12 @@ class ClaudeCliOAuthInvoker:
                     # ClaudeCliInvoker.invoke).
                     "--settings",
                     '{"sandbox": {"enabled": false}}',
-                    # Same destructive-op fence as the --bare path: the
-                    # ephemeral CLAUDE_CONFIG_DIR carries no project settings.json
-                    # deny, so re-apply it on the spawn (see
-                    # _WORKER_DISALLOWED_TOOLS).
+                    # Same strict fence as the --bare path: the ephemeral
+                    # CLAUDE_CONFIG_DIR carries no project settings.json, so
+                    # apply the allow/deny on the spawn (see
+                    # _WORKER_ALLOWED_TOOLS / _WORKER_DISALLOWED_TOOLS).
+                    "--allowedTools",
+                    _WORKER_ALLOWED_TOOLS,
                     "--disallowedTools",
                     _WORKER_DISALLOWED_TOOLS,
                 ],
