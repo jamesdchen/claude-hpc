@@ -65,6 +65,16 @@ def build_remote_backend(
         from hpc_agent.infra.backends.profile import SchedulerProfile
 
         profile = SchedulerProfile.from_dict(scheduler_profile)
+        # The pin's family selects the command grammar AND dictates the
+        # script extension; a `backend` that disagrees with it would emit
+        # (say) sbatch flags against a `.sh` script. Refuse the mismatch
+        # loudly rather than silently submit a broken job.
+        if backend_name and backend_name != profile.family:
+            raise errors.SpecInvalid(
+                f"backend {backend_name!r} disagrees with the pinned "
+                f"scheduler_profile family {profile.family!r}; the spec's "
+                "backend must equal the profile's family."
+            )
         cls = build_backend_class(profile, remote=True)
         # Mirror the SGE env-forwarding rule: `[]`/`None` mean "forward
         # every job_env key"; only used by the sge family but harmless to

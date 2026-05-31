@@ -450,20 +450,28 @@ def _submit_resubmit_batches(
     effective_constraints: ClusterConstraints | None = (
         constraints if isinstance(constraints, ClusterConstraints) else None
     )
-    if effective_constraints is None:
-        try:
-            from hpc_agent.infra.clusters import load_clusters_config, load_constraints
-            from hpc_agent.state.runs import read_run_sidecar
+    # A custom-scheduler cluster may pin a SchedulerProfile in clusters.yaml;
+    # honor it on recovery too (symmetric with submit_flow, which threads
+    # spec.scheduler_profile). Sourced from the same cluster_cfg we read for
+    # constraints. Best-effort: any failure falls back to the golden backend.
+    scheduler_profile_pin: dict | None = None
+    try:
+        from hpc_agent.infra.clusters import load_clusters_config, load_constraints
+        from hpc_agent.state.runs import read_run_sidecar
 
-            sidecar = read_run_sidecar(experiment_dir, run_id)
-            cluster_name = sidecar.get("cluster") if isinstance(sidecar, dict) else None
-            if cluster_name:
-                clusters = load_clusters_config()
-                cluster_cfg = clusters.get(cluster_name) if isinstance(clusters, dict) else None
-                if isinstance(cluster_cfg, dict):
+        sidecar = read_run_sidecar(experiment_dir, run_id)
+        cluster_name = sidecar.get("cluster") if isinstance(sidecar, dict) else None
+        if cluster_name:
+            clusters = load_clusters_config()
+            cluster_cfg = clusters.get(cluster_name) if isinstance(clusters, dict) else None
+            if isinstance(cluster_cfg, dict):
+                if effective_constraints is None:
                     effective_constraints = load_constraints(cluster_cfg)
-        except Exception:  # noqa: BLE001 — fall back to defaults on any failure
-            effective_constraints = None
+                pin = cluster_cfg.get("scheduler_profile")
+                if isinstance(pin, dict):
+                    scheduler_profile_pin = pin
+    except Exception:  # noqa: BLE001 — fall back to defaults on any failure
+        pass
 
     plan = resubmit_plan(
         task_count=total_tasks,
@@ -498,6 +506,7 @@ def _submit_resubmit_batches(
             job_env_keys=tuple(job_env.keys()),
             slurm_account=slurm_account,
             slurm_cluster=slurm_cluster,
+            scheduler_profile=scheduler_profile_pin,
         )
     else:
         backend_obj = backend_factory(

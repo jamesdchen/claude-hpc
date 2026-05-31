@@ -114,6 +114,19 @@ class TestBuildRemoteBackendWithProfile:
         assert cmd[0] == "qsub"
         assert "-t" in cmd and "-j" in cmd
 
+    def test_backend_name_family_mismatch_raises(self):
+        # Spec says sge, pin says slurm -> refuse (script ext would mismatch).
+        with pytest.raises(errors.SpecInvalid, match="disagrees with the pinned"):
+            build_remote_backend(
+                backend_name="sge",
+                script="run.sh",
+                ssh_target="u@h",
+                remote_path="/r",
+                pass_env_keys=None,
+                job_env_keys=("EXECUTOR",),
+                scheduler_profile=_custom_slurm_profile("mismatch").to_dict(),
+            )
+
     def test_without_profile_uses_golden(self):
         backend = build_remote_backend(
             backend_name="slurm",
