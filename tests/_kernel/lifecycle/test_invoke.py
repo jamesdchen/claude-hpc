@@ -96,6 +96,8 @@ def test_claude_cli_invoker_builds_the_right_call(
         "haiku",
         "--settings",
         '{"sandbox": {"enabled": false}}',
+        "--disallowedTools",
+        invoke_mod._WORKER_DISALLOWED_TOOLS,
         "--append-system-prompt-file",
     ]
     assert seen["system_prompt"] == "PREFIX"
@@ -250,6 +252,8 @@ def test_oauth_invoker_builds_the_right_call(
         "haiku",
         "--settings",
         '{"sandbox": {"enabled": false}}',
+        "--disallowedTools",
+        invoke_mod._WORKER_DISALLOWED_TOOLS,
         "--append-system-prompt-file",
     ]
     assert seen["system_prompt"] == "PREFIX"
@@ -265,6 +269,49 @@ def test_oauth_invoker_builds_the_right_call(
     assert linked["link"] == Path(config_dir) / ".credentials.json"
     assert seen["cwd"] != str(exp_dir)
     assert seen["cwd"] != config_dir
+
+
+def _disallowed_after_flag(argv: list[str]) -> str:
+    """The single value passed to ``--disallowedTools`` in *argv*."""
+    return argv[argv.index("--disallowedTools") + 1]
+
+
+def test_worker_spawn_fences_destructive_cluster_ops(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Both spawn paths must carry the destructive-op deny that `--bare` and the
+    OAuth ephemeral config drop from settings.json. Job submission/cancellation
+    belongs to `submit-flow`; hpc-agent has no kill verb by design."""
+    # --bare path
+    seen_bare: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _capture_run(seen_bare))
+    ClaudeCliInvoker().invoke(
+        RenderedPrompt(cacheable_prefix="P", variable_suffix="S"), cwd=tmp_path
+    )
+    bare_argv = seen_bare["argv"]
+    assert isinstance(bare_argv, list)
+
+    # OAuth path
+    creds = tmp_path / ".credentials.json"
+    creds.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(invoke_mod, "_oauth_credentials_path", lambda: creds)
+    monkeypatch.setattr(invoke_mod, "_link_credentials", lambda live, link: None)
+    seen_oauth: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _capture_run(seen_oauth))
+    ClaudeCliOAuthInvoker().invoke(
+        RenderedPrompt(cacheable_prefix="P", variable_suffix="S"), cwd=tmp_path / "exp"
+    )
+    oauth_argv = seen_oauth["argv"]
+    assert isinstance(oauth_argv, list)
+
+    # Both spawns fence the same way, and the fence covers every op the
+    # interactive agent is denied plus direct scheduler submission.
+    for argv in (bare_argv, oauth_argv):
+        assert "--disallowedTools" in argv
+        fenced = _disallowed_after_flag(argv)
+        assert fenced == invoke_mod._WORKER_DISALLOWED_TOOLS
+        for op in ("scancel", "qdel", "qsub", "sbatch"):
+            assert f"Bash({op}:*)" in fenced
 
 
 def test_oauth_invoker_returns_failure_without_spawning_when_creds_missing(

@@ -65,6 +65,23 @@ _MISSING_CREDENTIAL_REMEDIATION = (
 # caller's interactive model.
 _WORKER_MODEL = "haiku"
 
+# Destructive / out-of-band cluster ops the worker must NEVER reach for
+# directly — job submission and cancellation belong to the audited,
+# idempotent `submit-flow` primitive, and hpc-agent has no kill verb by
+# design (it never cancels a run; the caller stops polling and lets it
+# expire). The interactive agent is already denied these via settings.json
+# (`Bash(scancel:*)`, `Bash(qdel:*)`), but BOTH worker spawn paths bypass
+# that file: `--bare` skips settings.json outright, and the OAuth path runs
+# from an ephemeral CLAUDE_CONFIG_DIR with no project `.claude/`. So the
+# worker — the one surface that actually SSHes to a scheduler — is the only
+# place the deny never reaches. Re-apply it as a CLI fence on the spawn
+# itself. (Direct `ssh`/`rsync` are NOT yet fenced: aggregate.md still pulls
+# a sidecar with raw `rsync`, so a tighter `Bash(hpc-agent:*)`-only allowlist
+# is gated on de-freestyling that step.)
+_WORKER_DISALLOWED_TOOLS = (
+    "Bash(scancel:*) Bash(qdel:*) Bash(qmod:*) Bash(qsub:*) Bash(sbatch:*)"
+)
+
 # OAuth worker auth is unsupported on macOS: the Claude Code OAuth token lives
 # in the Keychain there, not a linkable credentials file, so there is nothing to
 # relocate into an ephemeral CLAUDE_CONFIG_DIR. Those users keep the API-key
@@ -292,6 +309,10 @@ class ClaudeCliInvoker:
                 # deterministic across platforms.
                 "--settings",
                 '{"sandbox": {"enabled": false}}',
+                # Re-apply the destructive-op deny that `--bare` drops from
+                # settings.json (see _WORKER_DISALLOWED_TOOLS).
+                "--disallowedTools",
+                _WORKER_DISALLOWED_TOOLS,
             ],
             prompt=prompt,
             cwd=str(cwd),
@@ -362,6 +383,12 @@ class ClaudeCliOAuthInvoker:
                     # ClaudeCliInvoker.invoke).
                     "--settings",
                     '{"sandbox": {"enabled": false}}',
+                    # Same destructive-op fence as the --bare path: the
+                    # ephemeral CLAUDE_CONFIG_DIR carries no project settings.json
+                    # deny, so re-apply it on the spawn (see
+                    # _WORKER_DISALLOWED_TOOLS).
+                    "--disallowedTools",
+                    _WORKER_DISALLOWED_TOOLS,
                 ],
                 prompt=prompt,
                 cwd=clean_cwd,
