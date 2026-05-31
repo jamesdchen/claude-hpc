@@ -59,6 +59,9 @@ from hpc_agent.infra.ssh_validation import validate_ssh_target
 from hpc_agent.infra.transport import rsync_pull
 from hpc_agent.models.mapreduce.reduce.metrics import collect_wave_errors, reduce_partials
 from hpc_agent.ops.aggregate.combine import combine_wave
+from hpc_agent.ops.monitor.reconcile import mark_terminal
+from hpc_agent.ops.monitor.status import record_status
+from hpc_agent.ops.monitor.terminal import _is_terminal
 from hpc_agent.state.journal import load_run
 from hpc_agent.state.run_record import TERMINAL_STATUSES
 from hpc_agent.state.runs import read_run_sidecar
@@ -300,7 +303,7 @@ def _aggregate_flow_arg_pre(ns: Any) -> dict[str, Any]:
 @primitive(
     name="aggregate-flow",
     verb="workflow",
-    composes=["combine-wave", "poll-run-status"],
+    composes=["combine-wave", "poll-run-status", "mark-run-terminal"],
     side_effects=[
         SideEffect("ssh", "<cluster>"),
         SideEffect("sync-pull", "<ssh_target>:<remote_path> -> <experiment_dir>/_aggregated/"),
@@ -410,6 +413,30 @@ def aggregate_flow(
     record = load_run(experiment_dir, run_id)
     if record is None:
         raise errors.JournalCorrupt(f"no journal record for {run_id!r}; submit the run first")
+
+    # Skip-monitor reconcile (opt-in): the caller went straight to aggregate
+    # on a short run without running monitor-flow, so the journal still says
+    # in_flight. Poll the cluster ONCE and, if it confirms the run is done,
+    # mark the journal terminal using the SAME completion logic monitor-flow
+    # uses (`_is_terminal` → `mark-run-terminal`). If the cluster shows the
+    # run still genuinely running, `_is_terminal` returns None and the gate
+    # below still fires — aggregate never reconciles a running run.
+    if (
+        spec.reconcile_terminal
+        and ensure_all_combined
+        and record.status not in TERMINAL_STATUSES
+    ):
+        refreshed = record_status(
+            experiment_dir,
+            run_id,
+            ssh_target=record.ssh_target,
+            remote_path=record.remote_path,
+            job_ids=record.job_ids,
+            job_name=record.job_name,
+        )
+        terminal_state, _ = _is_terminal(refreshed.last_status or {}, int(record.total_tasks))
+        if terminal_state is not None:
+            record = mark_terminal(experiment_dir, run_id, status=terminal_state)
 
     # Precondition gate: aggregating a run that monitor-flow has not
     # driven to a terminal state risks reducing over partial data and

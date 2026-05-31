@@ -42,7 +42,11 @@ If a value you need is absent here, derive it from the run sidecar on disk — n
 
 ## Steps
 
-1. **Verify the run is done** (or close enough). **You MUST invoke [poll-run-status](../../docs/primitives/poll-run-status.md) first** — it is the journal-reconciler, not just a status reporter: its envelope writes the cluster's terminal state back to the journal when the run is done. Skipping this leaves the journal saying `in_flight` after the cluster job is terminal, every later step makes flawed decisions on stale state, and the `escalation_reason` / `lifecycle_state` branches downstream become nonsense. Only proceed if `lifecycle_state` is `complete` (or the caller explicitly wants a partial aggregate via `fields.ensure_all_combined == false`). For partial aggregation, pass `ensure_all_combined: false` to `aggregate-flow` to skip combining waves still in flight.
+1. **Verify the run is done.** `aggregate-flow` gates on the journal's terminal `status` — aggregating a non-terminal run risks reducing over partial data and reporting plausible-but-wrong metrics. The journal reaches terminal one of two ways:
+   - **monitor-flow already ran it to terminal** (the normal path) — its poll loop calls `mark-run-terminal` when the cluster confirms completion. Then aggregate's gate passes; proceed.
+   - **The caller skipped monitor on a short run** — the journal still says `in_flight`. Pass `reconcile_terminal: true` to `aggregate-flow` (Step 5): it polls the cluster ONCE and, if the run is confirmed done, marks the journal terminal (via the same `mark-run-terminal` atom monitor uses) before the gate. If the cluster shows work still in flight, the gate still fires — aggregate never reconciles a genuinely-running run.
+
+   `poll-run-status` alone is **not** sufficient here: it refreshes the snapshot `last_status` but does NOT drive the lifecycle `status` to terminal. For a deliberate partial aggregate of a still-running run, pass `ensure_all_combined: false` instead (skips both the gate and combining waves still in flight).
 
 2. **Pull the run sidecar locally if missing** so `aggregate-flow` can read its `wave_map`, `result_dir_template`, `task_count`, and (if set) `aggregate_defaults`:
 
@@ -67,9 +71,12 @@ If a value you need is absent here, derive it from the run sidecar on disk — n
      "ensure_all_combined": true,
      "combiner_max_retries": 1,
      "mode": "auto",
-     "pull_summaries": false
+     "pull_summaries": false,
+     "reconcile_terminal": false
    }
    ```
+
+   Set `reconcile_terminal: true` only on the skip-monitor path (Step 1) — when the journal still says `in_flight` because no monitor-flow drove this run to terminal.
 
    ```bash
    hpc-agent aggregate-flow --spec spec.json --experiment-dir .
