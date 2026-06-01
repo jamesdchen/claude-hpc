@@ -24,7 +24,7 @@ from hpc_agent.infra.constraints import ClusterConstraints, parse_constraints
 # Scheduler families the framework ships golden profiles for. A
 # ``scheduler`` value outside this set is permitted ONLY when the entry
 # also carries a pinned ``scheduler_profile`` (see the validators below).
-_KNOWN_SCHEDULER_FAMILIES = frozenset({"slurm", "sge"})
+_KNOWN_SCHEDULER_FAMILIES = frozenset({"slurm", "sge", "pbspro", "torque"})
 
 # ---------------------------------------------------------------------------
 # ClusterConfig — single Pydantic SoT for the clusters.yaml shape.
@@ -57,9 +57,9 @@ class ClusterConfig(BaseModel):
     scheduler: str = Field(
         description=(
             "Scheduler family. Routes the submission to the right backend. "
-            "A known family (``slurm``/``sge``) needs nothing else; an "
-            "unknown family is permitted ONLY when ``scheduler_profile`` "
-            "pins a concrete SchedulerProfile dict."
+            "A known family (``slurm``/``sge``/``pbspro``/``torque``) needs "
+            "nothing else; an unknown family is permitted ONLY when "
+            "``scheduler_profile`` pins a concrete SchedulerProfile dict."
         )
     )
     scheduler_profile: dict[str, Any] | None = Field(
@@ -70,7 +70,7 @@ class ClusterConfig(BaseModel):
             "gets registered for this cluster. Round-trips through "
             "``SchedulerProfile.from_dict`` at load time so a malformed "
             "pin fails loudly. Required when ``scheduler`` is not a known "
-            "family (``slurm``/``sge``)."
+            "family (``slurm``/``sge``/``pbspro``/``torque``)."
         ),
     )
     host: str | None = Field(
@@ -237,8 +237,9 @@ class ClusterConfig(BaseModel):
     def _require_pin_for_unknown_family(self) -> ClusterConfig:
         """Enforce: an unknown scheduler family must carry a pinned profile.
 
-        A known family (``slurm``/``sge``) ships a golden profile, so the
-        pin is optional there. Any other ``scheduler`` value has no golden
+        A known family (``slurm``/``sge``/``pbspro``/``torque``) ships a
+        golden profile, so the pin is optional there. Any other
+        ``scheduler`` value has no golden
         seed, so the entry is only resolvable when it also pins a concrete
         ``scheduler_profile`` dict — otherwise the submit path would have
         nothing to register. This is a model (cross-field) validator

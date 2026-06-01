@@ -173,6 +173,14 @@ def detect_scheduler(result_dir: str | Path | None = None) -> str:
                 try:
                     meta = json.loads(meta_path.read_text(encoding="utf-8"))
                     backend = meta.get("backend", "")
+                    # Check the PBS forks before the bare-family names: a
+                    # ``pbspro`` hint contains neither "sge" nor "slurm", and
+                    # ``torque`` is a distinct PBS fork. Order pbspro/torque
+                    # first so a future fork-qualified hint isn't shadowed.
+                    if "pbspro" in backend:
+                        return "pbspro"
+                    if "torque" in backend:
+                        return "torque"
                     if "sge" in backend:
                         return "sge"
                     if "slurm" in backend:
