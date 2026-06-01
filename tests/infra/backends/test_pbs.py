@@ -192,6 +192,23 @@ def test_pbs_log_paths(family):
     assert cls.stderr_log_path("/repo", "job", "555", 0) == "/repo/logs/job.o555.1"
 
 
+@pytest.mark.parametrize(
+    ("family", "index_var"),
+    [("pbspro", "PBS_ARRAY_INDEX"), ("torque", "PBS_ARRAYID")],
+)
+def test_pbs_script_pins_log_filename_to_stderr_log_path(family, index_var):
+    # #217: the script must redirect each task's output to the exact name
+    # stderr_log_path expects (<job_name>.o<seq>.<array-index>), rather than
+    # rely on PBS's variant-dependent default array-log naming. The bare-seq
+    # extraction must use a leading-digit run (works for pbspro ``12345[3]``
+    # and torque ``12345-3``), and the array index must be the family's own var.
+    body = get_backend_class(family).render_script(kind="cpu")
+    assert 'PBS_SEQ="${PBS_JOBID%%[!0-9]*}"' in body
+    assert f'exec >"logs/${{PBS_JOBNAME}}.o${{PBS_SEQ}}.${{{index_var}}}" 2>&1' in body
+    # the redirect mirrors stderr_log_path's <job_name>.o<job_id>.<idx> shape
+    assert get_backend_class(family).stderr_log_path("/r", "j", "9", 0) == "/r/logs/j.o9.1"
+
+
 # --- history (qstat -xf -> Exit_status) + minimal inspect snapshot ---------
 
 

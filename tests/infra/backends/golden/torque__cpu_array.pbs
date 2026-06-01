@@ -38,6 +38,16 @@ set -eo pipefail
 # PBS jobs start in $HOME, not the submit dir — cd to where qsub ran.
 cd "$PBS_O_WORKDIR"
 
+# Pin the per-task log to the name hpc-agent's log-fetch expects
+# (<job_name>.o<seq>.<array-index>), independent of PBS Pro vs TORQUE
+# default array-log naming (which differ). PBS_SEQ is the leading-digit
+# job id (matches the id captured at submit); the index is the raw
+# scheduler array id. The directive ``-o logs/`` still captures any
+# pre-redirect guard failures in PBS's own spool file.
+mkdir -p logs
+PBS_SEQ="${PBS_JOBID%%[!0-9]*}"
+exec >"logs/${PBS_JOBNAME}.o${PBS_SEQ}.${PBS_ARRAYID}" 2>&1
+
 # --- Diagnostics ---
 echo "============================================"
 echo "Job ID:       $PBS_JOBID"
