@@ -121,16 +121,18 @@ def _resolve_pro_cron_status(
     install_cron_flag: bool,
     dry_run: bool,
 ) -> dict[str, Any] | None:
-    """Surface or invoke the pro plugin's install-cron primitive.
+    """Surface or invoke a plugin-provided ``install-cron`` primitive.
 
-    Returns ``None`` when the pro plugin isn't loaded (nothing to say).
+    Keyed purely on registry membership — ``install-cron`` is contributed
+    by a plugin, so this is a no-op on a core-only install. Returns
+    ``None`` when no plugin registered ``install-cron`` (nothing to say).
     Otherwise returns a dict describing one of three states:
 
-    * ``status: "available"`` — pro is loaded; the cron install is a
-      one-command follow-up the user can run. No mutation. Always
-      surfaced when ``--install-cron`` was not passed.
-    * ``status: "installed"`` — pro is loaded and ``--install-cron``
-      was passed; the install-cron primitive ran and its result is
+    * ``status: "available"`` — ``install-cron`` is registered; the cron
+      install is a one-command follow-up the user can run. No mutation.
+      Always surfaced when ``--install-cron`` was not passed.
+    * ``status: "installed"`` — ``install-cron`` is registered and
+      ``--install-cron`` was passed; the primitive ran and its result is
       embedded.
     * ``status: "skipped"`` — explicit reason the install couldn't run
       (no cluster, no ssh_target derivable, dry-run, etc.).
@@ -149,9 +151,10 @@ def _resolve_pro_cron_status(
         return {
             "status": "available",
             "reason": (
-                "hpc-agent-pro is loaded; run `hpc-agent install-cron` to enable "
-                "LightGBM-residual queue-wait forecasting (the snapshot cron needs "
-                "~7-14 days of history before useful)"
+                "a plugin providing `install-cron` is loaded; run "
+                "`hpc-agent install-cron` to enable its scheduled snapshot/training "
+                "cron (e.g. queue-wait forecasting, which needs ~7-14 days of "
+                "history before useful)"
             ),
             "command": suggested_command,
         }
@@ -248,11 +251,11 @@ def _resolve_pro_cron_status(
                 action="store_true",
                 help=(
                     "Also install the wait-predictor crontab entries (snapshot "
-                    "every 5 minutes, training daily at 03:00). Requires "
-                    "hpc-agent-pro to be installed and --cluster to be set; the "
-                    "ssh_target is derived from clusters.yaml. When hpc-agent-pro "
-                    "is loaded but this flag is not passed, the envelope still "
-                    "surfaces the suggested command."
+                    "every 5 minutes, training daily at 03:00). Requires a plugin "
+                    "providing the `install-cron` primitive to be installed and "
+                    "--cluster to be set; the ssh_target is derived from "
+                    "clusters.yaml. When that plugin is loaded but this flag is "
+                    "not passed, the envelope still surfaces the suggested command."
                 ),
             ),
         ),
@@ -276,10 +279,10 @@ def setup(
     parses, TCP :22 reachable) and — on a green probe — writes the 24h
     cache marker that ``/submit-hpc``'s Step 6b gate reads.
 
-    With *install_cron=True* and the ``hpc-agent-pro`` plugin loaded,
-    also invokes the pro plugin's ``install-cron`` primitive with the
+    With *install_cron=True* and a plugin providing ``install-cron``
+    loaded, also invokes that ``install-cron`` primitive with the
     ssh_target derived from the cluster config. Without the flag, the
-    envelope still surfaces a ``pro_cron`` recommendation when the pro
+    envelope still surfaces a ``pro_cron`` recommendation when such a
     plugin is detected — a no-mutation hint pointing at the follow-up
     command.
 
