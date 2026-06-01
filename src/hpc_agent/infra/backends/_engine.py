@@ -290,6 +290,15 @@ class ProfileBackend(HPCBackend):
             # leak history and make abandoned-run detection useless.
             csv = ",".join(job_ids)
             return f"squeue -j {shlex.quote(csv)} -h -o '%i' 2>/dev/null || true"
+        if cls.profile.family in ("pbspro", "torque"):
+            # PBS: query the explicit ids (NOT ``qstat -u``). ``-u`` triggers PBS's
+            # *wide* alternate listing where the state column is no longer index 4
+            # (SessID/NDS/TSK shift it right); passing job ids keeps the default
+            # brief format (id col 0, state col 4 — the format parse expects).
+            # ``-t`` expands array parents into subjobs; ids that have left the
+            # queue print to stderr (discarded) and are simply absent from stdout.
+            ids = " ".join(shlex.quote(str(j)) for j in job_ids)
+            return f"qstat -t {ids} 2>/dev/null || true"
         # sge: one ``qstat -u $USER`` call regardless of N; filtering happens
         # in parse_alive_output. $USER expands cluster-side.
         return 'qstat -u "$USER" 2>/dev/null || true'
@@ -308,7 +317,8 @@ class ProfileBackend(HPCBackend):
                 if base in wanted:
                     alive.add(base)
             return alive
-        # sge / pbs: qstat -u output has a 2-line header; job id is column 0.
+        # sge (``qstat -u``) / pbs (``qstat -t <ids>``): both print a 2-line
+        # header then rows with the job id in column 0.
         # PBS ids are ``<seq>.<server>`` / ``<seq>[<idx>].<server>`` — strip the
         # ``.server`` / ``[idx]`` to the bare sequence (a no-op for SGE's pure
         # numeric ids, so SGE behaviour is unchanged).
@@ -334,6 +344,11 @@ class ProfileBackend(HPCBackend):
         if cls.profile.family == "slurm":
             csv = ",".join(job_ids)
             return f"squeue -j {shlex.quote(csv)} -h -o '%i %T' 2>/dev/null || true"
+        if cls.profile.family in ("pbspro", "torque"):
+            # See build_alive_check_cmd: explicit ids (+ ``-t`` for arrays) keep
+            # PBS in its brief format so the state token stays at column 4.
+            ids = " ".join(shlex.quote(str(j)) for j in job_ids)
+            return f"qstat -t {ids} 2>/dev/null || true"
         # sge: qstat -u output already carries the state column.
         return 'qstat -u "$USER" 2>/dev/null || true'
 
@@ -351,9 +366,10 @@ class ProfileBackend(HPCBackend):
                 if base in wanted:
                     states[base] = parts[1].strip()
             return states
-        # sge / pbs: state is the 5th column (index 4); rows guarded on a digit
-        # id. PBS ids (``<seq>.<server>`` / ``<seq>[<idx>]...``) are stripped to
-        # the bare sequence (no-op for SGE), so this serves both families.
+        # sge (``qstat -u``) / pbs (``qstat -t <ids>``, brief format): state is the
+        # 5th column (index 4); rows guarded on a digit id. PBS ids
+        # (``<seq>.<server>`` / ``<seq>[<idx>]...``) are stripped to the bare
+        # sequence (no-op for SGE), so this serves both families.
         states_sge: dict[str, str] = {}
         wanted_sge = {str(j) for j in job_ids}
         for line in stdout.splitlines():

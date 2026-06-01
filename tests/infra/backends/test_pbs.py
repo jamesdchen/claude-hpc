@@ -134,7 +134,30 @@ def test_pbs_classify(family, state, bucket):
     assert get_backend_class(family).classify_scheduler_state(state) == bucket
 
 
-# --- qstat -u parsing (id is <seq>.<server>[<idx>]) ------------------------
+# --- live-state command shape (qstat -t <ids>, NOT qstat -u) ---------------
+
+
+@pytest.mark.parametrize("family", ["pbspro", "torque"])
+def test_pbs_live_cmds_use_explicit_ids_not_wide_u_format(family):
+    # ``qstat -u`` would trigger PBS's wide alternate listing (state column
+    # shifts off index 4); passing explicit ids keeps the brief format and
+    # ``-t`` expands array subjobs.
+    cls = get_backend_class(family)
+    for cmd in (
+        cls.build_alive_check_cmd(["12345", "12346"]),
+        cls.build_scheduler_state_cmd(["12345", "12346"]),
+    ):
+        assert cmd.startswith("qstat -t ")
+        assert "-u" not in cmd
+        assert "12345" in cmd and "12346" in cmd
+    # empty id list short-circuits (no stray ``qstat -t`` with no args)
+    assert cls.build_alive_check_cmd([]) == "true"
+    assert cls.build_scheduler_state_cmd([]) == "true"
+
+
+# --- qstat -t parsing (brief format; id is <seq>.<server>[<idx>]) ----------
+# Matches PBS's *brief* listing (the format emitted when ids are passed),
+# where the single-letter state sits at column index 4.
 
 _QSTAT = (
     "Job id            Name   User  Time Use S Queue\n"
