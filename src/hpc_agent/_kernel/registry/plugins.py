@@ -46,6 +46,7 @@ __all__ = [
     "plugin_slash_command_roots",
     "plugin_worker_prompt_roots",
     "register_plugin_cli",
+    "run_plugin_setup_actions",
 ]
 
 PLUGIN_GROUP = "hpc_agent.plugins"
@@ -136,6 +137,61 @@ def register_plugin_cli(subparsers: Any) -> None:
         hook = getattr(plugin, "register_cli", None)
         if callable(hook):
             hook(subparsers)
+
+
+def run_plugin_setup_actions(context: dict[str, Any]) -> dict[str, Any]:
+    """Collect every plugin's optional ``setup`` contributions.
+
+    A plugin may expose a ``run_setup_actions(context) -> Mapping | None``
+    callable. The host's ``setup`` primitive invokes it — passing a
+    context dict (``cluster``, ``experiment_dir``, ``install``,
+    ``dry_run``) — and merges each plugin's returned mapping into the
+    ``setup`` envelope's ``plugin_actions`` field, keyed by the plugin's
+    manifest name (falling back to the plugin module name).
+
+    This is the generic seam that replaces host-side knowledge of any
+    specific plugin verb: the host invokes the hook blindly and never
+    names what a plugin does at setup time. A plugin without the hook,
+    or one whose hook returns ``None``/empty, contributes nothing. A
+    hook that raises is isolated so one plugin can't break ``setup`` —
+    the failure surfaces as a ``warnings.warn`` and that plugin's entry
+    is omitted.
+    """
+    actions: dict[str, Any] = {}
+    for plugin in load_plugins():
+        hook = getattr(plugin, "run_setup_actions", None)
+        if not callable(hook):
+            continue
+        try:
+            result = hook(dict(context))
+        except Exception as exc:  # noqa: BLE001 — a plugin hook may raise anything
+            warnings.warn(
+                f"plugin setup hook failed for {getattr(plugin, '__name__', plugin)!r}: {exc!r}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            continue
+        if not result:
+            continue
+        key = _plugin_key(plugin)
+        actions[key] = dict(result)
+    return actions
+
+
+def _plugin_key(plugin: Any) -> str:
+    """Stable key for a plugin in the ``plugin_actions`` map.
+
+    Prefers the manifest name (the operator-facing distribution name);
+    falls back to the plugin object's ``__name__`` top-level package.
+    """
+    manifest = getattr(plugin, "MANIFEST", None)
+    name = getattr(manifest, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    mod = getattr(plugin, "__name__", None)
+    if isinstance(mod, str) and mod:
+        return mod.split(".", 1)[0]
+    return repr(plugin)
 
 
 def plugin_slash_command_roots() -> tuple[Any, ...]:

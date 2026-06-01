@@ -186,7 +186,7 @@ def _build_schema_registry_for(pkg: Any) -> list[tuple[type[BaseModel] | TypeAda
 
 # Build a flat list of (model, fname, schemas_dir) tuples across every
 # authoring package. Each package keeps its own discovery namespace so a
-# class name shared between core and pro (e.g. an inadvertent re-import)
+# class name shared between core and a plugin (e.g. an inadvertent re-import)
 # doesn't trip the collision guard.
 SCHEMA_REGISTRY: list[tuple[type[BaseModel] | TypeAdapter[Any], str, Path]] = [
     (model, fname, schemas_dir)

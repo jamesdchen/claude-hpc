@@ -7,6 +7,27 @@ on the wire surface enumerated in
 
 ## Unreleased
 
+### Changed — `setup` plugin integration is fully generic; host names no plugin
+
+The `setup` primitive no longer carries plugin-specific code. Previously
+it hard-coded the `install-cron` verb name, derived that verb's
+`ssh_target` arguments inline, and emitted the result under a
+`pro_cron` field — host code that existed solely to wire up one
+plugin's feature. It now invokes a generic
+`run_plugin_setup_actions(context)` seam: any plugin may expose a
+`run_setup_actions(context) -> Mapping | None` hook, which the host
+calls blindly (passing `cluster` / `experiment_dir` / `install` /
+`dry_run`) and collects under a neutral `plugin_actions` field keyed by
+plugin name. The host now knows nothing about what a setup action does.
+
+**Behavioral change to `hpc-agent setup` output:** the `data.pro_cron`
+field is replaced by `data.plugin_actions.<plugin-name>`. Any consumer
+reading `data.pro_cron` must update. A plugin must move its cron-derive
+logic behind the `run_setup_actions` hook to keep the integration
+working; nothing happens automatically from a registered `install-cron`
+primitive alone anymore. On a core-only install the field is absent, as
+before.
+
 ### Fixed — verify-canary resolves a vanished canary fast instead of timing out (#193)
 
 A canary that finished or failed fast and left the scheduler queue before the first status poll showed an all-zero *live* summary (nothing complete/failed/running/pending/unknown). The poll loop had no terminal condition for that, so it rode the full `wait_budget_sec` (30 min default) and reported `timeout` — a 30-minute agent-loop stall on a job that was already gone. The loop now detects the all-zero summary and, once it **persists** across consecutive polls (so the transient pre-registration window right after qsub doesn't false-trigger), breaks out and returns `failure_kind="completed_unknown"` (`ok=False`, so the two-phase gate still refuses the main array). The stderr scan still runs first, so a real marker (oom_killed, traceback) wins over the bland verdict. Unchanged: a genuinely slow/queued canary still waits to `timeout`; a persistently-broken reporter still surfaces `reporter_unreachable`. The `CanaryFailureKind` wire enum gained `completed_unknown` (and `reporter_unreachable`, which the code already returned but the `Literal` omitted); `verify_canary.output.json` regenerated.
@@ -94,13 +115,13 @@ Bugs surfaced by a real submit→monitor→aggregate run on UCLA Hoffman2 from a
 
 Three import-path changes that affect any code reaching into hpc-agent internals from the old paths.
 
-- **`infra/remote.py` re-exports removed.** PR #131 split the 1000+-line module into `infra/ssh_validation.py`, `infra/ssh_options.py`, and `infra/transport.py`, leaving re-exports back on `infra/remote.py` for backwards compatibility. PR #133 migrated every internal caller (host + the scheduling-strategy plugin + tests) to the new paths and then deleted the re-exports. External callers using `from hpc_agent.infra.remote import rsync_push` (and similar for `rsync_pull`, `deploy_runtime`, `run_combiner`, `run_combiner_checked`, `validate_ssh_target`, `parse_remote_json`, `DEFAULT_RSYNC_EXCLUDES`) must update to `infra.transport` / `infra.ssh_validation`. `ssh_run` stays on `infra.remote`.
+- **`infra/remote.py` re-exports removed.** PR #131 split the 1000+-line module into `infra/ssh_validation.py`, `infra/ssh_options.py`, and `infra/transport.py`, leaving re-exports back on `infra/remote.py` for backwards compatibility. PR #133 migrated every internal caller (host + the optional plugin + tests) to the new paths and then deleted the re-exports. External callers using `from hpc_agent.infra.remote import rsync_push` (and similar for `rsync_pull`, `deploy_runtime`, `run_combiner`, `run_combiner_checked`, `validate_ssh_target`, `parse_remote_json`, `DEFAULT_RSYNC_EXCLUDES`) must update to `infra.transport` / `infra.ssh_validation`. `ssh_run` stays on `infra.remote`.
 - **`state/runs.py` re-exports removed.** Same pattern: PR #131 extracted `state/run_sha.py` (`compute_cmd_sha`, `compute_tasks_py_sha`) and `state/wave_map.py` (`derive_wave_map`). PR #133 deleted the re-exports. External callers using `from hpc_agent.state.runs import compute_cmd_sha` must update to `state.run_sha`.
 - **`hpc_agent.incorporation.template` back-compat shim deleted.** Was a re-export to `hpc_agent.experiment_kit` after the post-reorg cleanup; sat in place 2+ releases, firing a `DeprecationWarning` at every import (~13 per pytest run from pkgutil discovery). Removed in PR #132. External callers using `from hpc_agent.incorporation.template import <name>` must update to `from hpc_agent.experiment_kit import <name>`.
 
 ### Changed — plugin module naming aligned with host
 
-The scheduling-strategy plugin's `_schema_models/` package was renamed to `_wire/` to match the host's post-Pydantic-migration name (PR #132). Internal change to the (unpublished) plugin package only; no external impact. Includes the corresponding pyproject lint-ignore + pre-commit hook updates.
+The optional plugin's `_schema_models/` package was renamed to `_wire/` to match the host's post-Pydantic-migration name (PR #132). Internal change to the (unpublished) plugin package only; no external impact. Includes the corresponding pyproject lint-ignore + pre-commit hook updates.
 
 ### Improved — Windows pytest no longer drowns in pre-existing failures
 
@@ -337,33 +358,26 @@ removed: the three paired interview slashes (`/hpc-axes-init`,
   self-explanatory without a slash translating
   (`src/hpc_agent/ops/preflight/check.py`). The optional snapshot-cron
   install (for the LightGBM-residual queue-wait predictor) became a
-  proper primitive shipped in the optional scheduling-strategy plugin — see Added below.
+  proper primitive shipped in an optional plugin — see Added below.
 
-### Added — `hpc-agent setup` integrates a plugin-provided `install-cron`
+### Added — `hpc-agent setup` surfaces an optional plugin's setup action
 
 `hpc-agent install-cron --ssh-target <target> --experiment-dir <dir>`
 installs the wait-predictor crontab entries (snapshot every 5 minutes,
 training daily at 03:00) idempotently. Fingerprinted by target module
 path so re-running detects existing entries and skips. The primitive
-itself — and the three cron-invoked modules (`snapshot_squeue`,
-`train_wait_predictor`, `extract_sacct_history`) — ship in the optional
-scheduling-strategy plugin, so installing that plugin is sufficient; no
-editable source checkout is needed.
+and the three cron-invoked modules (`snapshot_squeue`,
+`train_wait_predictor`, `extract_sacct_history`) ship in an optional
+plugin, so installing that plugin is sufficient; no editable source
+checkout is needed.
 
-`hpc-agent setup` now detects a registered `install-cron` primitive via
-the registry and integrates the cron install into the setup flow:
-
-* When the plugin is loaded and `--install-cron` is **not** passed: the
-  envelope surfaces `data.pro_cron: {status: "available", command:
-  "..."}` — a no-mutation recommendation pointing at the follow-up
-  command.
-* When the plugin is loaded and `--install-cron` **is** passed (with
-  `--cluster <name>`): setup derives `ssh_target` from the cluster's
-  `clusters.yaml` entry (`user@host`) and invokes the `install-cron`
-  primitive directly, embedding its result in
-  `data.pro_cron: {status: "installed", ...}`.
-* When the plugin is not loaded: no `pro_cron` field; the recommendation
-  is silent.
+`hpc-agent setup` integrates a plugin's setup-time action into its flow:
+when a plugin offering one is installed, `setup` surfaces a no-mutation
+"available" recommendation, and — with `--install-cron --cluster <name>`
+— invokes the action (deriving `ssh_target` from the cluster's
+`clusters.yaml` entry) and embeds the result. On a core-only install the
+hook is a silent no-op. *(The output shape was later reworked into a
+generic `plugin_actions` field — see Unreleased.)*
 
 Pip install itself is unchanged — auto-modifying the user's crontab
 during `pip install` would be a footgun (needs user-specific args,
@@ -432,7 +446,7 @@ register at import time, every declared overlay must exist on disk,
 the `cli_register` flag must match whether `register_cli` is
 exposed).
 
-The optional scheduling-strategy plugin declares its manifest at
+The optional plugin declares its manifest at
 its `plugin.py:MANIFEST` (14 primitives, overlays the `submit` worker
 prompt, registers a CLI subgroup). The test helper
 `tests/_registry_helpers.py:plugin_overlaid_workflows()` reads every
@@ -569,7 +583,7 @@ canonical home:
 The CLI orchestrator and per-domain ``cmd_*`` adapters moved out of
 ``hpc_agent/agent_cli.py`` during the PR-5c decomposition into
 ``hpc_agent.cli.<domain>``. The original module was kept as a re-export
-shim so the optional scheduling-strategy plugin and a handful of legacy import
+shim so the optional plugin and a handful of legacy import
 sites kept working. 0.6.0 deletes the shim.
 
 External integrators using ``from hpc_agent.agent_cli import X`` (or
@@ -693,7 +707,7 @@ decide what to put in a submit spec's `partition` field.
 
 ### Added — plugin demos cross-package composition
 
-Four new primitives in the optional scheduling-strategy plugin exercise the
+Four new primitives in the optional plugin exercise the
 plugin-composes-core path:
 
 - `plan-resubmit-overrides` (query) — promotes
@@ -815,7 +829,7 @@ Highlights for plugin authors and external integrators:
   `scripts/lint_subject_imports.py` (no allow-list — every cross-
   subject reach is rejected).
 
-The optional scheduling-strategy plugin is updated in lockstep with the reorg
+The optional plugin is updated in lockstep with the reorg
 (see its own changelog); no version pin changes are required
 on the host.
 
@@ -896,7 +910,7 @@ The experiment repo no longer commits generated code.
 
 ## 0.3.0 — 2026-05-20
 
-### Removed — scheduling-strategy layer extracted to an optional plugin
+### Removed — advisory/forecasting layer extracted to an optional plugin
 
 The queue-wait forecasting and submit-planning layer is no longer part
 of the `hpc-agent` package. Gone from the CLI: `plan-submit`,
