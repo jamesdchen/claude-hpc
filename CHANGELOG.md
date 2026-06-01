@@ -9,24 +9,13 @@ on the wire surface enumerated in
 
 ### Changed — `setup` plugin integration is fully generic; host names no plugin
 
-The `setup` primitive no longer carries plugin-specific code. Previously
-it hard-coded the `install-cron` verb name, derived that verb's
-`ssh_target` arguments inline, and emitted the result under a
-`pro_cron` field — host code that existed solely to wire up one
-plugin's feature. It now invokes a generic
-`run_plugin_setup_actions(context)` seam: any plugin may expose a
-`run_setup_actions(context) -> Mapping | None` hook, which the host
+The `setup` primitive carries no plugin-specific code. It invokes a
+generic `run_plugin_setup_actions(context)` seam: any plugin may expose
+a `run_setup_actions(context) -> Mapping | None` hook, which the host
 calls blindly (passing `cluster` / `experiment_dir` / `install` /
-`dry_run`) and collects under a neutral `plugin_actions` field keyed by
-plugin name. The host now knows nothing about what a setup action does.
-
-**Behavioral change to `hpc-agent setup` output:** the `data.pro_cron`
-field is replaced by `data.plugin_actions.<plugin-name>`. Any consumer
-reading `data.pro_cron` must update. A plugin must move its cron-derive
-logic behind the `run_setup_actions` hook to keep the integration
-working; nothing happens automatically from a registered `install-cron`
-primitive alone anymore. On a core-only install the field is absent, as
-before.
+`dry_run`) and collects under a `data.plugin_actions` field keyed by
+plugin name. The host knows nothing about what a setup action does. On a
+core-only install no plugin contributes and the field is absent.
 
 ### Fixed — verify-canary resolves a vanished canary fast instead of timing out (#193)
 
