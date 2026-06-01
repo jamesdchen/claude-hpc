@@ -1,8 +1,8 @@
 """Tests for the plugin entry-point loader.
 
 The disable env var is the single chokepoint that lets the dev-loop regen
-scripts produce core-only output when ``hpc-agent-pro`` (or any other
-``hpc_agent.plugins`` entry point) is installed in the venv — see #198.
+scripts produce core-only output when any ``hpc_agent.plugins`` entry
+point is installed in the venv — see #198.
 """
 
 from __future__ import annotations

@@ -1,12 +1,12 @@
 """Regenerate JSON Schemas under ``hpc_agent/schemas/`` from Pydantic models.
 
 The wire SoT is the JSON file (every external consumer reads it).
-The *authoring* SoT is the Pydantic model under
-``hpc_agent/_wire/`` (core) or ``hpc_agent_pro/_wire/``
-(pro plugin). This script bridges the two: it
-calls ``model.model_json_schema()`` (or ``adapter.json_schema()``
-for root-array schemas) for every model auto-discovered under
-those packages and writes / diffs the matching JSON file.
+The *authoring* SoT is the Pydantic model under ``hpc_agent/_wire/``.
+This script bridges the two: it calls ``model.model_json_schema()``
+(or ``adapter.json_schema()`` for root-array schemas) for every model
+auto-discovered under that package and writes / diffs the matching
+JSON file. (A plugin ships and regenerates its own schemas from its
+own ``_wire`` package; this script is core-only.)
 
 Same generator pattern as ``build_primitive_frontmatter.py``,
 ``build_primitive_index.py``, and ``build_operations_index.py``:
@@ -22,8 +22,8 @@ Usage::
 Discovery rules
 ---------------
 
-For each non-private submodule of each registered authoring package
-(``hpc_agent._wire`` for core, ``hpc_agent_pro._wire`` for pro):
+For each non-private submodule of the registered authoring package
+(``hpc_agent._wire``):
 
 1. Hardcoded mapping (``_NON_SUFFIX_MAPPING``) handles cross-cutting
    shapes whose names don't fit the suffix convention — the three
