@@ -400,17 +400,35 @@ def _author_profile_for_unknown_family(
     return profile
 
 
+def _is_golden_profile(profile) -> bool:
+    """True when *profile* is just the unmodified golden default for its family.
+
+    A standard slurm/sge cluster resolves to the golden profile, which has
+    nothing worth persisting — ``detect_scheduler`` already agrees via the
+    cheap ``backend`` hint, and writing the golden script bodies would bloat
+    ``clusters.yaml`` / ``experiment_meta.json``. Only *custom* profiles get
+    pinned.
+    """
+    try:
+        return profile == _golden_profile_for_family(profile.family)
+    except (ValueError, NotImplementedError, AttributeError):
+        return False
+
+
 def _pin_resolved(profile, *, result_dir, cluster_name) -> None:
-    """Persist a freshly-resolved (non-pinned-path) profile per the unified rule.
+    """Persist a freshly-resolved CUSTOM profile per the unified rule.
 
     Always pins to ``experiment_meta.json`` under *result_dir* (the per-run
     source of truth that recover/status read); ADDITIONALLY caches it into a
     writable ``clusters.yaml`` entry when *cluster_name* is given (so the
     next experiment on that cluster skips re-resolution). Both writes are
-    best-effort — a failure must never break resolution itself.
+    best-effort. Golden (unmodified) profiles are skipped — there is nothing
+    custom to record.
     """
     import contextlib
 
+    if _is_golden_profile(profile):
+        return
     if result_dir is not None:
         with contextlib.suppress(OSError):
             pin_scheduler_profile(result_dir, profile)

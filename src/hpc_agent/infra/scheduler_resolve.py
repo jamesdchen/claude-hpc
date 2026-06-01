@@ -20,6 +20,7 @@ engine emit something it doesn't understand.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from collections.abc import Callable
@@ -370,3 +371,169 @@ def resolve_unknown_scheduler(
                 f"canary validation failed for resolved profile {profile.name!r}: {result.detail}"
             )
     return profile
+
+
+# ---------------------------------------------------------------------------
+# Setup-CLI entry point (agent-driven)
+# ---------------------------------------------------------------------------
+
+
+def _build_ssh_run(ssh_target: str) -> SshRun:
+    from hpc_agent.infra.remote import ssh_run as _ssh
+
+    def run(cmd: str):
+        return _ssh(cmd, ssh_target=ssh_target)
+
+    return run
+
+
+def _needs_authoring(
+    cluster: str, scheduler: str, ssh_run: SshRun, *, reason: str, job_id: str | None = None
+) -> dict:
+    """Escalation envelope: hand the agent the probe + seed + prompt to author."""
+    probe = probe_cluster(ssh_run)
+    seed = None
+    with contextlib.suppress(errors.SpecInvalid):
+        seed = seed_profile_for_probe(probe)
+    out: dict = {
+        "status": "needs_authoring",
+        "scheduler": scheduler,
+        "reason": reason,
+        "probe": probe.raw,
+        "seed": seed.to_dict() if seed else None,
+        "prompt": _author_prompt(seed, probe) if seed else None,
+        "next": (
+            "Author a SchedulerProfile JSON (start from 'seed', adjust per the "
+            f"'probe' output and give it a distinct 'name'), then re-run: "
+            f"hpc-agent setup --cluster {cluster} --scheduler-profile-json '<json>'"
+        ),
+    }
+    if job_id:
+        out["canary_job_id"] = job_id
+    return out
+
+
+def resolve_for_setup(
+    cluster: str,
+    experiment_dir,
+    *,
+    cfg: dict | None = None,
+    ssh_run: SshRun | None = None,
+    scheduler_profile_json: str | dict | None = None,
+    run_canary: bool = True,
+) -> dict:
+    """Resolve (and validate) this cluster's scheduler profile for ``setup``.
+
+    The agent-driven entry point. Returns a JSON-able status dict for the
+    setup envelope and NEVER raises — every failure becomes a status the
+    agent can act on:
+
+    * ``resolved`` — a profile is registered (+ pinned when custom).
+    * ``needs_authoring`` — an unknown/forked scheduler the golden seed
+      couldn't validate; carries ``probe`` + ``seed`` + ``prompt`` so the
+      agent authors a profile dict and re-invokes with
+      ``--scheduler-profile-json``.
+    * ``invalid`` / ``canary_failed`` / ``skipped`` / ``error`` — diagnosed.
+
+    A CONFIRMATION canary (a live 1-task submit) runs only for a *custom*
+    profile (authored or clusters.yaml-pinned); a standard golden
+    slurm/sge cluster resolves deterministically with no job submitted.
+    """
+    from hpc_agent.infra.backends import register_profile
+    from hpc_agent.infra.backends.profile import SchedulerProfile
+
+    if cfg is None:
+        from hpc_agent.infra.clusters import load_clusters_config
+
+        try:
+            clusters = load_clusters_config()
+        except Exception as exc:  # noqa: BLE001 — surface as a status, don't crash setup
+            return {"status": "error", "reason": f"clusters.yaml failed to load: {exc}"}
+        if cluster not in clusters:
+            return {"status": "skipped", "reason": f"{cluster!r} not in clusters.yaml"}
+        cfg = clusters[cluster]
+
+    scheduler = (cfg.get("scheduler") or "").strip()
+    remote_repo = cfg.get("scratch") or cfg.get("remote_path")
+
+    if ssh_run is None:
+        from hpc_agent.infra.clusters import ClusterConfig
+
+        ssh_target = None
+        with contextlib.suppress(Exception):
+            ssh_target = ClusterConfig.model_validate(cfg).ssh_target
+        if not ssh_target:
+            return {
+                "status": "skipped",
+                "reason": f"{cluster!r} needs both host and user to derive ssh_target",
+            }
+        ssh_run = _build_ssh_run(ssh_target)
+
+    # --- candidate profile ------------------------------------------------
+    if scheduler_profile_json is not None:
+        try:
+            data = (
+                json.loads(scheduler_profile_json)
+                if isinstance(scheduler_profile_json, str)
+                else scheduler_profile_json
+            )
+            profile = SchedulerProfile.from_dict(data)
+        except (json.JSONDecodeError, errors.SpecInvalid, TypeError, AttributeError) as exc:
+            return {
+                "status": "invalid",
+                "reason": f"scheduler_profile is not a valid profile: {exc}",
+            }
+        problems = validate_profile_offline(profile)
+        if problems:
+            return {"status": "invalid", "problems": problems}
+        custom = True
+    else:
+        from hpc_agent.models.mapreduce.reduce.status import (
+            _is_golden_profile,
+            resolve_scheduler_profile,
+        )
+
+        try:
+            profile = resolve_scheduler_profile(
+                scheduler,
+                cfg=cfg,
+                result_dir=None,
+                cluster_name=None,
+                probe=ssh_run,
+                llm=None,
+            )
+        except errors.SpecInvalid as exc:
+            return _needs_authoring(cluster, scheduler, ssh_run, reason=str(exc))
+        custom = not _is_golden_profile(profile)
+
+    # --- confirmation canary (custom profiles only) -----------------------
+    canaried = False
+    if custom and run_canary and remote_repo:
+        result = canary_validate(profile, ssh_run=ssh_run, remote_repo=remote_repo)
+        canaried = True
+        if not result.ok:
+            return _needs_authoring(
+                cluster,
+                scheduler,
+                ssh_run,
+                reason=f"canary failed: {result.detail}",
+                job_id=result.job_id,
+            )
+
+    # --- register + pin (golden profiles are not pinned) ------------------
+    try:
+        register_profile(profile, remote=True)
+    except errors.SpecInvalid as exc:
+        return {"status": "invalid", "reason": str(exc)}
+    from hpc_agent.models.mapreduce.reduce.status import _pin_resolved
+
+    with contextlib.suppress(Exception):
+        _pin_resolved(profile, result_dir=experiment_dir, cluster_name=cluster)
+
+    return {
+        "status": "resolved",
+        "profile": profile.name,
+        "family": profile.family,
+        "custom": custom,
+        "canaried": canaried,
+    }

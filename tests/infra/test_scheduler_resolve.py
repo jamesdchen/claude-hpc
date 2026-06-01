@@ -176,3 +176,96 @@ def test_resolve_unknown_canary_requires_remote_repo():
     ssh = FakeSsh(present=("sbatch",), submit_stdout="Submitted batch job 1")
     with pytest.raises(errors.SpecInvalid, match="remote_repo"):
         sr.resolve_unknown_scheduler("x", ssh_run=ssh, llm=None, run_canary=True)
+
+
+# --- resolve_for_setup (CLI entry) -----------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _isolate_registry():
+    """Restore the global backend registry after each test (resolve_for_setup
+    registers resolved profiles)."""
+    from hpc_agent.infra.backends import _REGISTRY, _populate_registry
+
+    _populate_registry()
+    snap = dict(_REGISTRY)
+    try:
+        yield
+    finally:
+        _REGISTRY.clear()
+        _REGISTRY.update(snap)
+
+
+def _slurm_cfg(**extra):
+    return {"scheduler": "slurm", "scratch": "/scratch/u", **extra}
+
+
+def _custom_slurm_dict(name="discovery2"):
+    # Differs from golden by name (enough to be "custom"); keeps the golden
+    # error vocabulary so it passes offline validation.
+    return {**SLURM_PROFILE.to_dict(), "name": name}
+
+
+def test_setup_known_slurm_resolves_without_canary():
+    ssh = FakeSsh(present=("sbatch",), submit_stdout="Submitted batch job 1")
+    res = sr.resolve_for_setup("c", "/tmp/exp", cfg=_slurm_cfg(), ssh_run=ssh)
+    assert res["status"] == "resolved"
+    assert res["custom"] is False and res["canaried"] is False
+    # A standard golden cluster submits NO canary job.
+    assert not any("sbatch" in c for c in ssh.calls)
+
+
+def test_setup_authored_profile_canaries_and_pins(tmp_path):
+    ssh = FakeSsh(present=("sbatch",), submit_stdout="Submitted batch job 5", log_ok=True)
+    res = sr.resolve_for_setup(
+        "c",
+        tmp_path,
+        cfg=_slurm_cfg(),
+        ssh_run=ssh,
+        scheduler_profile_json=json.dumps(_custom_slurm_dict("disc")),
+    )
+    assert res["status"] == "resolved" and res["custom"] and res["canaried"]
+
+    from hpc_agent.infra.backends import get_backend_class
+
+    assert get_backend_class("disc").profile.name == "disc"
+    meta = json.loads((tmp_path / "experiment_meta.json").read_text())
+    assert meta["scheduler_profile"]["name"] == "disc"
+
+
+def test_setup_authored_invalid_regex_reports_invalid():
+    ssh = FakeSsh(present=("sbatch",))
+    bad = {**_custom_slurm_dict("x"), "job_id_regex": r"NOPE (\d+)"}
+    res = sr.resolve_for_setup(
+        "c", "/tmp/exp", cfg=_slurm_cfg(), ssh_run=ssh, scheduler_profile_json=json.dumps(bad)
+    )
+    assert res["status"] == "invalid"
+
+
+def test_setup_authored_canary_failure_escalates():
+    ssh = FakeSsh(present=("sbatch",), submit_stdout="Submitted batch job 5", log_ok=False)
+    res = sr.resolve_for_setup(
+        "c",
+        "/tmp/exp",
+        cfg=_slurm_cfg(),
+        ssh_run=ssh,
+        scheduler_profile_json=json.dumps(_custom_slurm_dict("disc")),
+    )
+    assert res["status"] == "needs_authoring" and "canary" in res["reason"]
+    assert res["seed"]["family"] == "slurm" and res["prompt"]
+
+
+def test_setup_cfg_pin_canaries():
+    ssh = FakeSsh(present=("sbatch",), submit_stdout="Submitted batch job 9", log_ok=True)
+    res = sr.resolve_for_setup(
+        "c",
+        "/tmp/exp",
+        cfg=_slurm_cfg(scheduler_profile=_custom_slurm_dict("pinned")),
+        ssh_run=ssh,
+    )
+    assert res["status"] == "resolved" and res["custom"] and res["canaried"]
+
+
+def test_setup_skipped_without_derivable_ssh_target():
+    res = sr.resolve_for_setup("c", "/tmp/exp", cfg={"scheduler": "slurm"})
+    assert res["status"] == "skipped"
