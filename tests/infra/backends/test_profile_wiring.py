@@ -137,3 +137,59 @@ class TestBuildRemoteBackendWithProfile:
             job_env_keys=("EXECUTOR",),
         )
         assert backend.profile is SLURM_PROFILE
+
+    def test_pbspro_golden_uses_J_array_flag(self):
+        backend = build_remote_backend(
+            backend_name="pbspro",
+            script=".hpc/templates/cpu_array.pbs",
+            ssh_target="u@h",
+            remote_path="/r",
+            pass_env_keys=None,
+            job_env_keys=("EXECUTOR",),
+        )
+        assert backend.profile.family == "pbspro"
+        cmd = backend._build_command("1-4", "job", {"EXECUTOR": "x"})
+        assert cmd[0] == "qsub"
+        assert "-J" in cmd and "-t" not in cmd  # pbspro array flag is -J
+        assert cmd[-1] == ".hpc/templates/cpu_array.pbs"
+
+    def test_torque_golden_uses_t_array_flag(self):
+        backend = build_remote_backend(
+            backend_name="torque",
+            script=".hpc/templates/cpu_array.pbs",
+            ssh_target="u@h",
+            remote_path="/r",
+            pass_env_keys=None,
+            job_env_keys=("EXECUTOR",),
+        )
+        assert backend.profile.family == "torque"
+        cmd = backend._build_command("1-4", "job", {"EXECUTOR": "x"})
+        assert cmd[0] == "qsub"
+        assert "-t" in cmd and "-J" not in cmd  # torque array flag is -t
+
+
+def test_deploy_runtime_scheduler_deploys_only_that_family():
+    """deploy_runtime(scheduler='pbspro') renders ONLY that family's scripts
+    (cpu_array.pbs / gpu_array.pbs) — never the sge/slurm ones — so the shared
+    .pbs name can't collide with torque on a given cluster."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from hpc_agent.infra import transport
+
+    dests: list[str] = []
+
+    def _run(*args, **kwargs):
+        argv = args[0] if args else kwargs.get("args")
+        if isinstance(argv, (list, tuple)) and argv and "scp" in str(argv[0]):
+            dests.append(str(argv[-1]))  # remote dst is the last argv token
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with patch("hpc_agent.infra.remote.subprocess.run", side_effect=_run):
+        transport.deploy_runtime(ssh_target="u@h", remote_path="/p", scheduler="pbspro")
+
+    array_scripts = [d for d in dests if "cpu_array" in d or "gpu_array" in d]
+    assert any(d.endswith("cpu_array.pbs") for d in array_scripts)
+    assert any(d.endswith("gpu_array.pbs") for d in array_scripts)
+    # The other families' scripts must NOT be deployed to a pbspro cluster.
+    assert not any(d.endswith((".sh", ".slurm")) for d in array_scripts)

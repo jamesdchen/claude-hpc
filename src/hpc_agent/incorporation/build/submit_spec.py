@@ -39,6 +39,13 @@ _DEFAULT_SCRIPTS: dict[tuple[str, bool], str] = {
     ("sge", True): ".hpc/templates/gpu_array.sh",
     ("slurm", False): ".hpc/templates/cpu_array.slurm",
     ("slurm", True): ".hpc/templates/gpu_array.slurm",
+    # pbspro/torque both render to ``.pbs`` (a cluster is exactly one PBS
+    # fork, and deploy_runtime ships only that family's scripts, so the
+    # shared ``.pbs`` name never collides on a given cluster).
+    ("pbspro", False): ".hpc/templates/cpu_array.pbs",
+    ("pbspro", True): ".hpc/templates/gpu_array.pbs",
+    ("torque", False): ".hpc/templates/cpu_array.pbs",
+    ("torque", True): ".hpc/templates/gpu_array.pbs",
 }
 
 # Job-env keys the cluster-side dispatcher / template ALWAYS need. The

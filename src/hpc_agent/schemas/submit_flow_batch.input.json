@@ -90,7 +90,9 @@
         "backend": {
           "enum": [
             "sge",
-            "slurm"
+            "slurm",
+            "pbspro",
+            "torque"
           ],
           "title": "Backend",
           "type": "string"

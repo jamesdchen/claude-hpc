@@ -112,4 +112,19 @@ def build_remote_backend(
             account=slurm_account,
             cluster=slurm_cluster,
         )
+    if backend_name in ("pbspro", "torque"):
+        # PBS forks have no dedicated remote class; build from the golden
+        # profile via the engine factory (same path a pinned profile takes).
+        from hpc_agent.infra.backends import build_backend_class
+        from hpc_agent.infra.backends.profile import PBSPRO_PROFILE, TORQUE_PROFILE
+
+        profile = PBSPRO_PROFILE if backend_name == "pbspro" else TORQUE_PROFILE
+        cls = build_backend_class(profile, remote=True)
+        keys = pass_env_keys if pass_env_keys else job_env_keys
+        return cls(
+            script=script,
+            ssh_run=ssh,
+            remote_repo=remote_path,
+            pass_env_keys=tuple(keys),
+        )
     raise errors.SpecInvalid(f"unknown backend: {backend_name!r}")

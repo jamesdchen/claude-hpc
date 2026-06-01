@@ -466,6 +466,7 @@ def deploy_runtime(
     *,
     ssh_target: str,
     remote_path: str,
+    scheduler: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Deploy framework runtime files to the cluster.
 
@@ -615,7 +616,13 @@ def deploy_runtime(
     # cpu_array/gpu_array remote basenames <- render_script(kind=...).
     _KIND_FOR_BASENAME = {"cpu_array": "cpu", "gpu_array": "gpu"}
 
-    for sched in ("sge", "slurm"):
+    # Deploy only the cluster's own family's scripts when *scheduler* is
+    # known (the submit path passes it). Falls back to sge+slurm when it
+    # isn't — preserving legacy callers — but a single-family deploy is
+    # what makes pbspro/torque (which share the ``.pbs`` ext) safe: only
+    # one PBS fork's scripts ever land on a given cluster.
+    schedulers = (scheduler,) if scheduler else ("sge", "slurm")
+    for sched in schedulers:
         backend_cls = get_backend_class(sched)
         ext = template_ext_for(sched).lstrip(".")
         for basename, kind in _KIND_FOR_BASENAME.items():
