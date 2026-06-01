@@ -164,13 +164,27 @@ class TestLabelResolverNoLLM:
     """The resolver maps a KNOWN label to its golden profile WITHOUT an LLM
     call. NEEDS_SPINE: hpc_agent.infra.backends.profile."""
 
-    @pytest.mark.parametrize(("label", "family"), [("slurm", "slurm"), ("sge", "sge")])
+    @pytest.mark.parametrize(
+        ("label", "family"),
+        [("slurm", "slurm"), ("sge", "sge"), ("pbspro", "pbspro"), ("torque", "torque")],
+    )
     def test_known_label_resolves_to_golden_without_llm(self, label, family):
-        from hpc_agent.infra.backends.profile import SGE_PROFILE, SLURM_PROFILE
+        from hpc_agent.infra.backends.profile import (
+            PBSPRO_PROFILE,
+            SGE_PROFILE,
+            SLURM_PROFILE,
+            TORQUE_PROFILE,
+        )
         from hpc_agent.models.mapreduce.reduce.status import resolve_scheduler_profile
 
-        golden = {"slurm": SLURM_PROFILE, "sge": SGE_PROFILE}[family]
-        # An exploding LLM proves path (3) is taken (NO LLM for known family).
+        golden = {
+            "slurm": SLURM_PROFILE,
+            "sge": SGE_PROFILE,
+            "pbspro": PBSPRO_PROFILE,
+            "torque": TORQUE_PROFILE,
+        }[family]
+        # An exploding LLM proves path (3) is taken (NO LLM for known family) —
+        # and that pbspro/torque are treated as KNOWN (not auto-authored).
         resolved = resolve_scheduler_profile(label, cfg={}, llm=_ExplodingLLM())
         assert resolved == golden
 

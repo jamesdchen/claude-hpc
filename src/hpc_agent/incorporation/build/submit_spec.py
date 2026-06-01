@@ -87,8 +87,8 @@ def build_submit_spec(*, spec: BuildSubmitSpecInput) -> dict[str, Any]:
     profile, cluster, ssh_target, remote_path, run_id, total_tasks,
     backend:
         Required identity fields that flow straight through to the
-        spec. ``backend`` is one of ``sge`` / ``slurm`` (both resolve
-        to the remote-over-ssh backend).
+        spec. ``backend`` is one of ``sge`` / ``slurm`` / ``pbspro`` /
+        ``torque`` (all resolve to the remote-over-ssh backend).
     cmd_sha:
         SHA-256 of the materialized task list, computed by
         :func:`compute_cmd_sha`. Stamped into ``job_env["HPC_CMD_SHA"]``

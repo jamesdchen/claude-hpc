@@ -68,8 +68,9 @@ LifecycleStateObservableWithTimeout = Literal[
 # ── infra ────────────────────────────────────────────────────────────────────
 
 # Scheduler driver. 'sge' covers Sun/Univa/Open Grid Engine variants;
-# 'slurm' covers Slurm-Workload-Manager clusters.
-Scheduler = Literal["sge", "slurm"]
+# 'slurm' covers Slurm-Workload-Manager clusters; 'pbspro' covers PBS Pro /
+# OpenPBS and 'torque' covers TORQUE (distinct PBS forks — see KNOWN_FAMILIES).
+Scheduler = Literal["sge", "slurm", "pbspro", "torque"]
 
 # Cluster-specific GPU label (e.g. 'A100', 'H100', 'L40S'). Semantic checks
 # live in inspect_cluster; the schema only enforces non-empty.

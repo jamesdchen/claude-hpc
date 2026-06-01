@@ -239,7 +239,7 @@ def get_template_path(scheduler: str, template: str) -> Path:
 
     Parameters
     ----------
-    scheduler : ``"sge"`` or ``"slurm"``
+    scheduler : ``"sge"``, ``"slurm"``, ``"pbspro"`` or ``"torque"``
     template : template basename (e.g. ``"cpu_array"`` / ``"gpu_array"``);
         the ``_array`` suffix maps to the profile script ``kind``.
     """

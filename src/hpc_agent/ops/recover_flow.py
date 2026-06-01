@@ -117,10 +117,19 @@ def render_overrides_to_extra_flags(
     Maps the planner-adjusted (or caller-supplied) override keys to the
     flags the scheduler accepts on the qsub command line:
 
-    * ``mem_mb`` — Slurm ``--mem=NM`` (suffix M); SGE ``-l h_data=NM``.
-    * ``walltime_sec`` — Slurm ``--time=HH:MM:SS``; SGE ``-l h_rt=HH:MM:SS``.
-    * ``gpus`` — Slurm ``--gpus=N``; SGE ``-l gpu=N``.
-    * ``cpus`` — Slurm ``--cpus-per-task=N``; SGE ``-pe shared N``.
+    * ``mem_mb`` — Slurm ``--mem=NM``; SGE ``-l h_data=NM``; PBS Pro
+      ``select=…:mem=Nmb``; TORQUE ``-l …,mem=Nmb``.
+    * ``walltime_sec`` — Slurm ``--time=HH:MM:SS``; SGE ``-l h_rt=…``;
+      PBS ``-l walltime=HH:MM:SS`` (TORQUE folds it into the same ``-l``).
+    * ``gpus`` — Slurm ``--gpus=N``; SGE ``-l gpu=N``; PBS Pro
+      ``select=…:ngpus=N``; TORQUE ``nodes=1:…:gpus=N``.
+    * ``cpus`` — Slurm ``--cpus-per-task=N``; SGE ``-pe shared N``; PBS Pro
+      ``select=…:ncpus=N``; TORQUE ``nodes=1:ppn=N``.
+
+    The PBS grammar mirrors the engine's ``resource_flags`` (the source of
+    truth) — PBS has no independent per-resource flags, so cpus/mem/gpus
+    are combined into the single ``select=``/``nodes=`` chunk a command-line
+    ``-l`` uses to override the script directive.
 
     Unknown keys are silently dropped — the planner emits documented
     keys only, and a typo'd override should not crash the whole
@@ -130,10 +139,10 @@ def render_overrides_to_extra_flags(
     if not overrides:
         return []
     s = (scheduler or "").lower()
-    if s not in {"slurm", "sge"}:
+    if s not in {"slurm", "sge", "pbspro", "torque"}:
         raise errors.SpecInvalid(
             f"render_overrides_to_extra_flags: unknown scheduler {scheduler!r}; "
-            "expected 'slurm' or 'sge'"
+            "expected 'slurm', 'sge', 'pbspro' or 'torque'"
         )
 
     out: list[str] = []
@@ -151,7 +160,7 @@ def render_overrides_to_extra_flags(
             out += [f"--gpus={gpus}"]
         if isinstance(cpus, int) and cpus > 0:
             out += [f"--cpus-per-task={cpus}"]
-    else:  # sge
+    elif s == "sge":
         if isinstance(mem_mb, int) and mem_mb > 0:
             out += ["-l", f"h_data={mem_mb}M"]
         if isinstance(walltime_sec, int) and walltime_sec > 0:
@@ -160,6 +169,34 @@ def render_overrides_to_extra_flags(
             out += ["-l", f"gpu={gpus}"]
         if isinstance(cpus, int) and cpus > 0:
             out += ["-pe", "shared", str(cpus)]
+    elif s == "pbspro":
+        # cpus/mem/gpus live in one ``select=`` chunk; walltime is separate.
+        chunk = ["select=1"]
+        if isinstance(cpus, int) and cpus > 0:
+            chunk.append(f"ncpus={cpus}")
+        if isinstance(mem_mb, int) and mem_mb > 0:
+            chunk.append(f"mem={mem_mb}mb")
+        if isinstance(gpus, int) and gpus > 0:
+            chunk.append(f"ngpus={gpus}")
+        if len(chunk) > 1:  # at least one resource beyond the bare chunk count
+            out += ["-l", ":".join(chunk)]
+        if isinstance(walltime_sec, int) and walltime_sec > 0:
+            out += ["-l", f"walltime={_format_walltime(walltime_sec)}"]
+    else:  # torque — single comma-joined ``-l`` (nodes spec + mem + walltime)
+        nodes = ["nodes=1"]
+        if isinstance(cpus, int) and cpus > 0:
+            nodes.append(f"ppn={cpus}")
+        if isinstance(gpus, int) and gpus > 0:
+            nodes.append(f"gpus={gpus}")
+        parts: list[str] = []
+        if len(nodes) > 1:
+            parts.append(":".join(nodes))
+        if isinstance(mem_mb, int) and mem_mb > 0:
+            parts.append(f"mem={mem_mb}mb")
+        if isinstance(walltime_sec, int) and walltime_sec > 0:
+            parts.append(f"walltime={_format_walltime(walltime_sec)}")
+        if parts:
+            out += ["-l", ",".join(parts)]
     return out
 
 

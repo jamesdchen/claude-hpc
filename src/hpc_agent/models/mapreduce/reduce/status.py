@@ -222,32 +222,43 @@ def detect_scheduler(result_dir: str | Path | None = None) -> str:
 # raises a clear error only on the paths that actually need them.
 # ---------------------------------------------------------------------------
 
-_KNOWN_SCHEDULER_FAMILIES = frozenset({"slurm", "sge"})
+_KNOWN_SCHEDULER_FAMILIES = frozenset({"slurm", "sge", "pbspro", "torque"})
 
 
 def _golden_profile_for_family(family: str):
     """Return the spine's golden ``SchedulerProfile`` for a known family.
 
-    ``family`` is one of ``{"slurm", "sge"}``. Imports the spine lazily so
-    this module stays importable before the spine lands. Raises
-    ``NotImplementedError`` if the spine isn't present yet (this path is
-    only reached for a known family, where a golden profile is expected to
-    exist), and ``ValueError`` for an unrecognised family.
+    ``family`` is one of :data:`_KNOWN_SCHEDULER_FAMILIES`
+    (slurm / sge / pbspro / torque). Imports the spine lazily so this module
+    stays importable before the spine lands. Raises ``NotImplementedError``
+    if the spine isn't present yet (this path is only reached for a known
+    family, where a golden profile is expected to exist), and ``ValueError``
+    for an unrecognised family.
     """
     try:
-        from hpc_agent.infra.backends.profile import SGE_PROFILE, SLURM_PROFILE
+        from hpc_agent.infra.backends.profile import (
+            PBSPRO_PROFILE,
+            SGE_PROFILE,
+            SLURM_PROFILE,
+            TORQUE_PROFILE,
+        )
     except ImportError as exc:  # pragma: no cover — spine not present yet
         raise NotImplementedError(
             "spine module hpc_agent.infra.backends.profile is not available "
-            "yet; golden profiles (SLURM_PROFILE/SGE_PROFILE) are required "
+            "yet; golden profiles (SLURM/SGE/PBSPRO/TORQUE) are required "
             "to resolve a known scheduler family."
         ) from exc
+    golden = {
+        "slurm": SLURM_PROFILE,
+        "sge": SGE_PROFILE,
+        "pbspro": PBSPRO_PROFILE,
+        "torque": TORQUE_PROFILE,
+    }
     fam = family.strip().lower()
-    if fam == "slurm":
-        return SLURM_PROFILE
-    if fam == "sge":
-        return SGE_PROFILE
-    raise ValueError(f"no golden profile for scheduler family {family!r}")
+    try:
+        return golden[fam]
+    except KeyError:
+        raise ValueError(f"no golden profile for scheduler family {family!r}") from None
 
 
 def _register(profile):
@@ -913,7 +924,9 @@ def _main() -> int:
         help="Comma-separated scheduler job IDs (optional)",
     )
     parser.add_argument("--job-name", default="", help="Job name for error-log lookup")
-    parser.add_argument("--scheduler", default=None, choices=[None, "sge", "slurm"])
+    parser.add_argument(
+        "--scheduler", default=None, choices=[None, "sge", "slurm", "pbspro", "torque"]
+    )
     parser.add_argument("--file-glob", default="*", help="Glob for per-task result files")
     parser.add_argument("--log-dir", default="", help="SLURM log directory")
     parser.add_argument("--scratch-dir", default="", help="SGE scratch log directory")
