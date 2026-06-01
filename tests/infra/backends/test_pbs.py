@@ -169,13 +169,28 @@ def test_pbs_log_paths(family):
     assert cls.stderr_log_path("/repo", "job", "555", 0) == "/repo/logs/job.o555.1"
 
 
-# --- history / inspect are documented follow-ons ---------------------------
+# --- history (qstat -xf -> Exit_status) + minimal inspect snapshot ---------
 
 
 @pytest.mark.parametrize("family", ["pbspro", "torque"])
-def test_pbs_history_and_inspect_not_yet_implemented(family):
-    cls = get_backend_class(family)
-    with pytest.raises(NotImplementedError):
-        cls.query_jobs(["12345"])
-    with pytest.raises(NotImplementedError):
-        cls.inspect_cluster("c", {})
+def test_pbs_query_jobs_dispatches_without_raising(family):
+    from unittest.mock import patch
+
+    # query_pbs shells out to qstat; with no real cluster it returns an empty
+    # task map + a diagnostic error rather than raising.
+    with patch(
+        "hpc_agent.infra.backends.query.subprocess.run",
+        side_effect=FileNotFoundError("qstat"),
+    ):
+        out = get_backend_class(family).query_jobs(["12345"])
+    assert out["tasks"] == {}
+    assert any(e["code"] == "qstat_unavailable" for e in out["errors"])
+
+
+@pytest.mark.parametrize("family", ["pbspro", "torque"])
+def test_pbs_inspect_returns_minimal_snapshot(family):
+    snap = get_backend_class(family).inspect_cluster("c", {})
+    d = snap.to_dict()
+    assert d["scheduler_kind"] == family
+    assert d["nodes"] == []
+    assert any(e["code"] == "pbs_inspect_minimal" for e in d["errors"])

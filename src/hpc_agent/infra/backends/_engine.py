@@ -441,13 +441,9 @@ class ProfileBackend(HPCBackend):
 
             return query_sacct(job_ids, cluster=slurm_cluster)
         if cls.profile.family in ("pbspro", "torque"):
-            # Authoritative history (reading Exit_status via ``qstat -xf`` /
-            # ``qstat -f``) is a documented follow-on; live monitoring works via
-            # build_scheduler_state_cmd + classify_scheduler_state.
-            raise NotImplementedError(
-                "PBS history query (query_pbs / Exit_status) is not yet "
-                "implemented; live monitoring via qstat -u is available."
-            )
+            from hpc_agent.infra.backends.query import query_pbs
+
+            return query_pbs(job_ids, fork=cls.profile.family)
         from hpc_agent.infra.backends.query import query_sge
 
         return query_sge(job_ids, user=sge_user)
@@ -476,9 +472,15 @@ class ProfileBackend(HPCBackend):
                 runner=runner,
             )
         if cls.profile.family in ("pbspro", "torque"):
-            raise NotImplementedError(
-                "cluster inspect (planner snapshot) is not yet implemented for "
-                "the PBS family; submit + live monitoring are supported."
+            from hpc_agent.infra.inspect.pbs import _pbs_inspect
+
+            return _pbs_inspect(
+                cluster_name,
+                cfg,
+                scheduler_kind=cls.profile.family,
+                stress_alloc_mem_pct=stress_alloc_mem_pct,
+                stress_cpu_load_frac=stress_cpu_load_frac,
+                runner=runner,
             )
         from hpc_agent.infra.inspect.sge import _sge_inspect
 
