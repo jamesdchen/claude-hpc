@@ -340,6 +340,9 @@ _SLURM_CLASSIFY = [
     ("REVOKED", "error"),
     ("SPECIAL_EXIT", "held"),
     ("SOMETHING_HOLD", "held"),
+    ("SUSPENDED", "held"),  # not progressing -> held (matches slurm-drmaa)
+    ("STOPPED", "held"),
+    ("CANCELLED by 100123", "error"),  # sacct trailing-text form -> match leading token
     ("UNKNOWN_STATE", "alive"),  # conservative default
 ]
 

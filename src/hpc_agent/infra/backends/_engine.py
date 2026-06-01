@@ -298,9 +298,15 @@ class ProfileBackend(HPCBackend):
         """Bucket a raw scheduler state token into ``alive`` / ``error`` / ``held``."""
         if cls.profile.family == "slurm":
             s = state.strip().upper()
-            if s in cls.profile.error_states:
+            # ``sacct`` can emit ``CANCELLED by <uid>`` (trailing text), so match
+            # on the leading token against the error vocabulary rather than the
+            # whole string (mirrors status._categorize's startswith handling).
+            head = s.split()[0] if s else s
+            if head in cls.profile.error_states:
                 return "error"
-            if "HOLD" in s or s == "SPECIAL_EXIT":
+            # SUSPENDED / STOPPED are not making progress — bucket as held (matches
+            # slurm-drmaa's USER/SYSTEM_SUSPENDED -> held), alongside the hold family.
+            if s in {"SUSPENDED", "STOPPED"} or "HOLD" in s or s == "SPECIAL_EXIT":
                 return "held"
             return "alive"
         # sge: error states carry an uppercase ``E``; held jobs carry ``h``.
