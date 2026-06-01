@@ -1,38 +1,30 @@
-"""Auto-resolve a :class:`SchedulerProfile` for an unknown scheduler.
+"""Deterministic scheduler detection for cluster onboarding.
 
-This is the live half of the resolver seam that
-:func:`hpc_agent.models.mapreduce.reduce.status.resolve_scheduler_profile`
-delegates to for an unrecognised scheduler. The loop is:
+Probes a login node and resolves which curated scheduler **family** it
+runs — ``slurm`` / ``sge`` / ``pbspro`` / ``torque`` — purely by
+measurement: which submit binary exists, and (for the ambiguous ``qsub``
+case) which marker tools + version banner are present. No LLM, no live
+job: the answer is ground truth from the cluster, and a wrong call fails
+loud at first submit (the engine's job-id parse guard).
 
-    probe -> seed-from-nearest-golden -> author (LLM) -> offline-validate
-          -> canary (live 1-task submit) -> return (caller pins)
-
-Every step is driven through injected callables (``ssh_run`` for the
-cluster, ``llm`` for authoring) so the whole module is unit-testable with
-stubs; only a real ``canary_validate`` pass needs an actual cluster.
-
-The ``family`` of any resolved profile is always one of
-:data:`hpc_agent.infra.backends.profile.KNOWN_FAMILIES` — the LLM only
-customises *data* (regex, scripts, error vocabulary), never the
-structural command grammar, so a misauthored profile can't make the
-engine emit something it doesn't understand.
+This module is intentionally *detection only*. A scheduler outside the
+curated families is handled by pinning a ``scheduler_profile`` in
+clusters.yaml (data) or adding a curated family (code) — it is not
+auto-authored at runtime, because a synthesised profile has no fast,
+reliable verifier and the curated families already cover the common
+ground. ``seed_profile_for_probe`` returns the nearest curated golden
+profile for a detected family (used by the deterministic resolver).
 """
 
 from __future__ import annotations
 
-import contextlib
-import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from hpc_agent import errors
-from hpc_agent.infra.backends.profile import (
-    SGE_PROFILE,
-    SLURM_PROFILE,
-    SchedulerProfile,
-)
+from hpc_agent.infra.backends.profile import SGE_PROFILE, SLURM_PROFILE, SchedulerProfile
 
 if TYPE_CHECKING:
     import subprocess
@@ -40,23 +32,17 @@ if TYPE_CHECKING:
 # Families the engine can register a profile under. ``probe_cluster`` only
 # ever resolves ``family`` to one of these (or None). Mirrors the frozen
 # set the engine registers under so a probe can never name something the
-# rest of the framework can't route. Kept as a module constant here (rather
-# than imported from the spine) so this resolver stays importable before the
-# spine's pbspro/torque profiles land during the parallel refactor.
+# rest of the framework can't route.
 _PROBE_FAMILIES = frozenset({"slurm", "sge", "pbspro", "torque"})
 
 # A callable that runs one shell command on the cluster login node and
 # returns its CompletedProcess (the same shape ``infra.remote.ssh_run``
 # yields). Injected so tests can stub the cluster.
 SshRun = Callable[[str], "subprocess.CompletedProcess[str]"]
-# Authoring hook: given a prompt, return a JSON object string of the
-# SchedulerProfile fields to override on the seed. Provider-agnostic — an
-# in-process LLM client or an agent-driven CLI verb both fit.
-Llm = Callable[[str], str]
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 — probe
+# Probe
 # ---------------------------------------------------------------------------
 
 # Submit binary -> family. ``sbatch`` is unambiguous (slurm); ``qsub`` is
@@ -135,7 +121,7 @@ class ProbeResult:
     binaries: dict[str, str] = field(default_factory=dict)  # bin -> path
     family: str | None = None  # inferred known family, else None
     versions: dict[str, str] = field(default_factory=dict)  # bin -> version banner
-    raw: dict[str, str] = field(default_factory=dict)  # cmd -> stdout (for the LLM)
+    raw: dict[str, str] = field(default_factory=dict)  # cmd -> stdout (diagnostics)
     markers: dict[str, bool] = field(default_factory=dict)  # disambig marker -> present
 
 
@@ -169,8 +155,7 @@ def probe_cluster(ssh_run: SshRun) -> ProbeResult:
         if path:
             binaries[bin_name] = path.splitlines()[0].strip()
 
-    # Version banners (only for binaries that exist) — useful context for
-    # the LLM and for distinguishing forks (Univa/SoG/OGS, Slurm vs flux).
+    # Version banners (only for binaries that exist) — diagnostics + fork split.
     _version_cmd = {"sbatch": "sbatch --version", "qsub": "qsub -help", "bsub": "bsub -V"}
     for bin_name in binaries:
         cmd = _version_cmd.get(bin_name)
@@ -207,16 +192,16 @@ def probe_cluster(ssh_run: SshRun) -> ProbeResult:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — seed from nearest golden
+# Seed from nearest curated golden profile
 # ---------------------------------------------------------------------------
 
 
 def seed_profile_for_probe(probe: ProbeResult) -> SchedulerProfile:
-    """Return the golden profile nearest to *probe* (the LLM's starting point).
+    """Return the curated golden profile for the detected family.
 
     Raises :class:`~hpc_agent.errors.SpecInvalid` when the probe found no
-    recognisable submit binary — there is nothing to seed from, and guessing
-    a family blind would be worse than failing loudly.
+    recognisable submit binary — there is nothing to map to, and guessing a
+    family blind would be worse than failing loudly.
     """
     if probe.family == "slurm":
         return SLURM_PROFILE
@@ -232,414 +217,6 @@ def seed_profile_for_probe(probe: ProbeResult) -> SchedulerProfile:
         return TORQUE_PROFILE
     raise errors.SpecInvalid(
         "cluster probe found no sbatch/qsub-family scheduler "
-        f"(binaries={sorted(probe.binaries)}); cannot seed a profile. "
+        f"(binaries={sorted(probe.binaries)}); cannot map to a curated profile. "
         "If this is a known scheduler, pin a 'scheduler_profile' in clusters.yaml."
     )
-
-
-# ---------------------------------------------------------------------------
-# Phase 3 — author (LLM) + offline validation
-# ---------------------------------------------------------------------------
-
-# Fields the LLM is allowed to override. ``family`` and ``scripts`` are
-# deliberately excluded: family is structural (engine-bound) and the seed's
-# scripts already render correctly for the family; an LLM rewriting bash is
-# a much larger risk surface than tweaking a regex.
-_AUTHORABLE_FIELDS = frozenset(
-    {"name", "submit_bin", "job_id_regex", "template_ext", "supports_test_only_eta", "error_states"}
-)
-
-
-def _author_prompt(seed: SchedulerProfile, probe: ProbeResult) -> str:
-    return (
-        "You are configuring an HPC scheduler profile. Below is a SEED profile "
-        f"for the nearest known family ({seed.family!r}) and the raw output of "
-        "probing the cluster's login node. Return ONLY a JSON object containing "
-        "the fields that DIFFER from the seed for this cluster's scheduler. "
-        f"Allowed keys: {sorted(_AUTHORABLE_FIELDS)}. Do not change 'family'.\n\n"
-        f"SEED:\n{json.dumps(seed.to_dict(), indent=2, sort_keys=True)}\n\n"
-        f"PROBE:\n{json.dumps(probe.raw, indent=2, sort_keys=True)}\n"
-    )
-
-
-def author_profile(seed: SchedulerProfile, probe: ProbeResult, llm: Llm) -> SchedulerProfile:
-    """Ask *llm* to customise *seed* for this cluster; merge + rebuild.
-
-    The LLM returns a JSON object of overrides; unknown / disallowed keys are
-    ignored, ``family`` and ``scripts`` are pinned to the seed, and the result
-    is rebuilt via ``SchedulerProfile.from_dict`` (which validates shape).
-    """
-    raw = llm(_author_prompt(seed, probe))
-    try:
-        overrides = json.loads(raw)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise errors.SpecInvalid(f"profile-authoring LLM did not return valid JSON: {exc}") from exc
-    if not isinstance(overrides, dict):
-        raise errors.SpecInvalid("profile-authoring LLM must return a JSON object")
-
-    merged = seed.to_dict()
-    for key, value in overrides.items():
-        if key in _AUTHORABLE_FIELDS:
-            merged[key] = value
-    # Pin the non-authorable, structural fields back to the seed.
-    merged["family"] = seed.family
-    merged["scripts"] = dict(seed.scripts)
-    return SchedulerProfile.from_dict(merged)
-
-
-# Representative submit-stdout + state tokens per family, used as the offline
-# oracle so a candidate profile is sanity-checked before any cluster contact.
-_FAMILY_SAMPLES = {
-    "slurm": {
-        "submit": "Submitted batch job 12345",
-        "alive_states": ["RUNNING", "PENDING"],
-        "error_states": ["FAILED", "TIMEOUT"],
-    },
-    "sge": {
-        "submit": 'Your job-array 12345.1-10:1 ("job") has been submitted',
-        "alive_states": ["r", "qw"],
-        "error_states": ["Eqw"],
-    },
-}
-
-
-def validate_profile_offline(profile: SchedulerProfile) -> list[str]:
-    """Return a list of problems with *profile*, empty if it passes.
-
-    The offline gate the canary can't be: a compilable, *matching* job-id
-    regex and a state classifier that buckets the family's known tokens
-    correctly. Run before any live submission so a broken regex is caught
-    without burning a cluster job.
-    """
-    from hpc_agent.infra.backends import build_backend_class
-
-    problems: list[str] = []
-    try:
-        rx = re.compile(profile.job_id_regex)
-    except re.error as exc:
-        return [f"job_id_regex does not compile: {exc}"]
-
-    sample = _FAMILY_SAMPLES.get(profile.family, {})
-    submit_line = sample.get("submit")
-    if submit_line:
-        m = rx.search(submit_line)
-        if not m or not m.groups():
-            problems.append(
-                f"job_id_regex {profile.job_id_regex!r} does not capture a job id "
-                f"from a representative submit line: {submit_line!r}"
-            )
-
-    cls = build_backend_class(profile, remote=True)
-    for state in sample.get("alive_states", []):
-        if cls.classify_scheduler_state(state) == "error":
-            problems.append(f"state {state!r} misclassified as error (expected alive/held)")
-    for state in sample.get("error_states", []):
-        if cls.classify_scheduler_state(state) != "error":
-            problems.append(f"error state {state!r} not classified as error")
-    return problems
-
-
-# ---------------------------------------------------------------------------
-# Phase 4 — canary (live; mockable via ssh_run)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class CanaryResult:
-    ok: bool
-    job_id: str | None = None
-    parsed: bool = False
-    found_alive: bool = False
-    log_found: bool = False
-    detail: str = ""
-
-
-# A trivial canary job body — validates the submit/parse/log plumbing
-# without depending on the user's executor. Written to the remote repo and
-# submitted as a 1-task array.
-_CANARY_BODY = '#!/bin/bash\necho "hpc-agent canary ok on $(hostname)"\n'
-
-
-def canary_validate(
-    profile: SchedulerProfile,
-    *,
-    ssh_run: SshRun,
-    remote_repo: str,
-    job_name: str = "hpc_canary",
-    log_poll: Callable[[str], bool] | None = None,
-) -> CanaryResult:
-    """Submit ONE trivial task through *profile* and confirm the plumbing.
-
-    Hard gates: the submit stdout must yield a job id via the profile's
-    regex, and the task's stderr log must appear on disk. The alive check is
-    informational (a sub-second canary may already be gone). Everything runs
-    through *ssh_run*, so this is exercised in tests with a stubbed cluster;
-    a real *pass* requires an actual login node.
-
-    *log_poll* (injected for testability) decides whether the expected log
-    path exists; it defaults to a single ``test -f`` over ssh.
-    """
-    from hpc_agent.infra.backends import build_backend_class
-
-    backend_cls = build_backend_class(profile, remote=True)
-    script_name = f".hpc/{job_name}{profile.template_ext}"
-    backend = backend_cls(
-        script=script_name,
-        ssh_run=ssh_run,
-        remote_repo=remote_repo,
-    )
-
-    # Materialise the canary script on the remote (heredoc avoids quoting pain).
-    ssh_run(f"mkdir -p {remote_repo}/.hpc")
-    ssh_run(f"cat > {remote_repo}/{script_name} <<'HPC_EOF'\n{_CANARY_BODY}HPC_EOF")
-
-    # Submit a 1-task array; submit_array_tracked enforces the job-id parse
-    # (raises if profile.JOB_ID_REGEX doesn't match the submit stdout).
-    try:
-        from pathlib import Path
-
-        submissions = backend.submit_array_tracked(
-            job_name, total_tasks=1, tasks_per_array=1, job_env={}, cwd=Path(remote_repo)
-        )
-    except RuntimeError as exc:
-        return CanaryResult(ok=False, parsed=False, detail=f"submit/parse failed: {exc}")
-    if not submissions:
-        return CanaryResult(ok=False, parsed=False, detail="no submission recorded")
-    job_id = submissions[0][1]
-
-    # Alive check (informational).
-    found_alive = False
-    try:
-        alive_cmd = backend_cls.build_alive_check_cmd([job_id])
-        alive_out = getattr(ssh_run(alive_cmd), "stdout", "") or ""
-        found_alive = job_id in backend_cls.parse_alive_output(alive_out, [job_id])
-    except Exception:  # noqa: BLE001 — informational only
-        found_alive = False
-
-    # Log existence (hard gate). task_id 0 -> on-disk index 1.
-    log_path = backend_cls.stderr_log_path(remote_repo, job_name, job_id, 0)
-    if log_poll is None:
-
-        def log_poll(path: str) -> bool:
-            out = getattr(ssh_run(f"test -f {path} && echo OK"), "stdout", "") or ""
-            return "OK" in out
-
-    log_found = bool(log_poll(log_path))
-    ok = log_found  # parse already enforced above
-    detail = "ok" if ok else f"canary log not found at {log_path}"
-    return CanaryResult(
-        ok=ok,
-        job_id=job_id,
-        parsed=True,
-        found_alive=found_alive,
-        log_found=log_found,
-        detail=detail,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator
-# ---------------------------------------------------------------------------
-
-
-def resolve_unknown_scheduler(
-    scheduler: str,
-    *,
-    ssh_run: SshRun,
-    llm: Llm | None = None,
-    remote_repo: str | None = None,
-    run_canary: bool = True,
-) -> SchedulerProfile:
-    """Full loop: probe -> seed -> author -> offline-validate -> canary.
-
-    *llm* is required (the authoring step); when absent the seed is used
-    verbatim (useful when the nearest golden already fits, e.g. a SLURM fork
-    whose submit shape is unchanged). *run_canary* requires *remote_repo*.
-    Raises :class:`~hpc_agent.errors.SpecInvalid` on any gate failure so a
-    bad profile is never returned (and therefore never pinned).
-    """
-    probe = probe_cluster(ssh_run)
-    seed = seed_profile_for_probe(probe)
-    profile = author_profile(seed, probe, llm) if llm is not None else seed
-
-    problems = validate_profile_offline(profile)
-    if problems:
-        raise errors.SpecInvalid(
-            f"resolved profile for {scheduler!r} failed offline validation: " + "; ".join(problems)
-        )
-
-    if run_canary:
-        if not remote_repo:
-            raise errors.SpecInvalid("canary validation requires remote_repo")
-        result = canary_validate(profile, ssh_run=ssh_run, remote_repo=remote_repo)
-        if not result.ok:
-            raise errors.SpecInvalid(
-                f"canary validation failed for resolved profile {profile.name!r}: {result.detail}"
-            )
-    return profile
-
-
-# ---------------------------------------------------------------------------
-# Setup-CLI entry point (agent-driven)
-# ---------------------------------------------------------------------------
-
-
-def _build_ssh_run(ssh_target: str) -> SshRun:
-    from hpc_agent.infra.remote import ssh_run as _ssh
-
-    def run(cmd: str):
-        return _ssh(cmd, ssh_target=ssh_target)
-
-    return run
-
-
-def _needs_authoring(
-    cluster: str, scheduler: str, ssh_run: SshRun, *, reason: str, job_id: str | None = None
-) -> dict:
-    """Escalation envelope: hand the agent the probe + seed + prompt to author."""
-    probe = probe_cluster(ssh_run)
-    seed = None
-    with contextlib.suppress(errors.SpecInvalid):
-        seed = seed_profile_for_probe(probe)
-    out: dict = {
-        "status": "needs_authoring",
-        "scheduler": scheduler,
-        "reason": reason,
-        "probe": probe.raw,
-        "seed": seed.to_dict() if seed else None,
-        "prompt": _author_prompt(seed, probe) if seed else None,
-        "next": (
-            "Author a SchedulerProfile JSON (start from 'seed', adjust per the "
-            f"'probe' output and give it a distinct 'name'), then re-run: "
-            f"hpc-agent setup --cluster {cluster} --scheduler-profile-json '<json>'"
-        ),
-    }
-    if job_id:
-        out["canary_job_id"] = job_id
-    return out
-
-
-def resolve_for_setup(
-    cluster: str,
-    experiment_dir,
-    *,
-    cfg: dict | None = None,
-    ssh_run: SshRun | None = None,
-    scheduler_profile_json: str | dict | None = None,
-    run_canary: bool = True,
-) -> dict:
-    """Resolve (and validate) this cluster's scheduler profile for ``setup``.
-
-    The agent-driven entry point. Returns a JSON-able status dict for the
-    setup envelope and NEVER raises — every failure becomes a status the
-    agent can act on:
-
-    * ``resolved`` — a profile is registered (+ pinned when custom).
-    * ``needs_authoring`` — an unknown/forked scheduler the golden seed
-      couldn't validate; carries ``probe`` + ``seed`` + ``prompt`` so the
-      agent authors a profile dict and re-invokes with
-      ``--scheduler-profile-json``.
-    * ``invalid`` / ``canary_failed`` / ``skipped`` / ``error`` — diagnosed.
-
-    A CONFIRMATION canary (a live 1-task submit) runs only for a *custom*
-    profile (authored or clusters.yaml-pinned); a standard golden
-    slurm/sge cluster resolves deterministically with no job submitted.
-    """
-    from hpc_agent.infra.backends import register_profile
-    from hpc_agent.infra.backends.profile import SchedulerProfile
-
-    if cfg is None:
-        from hpc_agent.infra.clusters import load_clusters_config
-
-        try:
-            clusters = load_clusters_config()
-        except Exception as exc:  # noqa: BLE001 — surface as a status, don't crash setup
-            return {"status": "error", "reason": f"clusters.yaml failed to load: {exc}"}
-        if cluster not in clusters:
-            return {"status": "skipped", "reason": f"{cluster!r} not in clusters.yaml"}
-        cfg = clusters[cluster]
-
-    scheduler = (cfg.get("scheduler") or "").strip()
-    remote_repo = cfg.get("scratch") or cfg.get("remote_path")
-
-    if ssh_run is None:
-        from hpc_agent.infra.clusters import ClusterConfig
-
-        ssh_target = None
-        with contextlib.suppress(Exception):
-            ssh_target = ClusterConfig.model_validate(cfg).ssh_target
-        if not ssh_target:
-            return {
-                "status": "skipped",
-                "reason": f"{cluster!r} needs both host and user to derive ssh_target",
-            }
-        ssh_run = _build_ssh_run(ssh_target)
-
-    # --- candidate profile ------------------------------------------------
-    if scheduler_profile_json is not None:
-        try:
-            data = (
-                json.loads(scheduler_profile_json)
-                if isinstance(scheduler_profile_json, str)
-                else scheduler_profile_json
-            )
-            profile = SchedulerProfile.from_dict(data)
-        except (json.JSONDecodeError, errors.SpecInvalid, TypeError, AttributeError) as exc:
-            return {
-                "status": "invalid",
-                "reason": f"scheduler_profile is not a valid profile: {exc}",
-            }
-        problems = validate_profile_offline(profile)
-        if problems:
-            return {"status": "invalid", "problems": problems}
-        custom = True
-    else:
-        from hpc_agent.models.mapreduce.reduce.status import (
-            _is_golden_profile,
-            resolve_scheduler_profile,
-        )
-
-        try:
-            profile = resolve_scheduler_profile(
-                scheduler,
-                cfg=cfg,
-                result_dir=None,
-                cluster_name=None,
-                probe=ssh_run,
-                llm=None,
-            )
-        except errors.SpecInvalid as exc:
-            return _needs_authoring(cluster, scheduler, ssh_run, reason=str(exc))
-        custom = not _is_golden_profile(profile)
-
-    # --- confirmation canary (custom profiles only) -----------------------
-    canaried = False
-    if custom and run_canary and remote_repo:
-        result = canary_validate(profile, ssh_run=ssh_run, remote_repo=remote_repo)
-        canaried = True
-        if not result.ok:
-            return _needs_authoring(
-                cluster,
-                scheduler,
-                ssh_run,
-                reason=f"canary failed: {result.detail}",
-                job_id=result.job_id,
-            )
-
-    # --- register + pin (golden profiles are not pinned) ------------------
-    try:
-        register_profile(profile, remote=True)
-    except errors.SpecInvalid as exc:
-        return {"status": "invalid", "reason": str(exc)}
-    from hpc_agent.models.mapreduce.reduce.status import _pin_resolved
-
-    with contextlib.suppress(Exception):
-        _pin_resolved(profile, result_dir=experiment_dir, cluster_name=cluster)
-
-    return {
-        "status": "resolved",
-        "profile": profile.name,
-        "family": profile.family,
-        "custom": custom,
-        "canaried": canaried,
-    }

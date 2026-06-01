@@ -99,13 +99,6 @@ def _setup_handler(args: argparse.Namespace) -> int:
         if preflight["all_ok"] and not args.dry_run:
             marker = write_preflight_marker(cluster=cluster, experiment_dir=experiment_dir)
             payload["preflight_marker"] = str(marker)
-            sched = _maybe_resolve_scheduler(
-                cluster=cluster,
-                experiment_dir=experiment_dir,
-                scheduler_profile_json=getattr(args, "scheduler_profile_json", None),
-            )
-            if sched is not None:
-                payload["scheduler_resolution"] = sched
 
     install_cron_flag = bool(getattr(args, "install_cron", False))
     cron_info = _resolve_pro_cron_status(
@@ -119,33 +112,6 @@ def _setup_handler(args: argparse.Namespace) -> int:
 
     _emit({"ok": True, "idempotent": True, "data": payload})
     return EXIT_OK
-
-
-def _maybe_resolve_scheduler(
-    *,
-    cluster: str,
-    experiment_dir: Path,
-    scheduler_profile_json: str | None,
-) -> dict[str, Any] | None:
-    """Resolve + validate the cluster's scheduler profile (agent-driven).
-
-    Returns the ``scheduler_resolution`` envelope (status dict) or ``None``
-    if resolution couldn't even start. Never raises — a standard slurm/sge
-    cluster resolves to the golden profile with no job submitted; an
-    unknown/forked scheduler comes back ``needs_authoring`` with the probe
-    and seed so the agent can author a profile and re-run with
-    ``--scheduler-profile-json``.
-    """
-    try:
-        from hpc_agent.infra.scheduler_resolve import resolve_for_setup
-
-        return resolve_for_setup(
-            cluster,
-            experiment_dir,
-            scheduler_profile_json=scheduler_profile_json,
-        )
-    except Exception as exc:  # noqa: BLE001 — resolution must never break setup
-        return {"status": "error", "reason": str(exc)}
 
 
 def _resolve_pro_cron_status(
@@ -278,17 +244,6 @@ def _resolve_pro_cron_status(
                 ),
             ),
             CliArg(
-                "--scheduler-profile-json",
-                type=str,
-                default=None,
-                help=(
-                    "JSON-encoded SchedulerProfile to validate + canary + pin for "
-                    "--cluster (the agent-authored answer to a prior "
-                    "'needs_authoring' result). Offline-validated, then confirmed "
-                    "with a live 1-task canary on the cluster before it is pinned."
-                ),
-            ),
-            CliArg(
                 "--install-cron",
                 action="store_true",
                 help=(
@@ -312,7 +267,6 @@ def setup(
     cluster: str | None = None,
     experiment_dir: str | Path | None = None,
     install_cron: bool = False,
-    scheduler_profile_json: str | None = None,
 ) -> dict[str, Any]:
     """One-shot setup: install bundled assets; optionally probe a cluster.
 
@@ -348,13 +302,6 @@ def setup(
         if preflight["all_ok"] and not dry_run:
             marker = write_preflight_marker(cluster=cluster, experiment_dir=exp)
             payload["preflight_marker"] = str(marker)
-            sched = _maybe_resolve_scheduler(
-                cluster=cluster,
-                experiment_dir=exp,
-                scheduler_profile_json=scheduler_profile_json,
-            )
-            if sched is not None:
-                payload["scheduler_resolution"] = sched
 
     cron_info = _resolve_pro_cron_status(
         cluster=cluster,

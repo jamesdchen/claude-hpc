@@ -350,62 +350,25 @@ def _author_profile_for_unknown_family(
     probe=None,
     llm=None,
 ):
-    """SEAM: author + canary-validate a profile for an UNKNOWN scheduler.
+    """An unrecognised scheduler family has no curated grammar — fail loudly.
 
-    This is the only part of the resolver that needs a real cluster, so it
-    is left as a documented seam rather than implemented blind. The
-    intended flow, step by step:
-
-    1. PROBE the login node for scheduler binaries (via the injected
-       *probe* callable, e.g. an ``ssh_run`` wrapper):
-       ``which sbatch qsub bsub`` to identify the family, then
-       ``scontrol --version`` / ``qconf -help`` / ``bjobs -V`` to confirm.
-    2. SEED from the nearest known golden profile (SLURM_PROFILE for an
-       sbatch-shaped scheduler, SGE_PROFILE for a qsub-shaped one) so the
-       LLM starts from a working shape rather than a blank dict.
-    3. LLM AUTHORING: hand the seed + probe output to *llm* and ask it to
-       fill the SchedulerProfile dict fields (submit_bin, job_id_regex,
-       template_ext, supports_test_only_eta, error_states, alive/cmd
-       shapes) for this scheduler.
-    4. CANARY VALIDATE: submit exactly ONE trivial task through the
-       candidate profile and confirm, end to end, that:
-         - the submit stdout job-id PARSES with ``job_id_regex``;
-         - the alive_cmd / query path FINDS that job id while it runs;
-         - the expected log path EXISTS on disk after it completes.
-    5. PIN: only once the canary passes, ``register_profile`` it and call
-       ``pin_scheduler_profile`` so the validated profile becomes durable.
-
-    The deterministic mechanics (probe / seed / author / offline-validate /
-    canary) live in :mod:`hpc_agent.infra.scheduler_resolve`; this function
-    wires the injected *probe* (an ``ssh_run`` callable) and *llm* into that
-    loop and registers the result. ``remote_repo`` for the live canary is
-    taken from the cluster cfg (``scratch``); without it the canary is
-    skipped but the offline-validation gate still applies.
+    The framework ships curated profiles for slurm / sge / pbspro / torque,
+    selected deterministically by detection. A scheduler outside those
+    families is NOT auto-authored at runtime: a synthesised profile would
+    have no fast, reliable verifier, and the curated families already cover
+    the common ground. The supported escape hatches are *data* (pin a
+    ``scheduler_profile`` in clusters.yaml) or *code* (add a curated family
+    + engine grammar). The ``probe``/``llm`` parameters are retained for
+    signature back-compat but are unused.
     """
-    # NB: ``errors`` is a local list variable in other functions of this
-    # module and the errors *module* is not imported at top level, so alias
-    # it locally to avoid the name collision.
     from hpc_agent import errors as _errors
 
-    if probe is None:
-        raise _errors.SpecInvalid(
-            f"resolving unknown scheduler {scheduler!r} requires a 'probe' "
-            "(an ssh_run callable for the login node). Pin a 'scheduler_profile' "
-            "in clusters.yaml to resolve deterministically instead."
-        )
-    from hpc_agent.infra.scheduler_resolve import resolve_unknown_scheduler
-
-    cfg = cfg or {}
-    remote_repo = cfg.get("scratch") or cfg.get("remote_path")
-    profile = resolve_unknown_scheduler(
-        scheduler,
-        ssh_run=probe,
-        llm=llm,
-        remote_repo=remote_repo,
-        run_canary=bool(remote_repo),
+    raise _errors.SpecInvalid(
+        f"scheduler {scheduler!r} is not a known family "
+        "(slurm/sge/pbspro/torque) and no 'scheduler_profile' is pinned. "
+        "Pin a SchedulerProfile dict in clusters.yaml, or add a curated "
+        "family (engine grammar) — unknown schedulers are not auto-authored."
     )
-    _register(profile)
-    return profile
 
 
 def _is_golden_profile(profile) -> bool:
@@ -475,9 +438,10 @@ def resolve_scheduler_profile(
        later reader agreeing with the first resolve. NO LLM.
     3. **Known family** (``slurm``/``sge``) with no pin — return the
        spine's golden profile and register it (idempotent). NO LLM.
-    4. **Unknown family** with no pin — delegate to the documented
-       LLM-authoring + canary seam (``_author_profile_for_unknown_family``),
-       which is the only path that needs a live cluster.
+    4. **Unknown family** with no pin — raises ``SpecInvalid``. Unknown
+       schedulers are NOT auto-authored at runtime; the escape hatches are
+       *data* (pin a ``scheduler_profile`` in clusters.yaml) or *code* (add
+       a curated family). See ``_author_profile_for_unknown_family``.
 
     When a profile is resolved by a non-pinned path (3 or 4), the unified
     pin rule applies: it is ALWAYS written to ``experiment_meta.json`` under
