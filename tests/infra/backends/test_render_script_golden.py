@@ -25,6 +25,10 @@ _GOLDEN = [
     ("SLURM_PROFILE", "gpu", "slurm__gpu_array.slurm"),
     ("SGE_PROFILE", "cpu", "sge__cpu_array.sh"),
     ("SGE_PROFILE", "gpu", "sge__gpu_array.sh"),
+    ("PBSPRO_PROFILE", "cpu", "pbspro__cpu_array.pbs"),
+    ("PBSPRO_PROFILE", "gpu", "pbspro__gpu_array.pbs"),
+    ("TORQUE_PROFILE", "cpu", "torque__cpu_array.pbs"),
+    ("TORQUE_PROFILE", "gpu", "torque__gpu_array.pbs"),
 ]
 
 

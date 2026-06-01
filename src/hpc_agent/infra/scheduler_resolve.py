@@ -222,6 +222,14 @@ def seed_profile_for_probe(probe: ProbeResult) -> SchedulerProfile:
         return SLURM_PROFILE
     if probe.family == "sge":
         return SGE_PROFILE
+    if probe.family == "pbspro":
+        from hpc_agent.infra.backends.profile import PBSPRO_PROFILE
+
+        return PBSPRO_PROFILE
+    if probe.family == "torque":
+        from hpc_agent.infra.backends.profile import TORQUE_PROFILE
+
+        return TORQUE_PROFILE
     raise errors.SpecInvalid(
         "cluster probe found no sbatch/qsub-family scheduler "
         f"(binaries={sorted(probe.binaries)}); cannot seed a profile. "

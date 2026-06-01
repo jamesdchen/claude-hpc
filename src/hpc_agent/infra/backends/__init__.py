@@ -407,6 +407,15 @@ def _populate_registry() -> None:
     from hpc_agent.infra.backends import sge_remote as _sge_remote  # noqa: F401
     from hpc_agent.infra.backends import slurm_remote as _slurm_remote  # noqa: F401
 
+    # PBS family (pbspro / torque) ships as golden profiles rather than
+    # hand-written remote classes — register them directly (not via
+    # register_profile, which would recurse into this populator).
+    from hpc_agent.infra.backends.profile import PBSPRO_PROFILE, TORQUE_PROFILE
+
+    for _prof in (PBSPRO_PROFILE, TORQUE_PROFILE):
+        if _prof.name not in _REGISTRY:
+            _REGISTRY[_prof.name] = build_backend_class(_prof, remote=True)
+
 
 def get_backend(name: str = "slurm", **kwargs: object) -> HPCBackend:
     """Instantiate a backend by name.  *kwargs* are forwarded to the constructor."""

@@ -30,14 +30,29 @@ from types import MappingProxyType
 from typing import Any
 
 from hpc_agent import errors
-from hpc_agent.infra.backends._scripts import SGE_CPU, SGE_GPU, SLURM_CPU, SLURM_GPU
+from hpc_agent.infra.backends._scripts import (
+    PBSPRO_CPU,
+    PBSPRO_GPU,
+    SGE_CPU,
+    SGE_GPU,
+    SLURM_CPU,
+    SLURM_GPU,
+    TORQUE_CPU,
+    TORQUE_GPU,
+)
 
 # Known structural families the engine can assemble commands for. A
 # resolved profile MUST pick one of these — it tells the engine which
 # flag grammar (sbatch-style vs qsub-style) to emit. A genuinely novel
 # grammar needs a new branch in the engine (documented escape hatch);
 # everything within a family is pure data on the profile.
-KNOWN_FAMILIES = frozenset({"slurm", "sge"})
+#
+# ``pbspro`` and ``torque`` are both qsub-family but diverge structurally
+# (array flag ``-J`` vs ``-t``, index env ``PBS_ARRAY_INDEX`` vs
+# ``PBS_ARRAYID``, ``select=`` vs ``nodes=:ppn=``, finished token ``F`` vs
+# ``C``, history ``qstat -x`` vs ``qstat -f``), so they are distinct
+# families rather than one — mirroring Nextflow's PbsPro/Pbs split.
+KNOWN_FAMILIES = frozenset({"slurm", "sge", "pbspro", "torque"})
 
 
 @dataclass(frozen=True)
@@ -194,4 +209,32 @@ SGE_PROFILE = SchedulerProfile(
     # exact-token set is intentionally empty for this family.
     error_states=frozenset(),
     scripts={"cpu": SGE_CPU, "gpu": SGE_GPU},
+)
+
+# PBS family. Job ids are ``<seq>.<server>`` (arrays ``<seq>[].<server>``) —
+# anchor on the ``.server`` suffix (SGE's ``Your job`` phrase and SLURM's
+# bare ``\d+`` both fail on PBS). Finished-state success/failure is NOT in
+# the live token (``F``/``C`` cover both) — it is read from ``Exit_status``
+# via the history query (``query_pbs``), so ``error_states`` stays empty;
+# the engine's pbs classify branch only buckets the live qstat tokens.
+PBSPRO_PROFILE = SchedulerProfile(
+    name="pbspro",
+    family="pbspro",
+    submit_bin="qsub",
+    job_id_regex=r"(\d+)(?:\[\d*\])?\.[A-Za-z0-9_.-]+",
+    template_ext=".pbs",
+    supports_test_only_eta=False,
+    error_states=frozenset(),
+    scripts={"cpu": PBSPRO_CPU, "gpu": PBSPRO_GPU},
+)
+
+TORQUE_PROFILE = SchedulerProfile(
+    name="torque",
+    family="torque",
+    submit_bin="qsub",
+    job_id_regex=r"(\d+)(?:\[\d*\])?\.[A-Za-z0-9_.-]+",
+    template_ext=".pbs",
+    supports_test_only_eta=False,
+    error_states=frozenset(),
+    scripts={"cpu": TORQUE_CPU, "gpu": TORQUE_GPU},
 )

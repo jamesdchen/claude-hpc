@@ -85,6 +85,9 @@ class ProfileBackend(HPCBackend):
             return []
         if self.profile.family == "slurm":
             return ["--dependency", f"afterany:{':'.join(job_ids)}"]
+        if self.profile.family in ("pbspro", "torque"):
+            # PBS dependency: -W depend=afterany:<id>:<id>
+            return ["-W", f"depend=afterany:{':'.join(job_ids)}"]
         # sge
         return ["-hold_jid", ",".join(job_ids)]
 
@@ -108,6 +111,29 @@ class ProfileBackend(HPCBackend):
                 flags += ["--mem", f"{int(mem_mb)}M"]
             if cpus:
                 flags += ["--cpus-per-task", str(int(cpus))]
+        elif self.profile.family == "pbspro":
+            # PBS Pro: chunk syntax ``-l select=1:ncpus=N:mem=Mmb`` + a
+            # separate ``-l walltime=`` (walltime is job-wide, not in select).
+            if cpus or mem_mb:
+                sel = "select=1"
+                if cpus:
+                    sel += f":ncpus={int(cpus)}"
+                if mem_mb:
+                    sel += f":mem={int(mem_mb)}mb"
+                flags += ["-l", sel]
+            if walltime_sec:
+                flags += ["-l", f"walltime={_fmt_hms(int(walltime_sec))}"]
+        elif self.profile.family == "torque":
+            # TORQUE: ``-l nodes=1:ppn=N,mem=Mmb,walltime=HH:MM:SS`` (one
+            # comma-joined resource list).
+            parts: list[str] = []
+            parts.append(f"nodes=1:ppn={int(cpus)}" if cpus else "nodes=1")
+            if mem_mb:
+                parts.append(f"mem={int(mem_mb)}mb")
+            if walltime_sec:
+                parts.append(f"walltime={_fmt_hms(int(walltime_sec))}")
+            if cpus or mem_mb or walltime_sec:
+                flags += ["-l", ",".join(parts)]
         else:  # sge
             if walltime_sec:
                 flags += ["-l", f"h_rt={_fmt_hms(int(walltime_sec))}"]
@@ -131,7 +157,48 @@ class ProfileBackend(HPCBackend):
     ) -> list[str]:
         if self.profile.family == "slurm":
             return self._build_slurm_command(task_range, job_name, job_env, extra_flags=extra_flags)
+        if self.profile.family in ("pbspro", "torque"):
+            return self._build_pbs_command(task_range, job_name, job_env, extra_flags=extra_flags)
         return self._build_sge_command(task_range, job_name, job_env, extra_flags=extra_flags)
+
+    def _build_pbs_command(
+        self,
+        task_range: str,
+        job_name: str,
+        job_env: dict[str, str],
+        *,
+        extra_flags: list[str] | None = None,
+    ) -> list[str]:
+        # PBS Pro array flag is ``-J``; TORQUE uses ``-t`` (like SGE). Streams
+        # joined with ``-j oe`` (PBS) cf. SGE's ``-j y``. Otherwise the qsub
+        # shape + the ``-v`` comma hazard mirror the SGE branch.
+        array_flag = "-J" if self.profile.family == "pbspro" else "-t"
+        cmd = [
+            self.profile.submit_bin,
+            array_flag,
+            task_range,
+            "-N",
+            job_name,
+            "-o",
+            self.log_dir,
+            "-j",
+            "oe",
+        ]
+        pass_env_keys = getattr(self, "pass_env_keys", ())
+        bad = [k for k, v in job_env.items() if k in pass_env_keys and "," in str(v)]
+        if bad:
+            raise errors.SpecInvalid(
+                "PBS qsub -v cannot transport env values containing "
+                f"','; offending keys: {sorted(bad)}. Pre-encode "
+                "(base64, space-delimited list, etc.) before submission."
+            )
+        pass_vars = ",".join(f"{k}={v}" for k, v in job_env.items() if k in pass_env_keys)
+        if pass_vars:
+            cmd += ["-v", pass_vars]
+        if extra_flags:
+            cmd += extra_flags
+        cmd.append(self.script)
+        return cmd
 
     def _build_slurm_command(
         self,
@@ -241,7 +308,10 @@ class ProfileBackend(HPCBackend):
                 if base in wanted:
                     alive.add(base)
             return alive
-        # sge: qstat -u output has a 2-line header; job id is column 0.
+        # sge / pbs: qstat -u output has a 2-line header; job id is column 0.
+        # PBS ids are ``<seq>.<server>`` / ``<seq>[<idx>].<server>`` — strip the
+        # ``.server`` / ``[idx]`` to the bare sequence (a no-op for SGE's pure
+        # numeric ids, so SGE behaviour is unchanged).
         alive_sge: set[str] = set()
         wanted_sge = {str(j) for j in job_ids}
         for line in stdout.splitlines():
@@ -251,8 +321,9 @@ class ProfileBackend(HPCBackend):
             jid = cols[0].strip()
             if not jid or not jid[0].isdigit():
                 continue  # header / separator line
-            if jid in wanted_sge:
-                alive_sge.add(jid)
+            base = jid.split(".")[0].split("[")[0]
+            if base in wanted_sge:
+                alive_sge.add(base)
         return alive_sge
 
     @classmethod
@@ -280,7 +351,9 @@ class ProfileBackend(HPCBackend):
                 if base in wanted:
                     states[base] = parts[1].strip()
             return states
-        # sge: state is the 5th column; rows are guarded on a digit id.
+        # sge / pbs: state is the 5th column (index 4); rows guarded on a digit
+        # id. PBS ids (``<seq>.<server>`` / ``<seq>[<idx>]...``) are stripped to
+        # the bare sequence (no-op for SGE), so this serves both families.
         states_sge: dict[str, str] = {}
         wanted_sge = {str(j) for j in job_ids}
         for line in stdout.splitlines():
@@ -288,9 +361,12 @@ class ProfileBackend(HPCBackend):
             if len(cols) < 5:
                 continue
             jid = cols[0].strip()
-            if not jid or not jid[0].isdigit() or jid not in wanted_sge:
+            if not jid or not jid[0].isdigit():
                 continue
-            states_sge[jid] = cols[4].strip()
+            base = jid.split(".")[0].split("[")[0]
+            if base not in wanted_sge:
+                continue
+            states_sge[base] = cols[4].strip()
         return states_sge
 
     @classmethod
@@ -307,6 +383,16 @@ class ProfileBackend(HPCBackend):
             # SUSPENDED / STOPPED are not making progress — bucket as held (matches
             # slurm-drmaa's USER/SYSTEM_SUSPENDED -> held), alongside the hold family.
             if s in {"SUSPENDED", "STOPPED"} or "HOLD" in s or s == "SPECIAL_EXIT":
+                return "held"
+            return "alive"
+        if cls.profile.family in ("pbspro", "torque"):
+            # PBS live qstat single-letter states. H/S/U are not progressing
+            # -> held; everything else live (Q R E B T W M) -> alive. Finished
+            # tokens (F/C/X) don't appear in the live ``qstat -u`` listing, and
+            # success-vs-failure is read from Exit_status in the history path,
+            # not the live token (so there is no live 'error' bucket here).
+            s = state.strip()
+            if s in {"H", "S", "U"}:
                 return "held"
             return "alive"
         # sge: error states carry an uppercase ``E``; held jobs carry ``h``.
@@ -354,6 +440,14 @@ class ProfileBackend(HPCBackend):
             from hpc_agent.infra.backends.query import query_sacct
 
             return query_sacct(job_ids, cluster=slurm_cluster)
+        if cls.profile.family in ("pbspro", "torque"):
+            # Authoritative history (reading Exit_status via ``qstat -xf`` /
+            # ``qstat -f``) is a documented follow-on; live monitoring works via
+            # build_scheduler_state_cmd + classify_scheduler_state.
+            raise NotImplementedError(
+                "PBS history query (query_pbs / Exit_status) is not yet "
+                "implemented; live monitoring via qstat -u is available."
+            )
         from hpc_agent.infra.backends.query import query_sge
 
         return query_sge(job_ids, user=sge_user)
@@ -380,6 +474,11 @@ class ProfileBackend(HPCBackend):
                 stress_alloc_mem_pct=stress_alloc_mem_pct,
                 stress_cpu_load_frac=stress_cpu_load_frac,
                 runner=runner,
+            )
+        if cls.profile.family in ("pbspro", "torque"):
+            raise NotImplementedError(
+                "cluster inspect (planner snapshot) is not yet implemented for "
+                "the PBS family; submit + live monitoring are supported."
             )
         from hpc_agent.infra.inspect.sge import _sge_inspect
 
