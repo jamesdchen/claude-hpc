@@ -248,9 +248,7 @@ def test_prior_records_carries_run_id_metrics_result_dirs_and_complete(
     assert rec["complete"] is True
     assert rec["metrics"]["val_loss"] == pytest.approx(0.25)
     # Artifact lineage: the per-task result dir is surfaced as a string path.
-    assert rec["result_dirs"] == [
-        str(tmp_path / "results" / "20260101-000000-iter0001" / "task_0")
-    ]
+    assert rec["result_dirs"] == [str(tmp_path / "results" / "20260101-000000-iter0001" / "task_0")]
     # No token was recorded for this iteration.
     assert rec["trial_tokens"] is None
 
