@@ -1,9 +1,15 @@
 # Design: the strategy-agnostic campaign seam
 
-> **Status:** proposal. Tracks [#218](https://github.com/jamesdchen/hpc-agent/issues/218).
-> This describes a *target* design, not current behaviour. For what
-> exists today see [`docs/workflows/campaign.md`](../workflows/campaign.md)
-> and [`docs/internals/campaign-lifecycle.md`](../internals/campaign-lifecycle.md).
+> **Status:** implemented at the library layer. Tracks
+> [#218](https://github.com/jamesdchen/hpc-agent/issues/218) /
+> [#219](https://github.com/jamesdchen/hpc-agent/issues/219).
+> Shipped: `prior_records()`, the `trial_token` reserved-key strip, the
+> optional sidecar `trial_tokens` round-trip, the campaign-iteration dedup
+> rejection, and the `optuna_strategy.py` / `pbt_strategy.py` scaffolds.
+> Deferred (follow-up): exposing `trial_token` auto-extraction on the
+> `compute-run-id` / `find-prior-run` CLI primitives (a wider wire/schema
+> surface). For runtime behaviour see
+> [`docs/workflows/campaign.md`](../workflows/campaign.md).
 
 ## Problem
 
@@ -90,11 +96,12 @@ doubling as a dedup-buster the user has to hand-inject into `resolve()`.
 Coordinate with [#207](https://github.com/jamesdchen/hpc-agent/issues/207)
 (cmd_sha param-identity semantics).
 
-### 3. Artifact / result-dir lineage in `prior()`
+### 3. Artifact / result-dir lineage in `prior_records()`
 
-Have `prior()` additionally expose each past iteration's `result_dir`
-paths (it already runs `reduce_metrics` over them — it has them). This
-single addition unlocks the artifact-carrying classes:
+A new accessor `prior_records()` (sibling to the unchanged `prior()`)
+exposes each past iteration's `result_dir` paths (it already runs
+`reduce_metrics` over them — it has them). This single addition unlocks the
+artifact-carrying classes:
 
 - **PBT** — locate the checkpoint to clone.
 - **RL self-play** — locate the previous generation's replay buffer.
@@ -111,62 +118,72 @@ convergence reads `metrics["estimate"]` and computes its own variance;
 walk-forward reads nothing. The framework never knows which key (if any)
 is "the objective", nor the optimisation direction.
 
-## Proposed `prior()` return shape
+## `prior_records()` return shape (as implemented)
 
 ```python
-# prior(experiment_dir, campaign_id) -> list[IterationRecord]  (oldest-first)
+# prior_records(experiment_dir, campaign_id) -> list[record]  (oldest-first)
 {
     "run_id": "…",
-    "trial_token": <opaque, round-tripped from resolve()>,   # may be null
-    "status": "complete" | "failed" | "timeout" | "abandoned",
-    "metrics": {…},          # opaque reduced-metric dict (today's payload)
-    "result_dirs": ["…"],    # NEW: per-task output dirs for artifact lineage
+    "campaign_id": "…" | None,
+    "trial_tokens": [<opaque, round-tripped from resolve()>] | None,
+    "result_dirs": ["…"],   # per-task output dirs — artifact lineage
+    "metrics": {…},         # reduce_metrics(result_dirs) — same payload as prior()
+    "complete": bool,       # filesystem-derived: any result_dir has a metrics.json
 }
 ```
 
-Everything except `result_dirs` exists today; the addition is additive
-and back-compatible.
+`prior()` is unchanged (still returns just the `metrics` dict per
+iteration). `complete` is a pure filesystem readiness flag, **not**
+authoritative lifecycle — `failed` vs `timeout` vs `abandoned` live in the
+journal and are reported by `hpc-agent status`. Keeping `prior_records` a
+sidecar+filesystem read (no SSH, no journal) is what makes it safe to call
+from `tasks.py` at module load.
 
 ## Worked examples
 
+Both ship as tested, **cluster-safe** scaffolds (the cluster imports
+`tasks.py` and calls `resolve()` on the compute node, so the optimizer must
+not be imported / re-`ask`ed there). See
+[`optuna_strategy.py`](../../src/hpc_agent/models/mapreduce/templates/scaffolds/optuna_strategy.py)
+and
+[`pbt_strategy.py`](../../src/hpc_agent/models/mapreduce/templates/scaffolds/pbt_strategy.py).
+
 ### Optuna (scalar objective lives in a metrics key)
 
+`import optuna` + `study.ask()` happen only on the orchestrator (inside a
+`_propose` helper), keyed by the count of completed iterations so the index
+is identical on orchestrator and cluster; `resolve()` reads the persisted
+proposal. Reconciliation is by oldest-first index (record `i` == trial `i`):
+
 ```python
-study = optuna.create_study(
-    storage=f"sqlite:///{campaign_dir()}/optuna.db",
-    study_name=CID, direction="minimize", load_if_exists=True,
-)
-for past in prior(".", CID):                       # framework-supplied pairing
-    study.tell(past["trial_token"], past["metrics"]["val_loss"])
-def total():   return 0 if len(prior(".", CID)) >= MAX else 1
-def resolve(i):
-    t = study.ask()
-    return {**t.params, "trial_token": t.number}   # framework round-trips, never reads
+for i, rec in enumerate(prior_records(".", CID)):
+    if rec["complete"] and study.trials[i].state == RUNNING:
+        study.tell(study.trials[i], rec["metrics"]["val_loss"])  # "val_loss" is just a key
 ```
 
-No executor-side `study.tell`, no `score_iter.py` helper, no `__import__`
-hack — the rough edges in today's Recipe 2 disappear. (See
-[#219](https://github.com/jamesdchen/hpc-agent/issues/219) for shipping a
-tested scaffold.)
+`val_loss` is a user-chosen metrics key — the framework privileges no
+objective. The rough edges in the old Recipe 2 (the `pass`/`__import__`
+junk, the executor-side `tell`) are gone.
 
 ### Synchronous PBT (artifact lineage, no scalar-objective channel)
 
 ```python
-past = prior(".", CID)
-if past:
-    ranked = sorted(past, key=lambda r: r["metrics"]["fitness"], reverse=True)
-    survivors = ranked[: POP // 2]                 # truncation selection
-    next_pop = [clone_and_perturb(r["result_dirs"][0]) for r in survivors] * 2
-else:
-    next_pop = [fresh_member(m) for m in range(POP)]
-def total():   return 0 if generation(past) >= MAX_GEN else POP
-def resolve(i):
-    m = next_pop[i]
-    return {**m.hparams, "init_ckpt": m.ckpt_path, "trial_token": (m.member, m.generation)}
+gens = [r for r in prior_records(".", CID) if r["complete"]]   # finished generations
+survivors = sorted(members(gens[-1]["result_dirs"]),          # read checkpoints from result_dirs
+                   key=lambda m: m["fitness"], reverse=True)[: POP // 2] if gens else []
+def total():   return 0 if len(gens) >= MAX_GEN else POP
+def resolve(member):
+    if not survivors:
+        return {"lr": fresh_lr(member), "init_ckpt": "", "trial_token": [len(gens), member]}
+    parent = survivors[member % len(survivors)]
+    return {"lr": perturb(parent["lr"], len(gens), member),
+            "init_ckpt": parent["ckpt"], "trial_token": [len(gens), member]}
 ```
 
-`fitness` is just a key; `result_dirs` carries the checkpoints. The
-framework imports neither an optimiser nor a notion of "fitness".
+`fitness` is just a key; `result_dirs` carries the checkpoints; the
+perturbation is seeded by `(generation, member)` so `resolve` is
+deterministic on both the orchestrator and the cluster. The framework
+imports neither an optimiser nor a notion of "fitness".
 
 ## Out of scope (deliberate exclusions)
 
