@@ -55,12 +55,13 @@ _PRIMITIVE_TO_CLI_VERB: dict[str, str] = {
 # argue for it explicitly.
 _INTENTIONALLY_NO_CLI: set[str] = {
     # Validators that are part of the ``validate-campaign`` family but
-    # have no standalone CLI verb. Four of them
+    # have no standalone CLI verb. Five of them
     # (validate-executor-signatures, validate-input-dataset,
-    # validate-stochastic-marker, validate-walltime-against-history)
-    # are explicitly composed into ``validate-campaign``;
+    # validate-stochastic-marker, validate-walltime-against-history,
+    # dry-run-local) are explicitly composed into ``validate-campaign``;
     # ``validate-self-qos-limit`` is registered for schema/contract
     # symmetry but not yet wired into the workflow body.
+    "dry-run-local",
     "validate-executor-signatures",
     "validate-input-dataset",
     "validate-self-qos-limit",
@@ -105,8 +106,8 @@ def cli_verbs() -> set[str]:
 def test_every_agent_facing_primitive_has_a_cli_subcommand(cli_verbs: set[str]) -> None:
     """Pin: agent-facing primitives are reachable via the CLI."""
     missing: list[str] = []
-    # Filter to core-only: hpc-agent-pro primitives are wired into the CLI by
-    # the plugin itself (separate cli_register entry point); the core CLI parser
+    # Filter to core-only: a plugin's primitives are wired into the CLI by
+    # the plugin itself (its own cli_register entry point); the core CLI parser
     # this test inspects intentionally only sees core verbs.
     for entry in core_only_operations_catalog():
         if not entry.get("agent_facing"):

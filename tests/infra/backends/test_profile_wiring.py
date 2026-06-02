@@ -185,7 +185,17 @@ def test_deploy_runtime_scheduler_deploys_only_that_family():
             dests.append(str(argv[-1]))  # remote dst is the last argv token
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    with patch("hpc_agent.infra.remote.subprocess.run", side_effect=_run):
+    # deploy_runtime does the mkdir/clean via ``ssh_run`` (which since #209
+    # captures over ``subprocess.Popen`` on POSIX, not ``subprocess.run``) and
+    # pushes each file via a direct ``subprocess.run`` scp — no-op the former,
+    # capture scp destinations through the latter.
+    with (
+        patch(
+            "hpc_agent.infra.transport.ssh_run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ),
+        patch("hpc_agent.infra.transport.subprocess.run", side_effect=_run),
+    ):
         transport.deploy_runtime(ssh_target="u@h", remote_path="/p", scheduler="pbspro")
 
     array_scripts = [d for d in dests if "cpu_array" in d or "gpu_array" in d]

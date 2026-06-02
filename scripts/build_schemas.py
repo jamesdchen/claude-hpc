@@ -5,7 +5,8 @@ The *authoring* SoT is the Pydantic model under ``hpc_agent/_wire/``.
 This script bridges the two: it calls ``model.model_json_schema()``
 (or ``adapter.json_schema()`` for root-array schemas) for every model
 auto-discovered under that package and writes / diffs the matching
-JSON file.
+JSON file. (A plugin ships and regenerates its own schemas from its
+own ``_wire`` package; this script is core-only.)
 
 Same generator pattern as ``build_primitive_frontmatter.py``,
 ``build_primitive_index.py``, and ``build_operations_index.py``:
@@ -21,7 +22,7 @@ Usage::
 Discovery rules
 ---------------
 
-For each non-private submodule of the authoring package
+For each non-private submodule of the registered authoring package
 (``hpc_agent._wire``):
 
 1. Hardcoded mapping (``_NON_SUFFIX_MAPPING``) handles cross-cutting
@@ -183,7 +184,7 @@ def _build_schema_registry_for(pkg: Any) -> list[tuple[type[BaseModel] | TypeAda
 
 # Build a flat list of (model, fname, schemas_dir) tuples across every
 # authoring package. Each package keeps its own discovery namespace so a
-# class name shared between core and pro (e.g. an inadvertent re-import)
+# class name shared between core and a plugin (e.g. an inadvertent re-import)
 # doesn't trip the collision guard.
 SCHEMA_REGISTRY: list[tuple[type[BaseModel] | TypeAdapter[Any], str, Path]] = [
     (model, fname, schemas_dir)
