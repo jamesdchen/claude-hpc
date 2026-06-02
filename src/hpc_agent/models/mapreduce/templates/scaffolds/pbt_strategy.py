@@ -44,7 +44,7 @@ _CKPT_NAME = "ckpt.pt"  # checkpoint filename the executor writes into RESULT_DI
 _LR_LO, _LR_HI = 1e-5, 1e-1
 
 # Repo root is the parent of .hpc/ (this file lives in .hpc/tasks.py).
-_EXPERIMENT_DIR = str(Path(__file__).resolve().parent.parent)
+_EXPERIMENT_DIR = Path(__file__).resolve().parent.parent
 _CID = os.environ.get("HPC_CAMPAIGN_ID", "")
 
 FLAGS: dict[str, list] = {

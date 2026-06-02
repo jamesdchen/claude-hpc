@@ -47,7 +47,7 @@ _OBJECTIVE = "val_loss"  # metrics.json key to optimize
 _DIRECTION = "minimize"
 _MAX_TRIALS = 50
 
-_EXPERIMENT_DIR = str(Path(__file__).resolve().parent.parent)  # repo root (parent of .hpc/)
+_EXPERIMENT_DIR = Path(__file__).resolve().parent.parent  # repo root (parent of .hpc/)
 _CID = os.environ.get("HPC_CAMPAIGN_ID", "")
 _CAMPAIGN_DIR = Path(__file__).resolve().parent / "campaigns" / _CID
 _PROPOSALS_DIR = _CAMPAIGN_DIR / "proposals"
@@ -82,7 +82,8 @@ def _propose(n: int) -> dict:
     """
     path = _proposal_path(n)
     if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+        cached: dict = json.loads(path.read_text(encoding="utf-8"))
+        return cached
 
     import optuna
 
