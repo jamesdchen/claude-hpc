@@ -12,8 +12,10 @@ parent session's permissions.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -34,13 +36,25 @@ def _hook_command() -> str:
 
 def _rc(cmd: str) -> int:
     payload = json.dumps({"tool_input": {"command": cmd}})
-    return subprocess.run(
-        ["bash", "-c", _hook_command()],
-        input=payload,
-        text=True,
-        capture_output=True,
-        timeout=30,
-    ).returncode
+    # Run the hook from a temp script (LF-forced) rather than passing the
+    # multi-line body as a ``bash -c`` argument. On Windows the latter is
+    # mangled by CreateProcess/MSYS argument quoting, so the script fails
+    # uniformly (exit 1) regardless of input — the hook logic itself is
+    # fine (it passes on POSIX). delete=False + explicit unlink so Windows
+    # can reopen the closed file for bash to read.
+    fd, path = tempfile.mkstemp(suffix=".sh")
+    try:
+        with os.fdopen(fd, "w", newline="\n") as f:
+            f.write(_hook_command())
+        return subprocess.run(
+            ["bash", path],
+            input=payload,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        ).returncode
+    finally:
+        os.unlink(path)
 
 
 @needs_jq
