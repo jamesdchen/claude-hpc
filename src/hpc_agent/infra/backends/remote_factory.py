@@ -15,7 +15,7 @@ factory does not double-validate.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from hpc_agent import errors
 from hpc_agent.infra.backends.sge_remote import RemoteSGEBackend
@@ -24,6 +24,7 @@ from hpc_agent.infra.remote import ssh_run
 
 if TYPE_CHECKING:
     from hpc_agent.infra.backends import HPCBackend
+    from hpc_agent.infra.backends._engine import RemoteProfileBackend
 
 __all__ = ["build_remote_backend"]
 
@@ -75,7 +76,10 @@ def build_remote_backend(
                 f"scheduler_profile family {profile.family!r}; the spec's "
                 "backend must equal the profile's family."
             )
-        cls = build_backend_class(profile, remote=True)
+        # build_backend_class(remote=True) yields a RemoteProfileBackend
+        # subclass whose __init__ takes these kwargs (the declared return
+        # type[HPCBackend] is the structural supertype).
+        cls = cast("type[RemoteProfileBackend]", build_backend_class(profile, remote=True))
         # Mirror the SGE env-forwarding rule: `[]`/`None` mean "forward
         # every job_env key"; only used by the sge family but harmless to
         # pass for slurm (which ignores pass_env_keys).
@@ -119,7 +123,7 @@ def build_remote_backend(
         from hpc_agent.infra.backends.profile import PBSPRO_PROFILE, TORQUE_PROFILE
 
         profile = PBSPRO_PROFILE if backend_name == "pbspro" else TORQUE_PROFILE
-        cls = build_backend_class(profile, remote=True)
+        cls = cast("type[RemoteProfileBackend]", build_backend_class(profile, remote=True))
         keys = pass_env_keys if pass_env_keys else job_env_keys
         return cls(
             script=script,

@@ -182,6 +182,15 @@ class HPCBackend(abc.ABC):
         """Return per-job state map for *job_ids* via the scheduler's history."""
         raise NotImplementedError("backend does not implement query_jobs")
 
+    @classmethod
+    def render_script(cls, *, kind: str, **_opts: Any) -> str:
+        """Return the runtime array-job script body for *kind* (cpu/gpu).
+
+        Profile-driven backends render it from ``cls.profile``; the base
+        raises so an unmigrated backend is loud rather than silently wrong.
+        """
+        raise NotImplementedError("backend does not implement render_script")
+
     @staticmethod
     def inspect_cluster(
         cluster_name: str,

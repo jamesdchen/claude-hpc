@@ -58,6 +58,13 @@ class ProfileBackend(HPCBackend):
     # Concrete subclasses set this; ``__init_subclass__`` derives the rest.
     profile: SchedulerProfile
 
+    # Instance attributes populated by concrete subclasses' ``__init__`` (or
+    # by ``build_backend_class``); declared here so the family-shaped command
+    # builders type-check. ``log_dir`` is already declared on the base.
+    script: str
+    cluster: str
+    account: str
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         prof = cls.__dict__.get("profile")

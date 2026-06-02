@@ -392,7 +392,7 @@ def _is_golden_profile(profile) -> bool:
     pinned.
     """
     try:
-        return profile == _golden_profile_for_family(profile.family)
+        return bool(profile == _golden_profile_for_family(profile.family))
     except (ValueError, NotImplementedError, AttributeError):
         return False
 

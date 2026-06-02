@@ -40,6 +40,7 @@ class TestKnownSchedulerFamilies:
         with pytest.raises(errors.SpecInvalid, match="not a known family"):
             ClusterConfig.model_validate({"scheduler": "moab"})
 
+
 # ─── get_walltime_arbitrage ─────────────────────────────────────────────────
 
 
