@@ -120,7 +120,7 @@
   "$defs": {
     "_AttemptsThisEpisode": {
       "additionalProperties": false,
-      "description": "What recovery has already been tried this failure episode — lets a\ndecision-maker avoid re-trying an exhausted strategy.",
+      "description": "What recovery has already been tried this failure episode — lets a\ndecision-maker avoid re-trying an exhausted strategy.\n\nReuses the journal's existing per-task retry record\n(``state/run_record.py:RunRecord.retries`` = ``{task_id: {attempts,\ncategory, overrides}}``, written by ``ops/recover/runner.py``): ``count``\nsnapshots that ``attempts`` counter rather than tracking attempts\nseparately. ``strategies`` is the only new piece — it generalizes the\nrecord's single ``category``/``overrides`` into the ordered list of what\nwas tried.",
       "properties": {
         "count": {
           "description": "Number of recovery attempts already made this episode.",
@@ -197,7 +197,7 @@
     },
     "_LogTail": {
       "additionalProperties": false,
-      "description": "Bounded, normalized tail of the relevant log. Callers MUST bound this\n(the schema does not transport unbounded logs) and SHOULD normalize\nvolatile tokens (timestamps, paths, addresses) so signatures cluster.",
+      "description": "Bounded, normalized tail of the relevant log. Callers MUST bound this\n(the schema does not transport unbounded logs) and SHOULD normalize\nvolatile tokens (timestamps, paths, addresses) so signatures cluster.\n\nReuses the existing capture/normalize path rather than re-fetching:\npopulate ``text`` from ``infra/cluster_logs.py:fetch_task_logs(...)``\noutput run through\n``ops/recover/runner_failures.py:fingerprint_stderr_tail`` (which already\nstrips volatile tokens). ``truncated`` and ``source`` are the only new\nmetadata.",
       "properties": {
         "text": {
           "description": "The normalized log tail.",

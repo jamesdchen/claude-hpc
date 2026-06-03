@@ -47,7 +47,15 @@ class _TemporalContext(BaseModel):
 
 class _AttemptsThisEpisode(BaseModel):
     """What recovery has already been tried this failure episode — lets a
-    decision-maker avoid re-trying an exhausted strategy."""
+    decision-maker avoid re-trying an exhausted strategy.
+
+    Reuses the journal's existing per-task retry record
+    (``state/run_record.py:RunRecord.retries`` = ``{task_id: {attempts,
+    category, overrides}}``, written by ``ops/recover/runner.py``): ``count``
+    snapshots that ``attempts`` counter rather than tracking attempts
+    separately. ``strategies`` is the only new piece — it generalizes the
+    record's single ``category``/``overrides`` into the ordered list of what
+    was tried."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -87,7 +95,14 @@ class _LivenessVsCorrectness(BaseModel):
 class _LogTail(BaseModel):
     """Bounded, normalized tail of the relevant log. Callers MUST bound this
     (the schema does not transport unbounded logs) and SHOULD normalize
-    volatile tokens (timestamps, paths, addresses) so signatures cluster."""
+    volatile tokens (timestamps, paths, addresses) so signatures cluster.
+
+    Reuses the existing capture/normalize path rather than re-fetching:
+    populate ``text`` from ``infra/cluster_logs.py:fetch_task_logs(...)``
+    output run through
+    ``ops/recover/runner_failures.py:fingerprint_stderr_tail`` (which already
+    strips volatile tokens). ``truncated`` and ``source`` are the only new
+    metadata."""
 
     model_config = ConfigDict(extra="forbid")
 
