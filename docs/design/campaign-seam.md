@@ -1,14 +1,27 @@
 # Design: the strategy-agnostic campaign seam
 
-> **Status:** implemented at the library layer. Tracks
+> **Status:** implemented. Tracks
 > [#218](https://github.com/jamesdchen/hpc-agent/issues/218) /
 > [#219](https://github.com/jamesdchen/hpc-agent/issues/219).
 > Shipped: `prior_records()`, the `trial_token` reserved-key strip, the
-> optional sidecar `trial_tokens` round-trip, the campaign-iteration dedup
-> rejection, and the `optuna_strategy.py` / `pbt_strategy.py` scaffolds.
-> Deferred (follow-up): exposing `trial_token` auto-extraction on the
-> `compute-run-id` / `find-prior-run` CLI primitives (a wider wire/schema
-> surface). For runtime behaviour see
+> sidecar `trial_tokens` round-trip, the campaign-iteration dedup rejection,
+> the `optuna_strategy.py` / `pbt_strategy.py` scaffolds, **and the
+> end-to-end CLI wiring of `trial_token`** — `compute-run-id` extracts the
+> per-task tokens (the one place the task list is materialized) and
+> `write-run-sidecar` persists them, so `prior_records()["trial_tokens"]` is
+> populated through the canonical Step-6d submit path, not just via a direct
+> library call.
+>
+> **Still deferred** (only matters for a concurrent / out-of-order strategy,
+> and only on the path that skips Step-6d): threading `trial_tokens` through
+> `build-submit-spec` → `SubmitFlowSpec` → `submit_flow._ensure_run_sidecar`,
+> the *synthesized*-sidecar fallback. The campaign loop goes through Step-6d
+> `write-run-sidecar` first (now wired), so `_ensure_run_sidecar` is a no-op
+> for it — this fallback is an edge case, not the core feature, and is left
+> for when a pure-agent-submit campaign actually needs it. Also deferred:
+> campaign-awareness on the advisory `find-prior-run` primitive (the
+> authoritative dedup rejection is already wired in `submit_and_record`).
+> For runtime behaviour see
 > [`docs/workflows/campaign.md`](../workflows/campaign.md).
 
 ## Problem
