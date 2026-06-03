@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/failure_features.json",
+  "$defs": {
+    "FailureFeatures": {
+      "additionalProperties": false,
+      "description": "Structured diagnostic evidence attached to an ``ok=false`` envelope on operation failure.\n\nCaptures *why* an operation may have failed, independent of *what* failed: the\nfeature set a diagnosis would need, not an enumeration of failure modes. Every\nfield is optional and populated only where the operation can supply it (so a\nbare ``{}`` is a valid, if uninformative, block). This layer produces evidence;\nit does not decide recovery. See issue #230.",
+      "properties": {
+        "error_class": {
+          "description": "Normalized failure signature. Open vocabulary (the failure space cannot be enumerated), but callers SHOULD reuse canonical tokens where they fit: 'oom', 'connection_refused', 'timeout', 'nonzero_exit', 'malformed_response', 'quota_exceeded', 'permission_denied', 'source_missing'. Distinct from the envelope's coarse 'error_code' — several error_classes can map to one error_code.",
+          "title": "Error Class",
+          "type": "string"
+        },
+        "resource_spec": {
+          "additionalProperties": true,
+          "description": "The resource/sweep spec in effect at the moment of failure (e.g. GPU type/count, scheduler-level params, sampling width). The discriminator that turns a shared signature into opposite fixes — e.g. OOM at tp_size=2 vs OOM at n=128.",
+          "title": "Resource Spec",
+          "type": "object"
+        },
+        "temporal_context": {
+          "$ref": "#/$defs/_TemporalContext"
+        },
+        "attempts_this_episode": {
+          "$ref": "#/$defs/_AttemptsThisEpisode"
+        },
+        "liveness_vs_correctness": {
+          "$ref": "#/$defs/_LivenessVsCorrectness"
+        },
+        "log_tail": {
+          "$ref": "#/$defs/_LogTail"
+        },
+        "probes": {
+          "description": "Optional targeted probe outputs from caller-supplied probe hooks.",
+          "items": {
+            "$ref": "#/$defs/_Probe"
+          },
+          "type": "array"
+        }
+      },
+      "title": "FailureFeatures",
+      "type": "object"
+    },
+    "_TemporalContext": {
+      "additionalProperties": false,
+      "description": "When in the operation's life did it fail — the single most discriminating feature (structural vs. runtime).",
+      "properties": {
+        "phase": {
+          "description": "'first_attempt' = failed before any unit of work succeeded (points at a structural/config problem). 'after_progress' = failed after N units succeeded (points at a runtime/data-dependent problem). 'unknown' when the operation cannot tell.",
+          "enum": [
+            "first_attempt",
+            "after_progress",
+            "unknown"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "successful_units": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Count of units (tasks, requests, rounds) that succeeded before the failure, when known.",
+          "title": "Successful Units"
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "title": "_TemporalContext",
+      "type": "object"
+    },
+    "_AttemptsThisEpisode": {
+      "additionalProperties": false,
+      "description": "What recovery has already been tried in this failure episode — lets a decision-maker avoid re-trying an exhausted strategy.",
+      "properties": {
+        "count": {
+          "description": "Number of recovery attempts already made this episode.",
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "strategies": {
+          "description": "Ordered list of recovery strategies already applied (e.g. 'retry', 'resubmit', 'restart_service', 'increase_walltime').",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "title": "_AttemptsThisEpisode",
+      "type": "object"
+    },
+    "_LivenessVsCorrectness": {
+      "additionalProperties": false,
+      "description": "Distinguishes 'down' from 'up-but-broken' by separating a liveness signal (does it respond?) from a correctness signal (does a real request return a valid result?). The classic silent-rot case is liveness=pass, correctness=fail.",
+      "properties": {
+        "liveness": {
+          "description": "Result of a liveness check (port open / process alive / health endpoint).",
+          "enum": [
+            "pass",
+            "fail",
+            "unknown"
+          ],
+          "title": "Liveness",
+          "type": "string"
+        },
+        "correctness": {
+          "description": "Result of a real-path request (an actual request that exercises the backing work, not a port ping).",
+          "enum": [
+            "pass",
+            "fail",
+            "unknown"
+          ],
+          "title": "Correctness",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "required": [
+        "liveness",
+        "correctness"
+      ],
+      "title": "_LivenessVsCorrectness",
+      "type": "object"
+    },
+    "_LogTail": {
+      "additionalProperties": false,
+      "description": "Bounded, normalized tail of the relevant log. Callers MUST bound this (the schema does not transport unbounded logs) and SHOULD normalize volatile tokens (timestamps, paths, addresses) so signatures cluster.",
+      "properties": {
+        "text": {
+          "description": "The normalized log tail.",
+          "title": "Text",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "description": "True when content was dropped to fit the bound.",
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the tail came from, e.g. 'stderr', 'task.log', 'service.stdout'.",
+          "title": "Source"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "_LogTail",
+      "type": "object"
+    },
+    "_Probe": {
+      "additionalProperties": false,
+      "description": "One targeted probe result from a caller-supplied probe hook.",
+      "properties": {
+        "name": {
+          "description": "Probe identifier, e.g. 'gpu_visible', 'service_real_request', 'scratch_writable'.",
+          "title": "Name",
+          "type": "string"
+        },
+        "ok": {
+          "description": "Whether the probe passed.",
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "required": [
+        "name",
+        "ok"
+      ],
+      "title": "_Probe",
+      "type": "object"
+    }
+  },
+  "$ref": "#/$defs/FailureFeatures"
+}
