@@ -6,8 +6,25 @@
       "additionalProperties": false,
       "description": "Structured diagnostic evidence attached to an ``ok=false`` envelope on operation failure.\n\nCaptures *why* an operation may have failed, independent of *what* failed: the\nfeature set a diagnosis would need, not an enumeration of failure modes. Every\nfield is optional and populated only where the operation can supply it (so a\nbare ``{}`` is a valid, if uninformative, block). This layer produces evidence;\nit does not decide recovery. See issue #230.",
       "properties": {
+        "error_class_raw": {
+          "description": "The failure signature exactly as the producer (a failing op or a caller-supplied probe hook) wrote it. Open, ungoverned, preserved verbatim — the framework cannot enforce a vocabulary across producers it does not own, and never rejects or rewrites this value. Used for audit and as the input to normalization.",
+          "title": "Error Class Raw",
+          "type": "string"
+        },
         "error_class": {
-          "description": "Normalized failure signature. Open vocabulary (the failure space cannot be enumerated), but callers SHOULD reuse canonical tokens where they fit: 'oom', 'connection_refused', 'timeout', 'nonzero_exit', 'malformed_response', 'quota_exceeded', 'permission_denied', 'source_missing'. Distinct from the envelope's coarse 'error_code' — several error_classes can map to one error_code.",
+          "description": "The canonical failure class, assigned by the framework's normalizer at ingest (NOT written by the producer) by mapping 'error_class_raw' onto a controlled, framework-owned vocabulary. This is the field deterministic recovery policy and the recall/memory subsystem index on, so it MUST come from a value space the framework governs. 'unknown' means the normalizer could not canonicalize the raw string — that is the well-defined trigger to escalate to a decision-maker (e.g. the agentic layer), whose resolution should feed a new raw->canonical mapping back into the normalizer rather than minting a new free-text class. The enum is the starter vocabulary; it grows via schema-version bumps, which is the single governed place the vocabulary changes. Distinct from the envelope's coarser 'error_code' — several error_classes can map to one error_code. MUST stay aligned with the 'error_class' field in failures.output.json (same vocabulary, same normalizer).",
+          "enum": [
+            "oom",
+            "connection_refused",
+            "timeout",
+            "nonzero_exit",
+            "malformed_response",
+            "quota_exceeded",
+            "permission_denied",
+            "source_missing",
+            "preempted",
+            "unknown"
+          ],
           "title": "Error Class",
           "type": "string"
         },
