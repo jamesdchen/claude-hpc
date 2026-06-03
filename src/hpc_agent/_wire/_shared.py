@@ -21,13 +21,13 @@ from pydantic import Field, StringConstraints
 
 # ── identifiers ──────────────────────────────────────────────────────────────
 
-# Strict run-identifier shape used on INPUT schemas. Filesystem-safe:
+# Strict run-identifier shape — used on every run_id field (input AND
+# output). Output run_ids are path-validated against this same pattern, so
+# strict output validation catches a malformed-id bug instead of emitting it.
+# Filesystem-safe:
 # alphanumerics, dot, underscore, hyphen.
 RunIdStrict = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._\-]+$")]
 
-# Loose run-identifier used on OUTPUT schemas — any string. Output schemas
-# use this so legacy sidecars validate.
-RunIdLoose = str
 
 # SSH target: ``user@host`` (or OpenSSH alias resolving to the same).
 SshTarget = Annotated[str, StringConstraints(pattern=r"^[^@]+@[^@]+$")]

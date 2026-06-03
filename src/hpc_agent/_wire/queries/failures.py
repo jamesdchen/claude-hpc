@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from hpc_agent._wire._shared import RunIdLoose, Scheduler
+from hpc_agent._wire._shared import RunIdStrict, Scheduler
 
 
 class _FailureCluster(BaseModel):
@@ -29,7 +29,7 @@ class FailuresResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid", title="failures output data")
 
-    run_id: RunIdLoose
+    run_id: RunIdStrict
     failed_count: int = Field(
         ge=0,
         description="Total number of failed task ids in the current status report.",
