@@ -100,33 +100,6 @@ ErrorCode = Literal[
     "internal",
 ]
 
-# ── failure features ─────────────────────────────────────────────────────────
-
-# Canonical, framework-owned failure-class vocabulary assigned by the
-# normalizer at ingest (NOT written by producers — those write the open
-# ``error_class_raw`` string, which the normalizer maps onto this enum).
-# Deterministic recovery policy and the recall/memory subsystem index on
-# this field, so it must come from a value space the framework governs.
-# ``unknown`` means the normalizer could not canonicalize the raw string —
-# the well-defined trigger to escalate to a decision-maker. The enum grows
-# only here (a schema-version bump), the single governed place the vocabulary
-# changes. MUST stay aligned with the ``error_class`` surfaced in
-# ``failures.output.json`` (same vocabulary, same normalizer) once that field
-# is reconciled. Distinct from the coarser ``ErrorCode`` envelope enum —
-# several failure classes can map to one error_code.
-FailureClass = Literal[
-    "oom",
-    "connection_refused",
-    "timeout",
-    "nonzero_exit",
-    "malformed_response",
-    "quota_exceeded",
-    "permission_denied",
-    "source_missing",
-    "preempted",
-    "unknown",
-]
-
 # ── failure categories ───────────────────────────────────────────────────────
 
 # Values returned by ``hpc_agent.models.mapreduce.reduce.classify.classify_failure``.

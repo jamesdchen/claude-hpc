@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from hpc_agent._wire._shared import FailureClass
+from hpc_agent._wire._shared import FailureCategory
 
 
 class _TemporalContext(BaseModel):
@@ -130,22 +130,22 @@ class FailureFeatures(BaseModel):
             "audit and as the input to normalization."
         ),
     )
-    error_class: FailureClass | None = Field(
+    error_class: FailureCategory | None = Field(
         default=None,
         description=(
-            "The canonical failure class, assigned by the framework's normalizer "
-            "at ingest (NOT written by the producer) by mapping 'error_class_raw' "
-            "onto a controlled, framework-owned vocabulary. This is the field "
-            "deterministic recovery policy and the recall/memory subsystem index "
-            "on, so it MUST come from a value space the framework governs. "
-            "'unknown' means the normalizer could not canonicalize the raw string "
-            "— the well-defined trigger to escalate to a decision-maker (e.g. the "
-            "agentic layer), whose resolution should feed a new raw->canonical "
-            "mapping back into the normalizer rather than minting a new free-text "
-            "class. Distinct from the envelope's coarser 'error_code' — several "
-            "error_classes can map to one error_code. MUST stay aligned with the "
-            "'error_class' field in failures.output.json (same vocabulary, same "
-            "normalizer)."
+            "The canonical failure class. Reuses the framework-owned "
+            "'FailureCategory' vocabulary (the values 'classify_failure' returns "
+            "and that DEFAULT_AUTO_RETRY_POLICY keys on) — NOT a parallel "
+            "taxonomy. Populated by the existing classifier "
+            "('ops/recover/failure_signatures.py:classify' + "
+            "'models/mapreduce/reduce/classify.py:classify_failure') from the raw "
+            "stderr signature in 'error_class_raw', not by a new normalizer. "
+            "'unknown' is the escape hatch: the classifier could not categorize "
+            "the failure — the well-defined trigger to escalate to a "
+            "decision-maker (e.g. the agentic layer). Service/staging classes "
+            "(#231/#232) extend FailureCategory in '_shared.py' — the single "
+            "governed place the vocabulary grows — rather than introducing a new "
+            "enum here. Distinct from the coarser envelope 'error_code'."
         ),
     )
     resource_spec: dict[str, Any] | None = Field(
