@@ -1,18 +1,27 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jamesdchen/hpc-agent/schemas/failure_features.json",
-  "$defs": {
-    "FailureFeatures": {
-      "additionalProperties": false,
-      "description": "Structured diagnostic evidence attached to an ``ok=false`` envelope on operation failure.\n\nCaptures *why* an operation may have failed, independent of *what* failed: the\nfeature set a diagnosis would need, not an enumeration of failure modes. Every\nfield is optional and populated only where the operation can supply it (so a\nbare ``{}`` is a valid, if uninformative, block). This layer produces evidence;\nit does not decide recovery. See issue #230.",
-      "properties": {
-        "error_class_raw": {
-          "description": "The failure signature exactly as the producer (a failing op or a caller-supplied probe hook) wrote it. Open, ungoverned, preserved verbatim — the framework cannot enforce a vocabulary across producers it does not own, and never rejects or rewrites this value. Used for audit and as the input to normalization.",
-          "title": "Error Class Raw",
+  "title": "FailureFeatures",
+  "description": "Structured diagnostic evidence attached to an ``ok=false`` envelope on\noperation failure. Evidence only; no recovery logic. See issue #230.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "error_class_raw": {
+      "anyOf": [
+        {
           "type": "string"
         },
-        "error_class": {
-          "description": "The canonical failure class, assigned by the framework's normalizer at ingest (NOT written by the producer) by mapping 'error_class_raw' onto a controlled, framework-owned vocabulary. This is the field deterministic recovery policy and the recall/memory subsystem index on, so it MUST come from a value space the framework governs. 'unknown' means the normalizer could not canonicalize the raw string — that is the well-defined trigger to escalate to a decision-maker (e.g. the agentic layer), whose resolution should feed a new raw->canonical mapping back into the normalizer rather than minting a new free-text class. The enum is the starter vocabulary; it grows via schema-version bumps, which is the single governed place the vocabulary changes. Distinct from the envelope's coarser 'error_code' — several error_classes can map to one error_code. MUST stay aligned with the 'error_class' field in failures.output.json (same vocabulary, same normalizer).",
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The failure signature exactly as the producer (a failing op or a caller-supplied probe hook) wrote it. Open, ungoverned, preserved verbatim — the framework cannot enforce a vocabulary across producers it does not own, and never rejects or rewrites this value. Used for audit and as the input to normalization.",
+      "title": "Error Class Raw"
+    },
+    "error_class": {
+      "anyOf": [
+        {
           "enum": [
             "oom",
             "connection_refused",
@@ -25,76 +34,95 @@
             "preempted",
             "unknown"
           ],
-          "title": "Error Class",
           "type": "string"
         },
-        "resource_spec": {
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The canonical failure class, assigned by the framework's normalizer at ingest (NOT written by the producer) by mapping 'error_class_raw' onto a controlled, framework-owned vocabulary. This is the field deterministic recovery policy and the recall/memory subsystem index on, so it MUST come from a value space the framework governs. 'unknown' means the normalizer could not canonicalize the raw string — the well-defined trigger to escalate to a decision-maker (e.g. the agentic layer), whose resolution should feed a new raw->canonical mapping back into the normalizer rather than minting a new free-text class. Distinct from the envelope's coarser 'error_code' — several error_classes can map to one error_code. MUST stay aligned with the 'error_class' field in failures.output.json (same vocabulary, same normalizer).",
+      "title": "Error Class"
+    },
+    "resource_spec": {
+      "anyOf": [
+        {
           "additionalProperties": true,
-          "description": "The resource/sweep spec in effect at the moment of failure (e.g. GPU type/count, scheduler-level params, sampling width). The discriminator that turns a shared signature into opposite fixes — e.g. OOM at tp_size=2 vs OOM at n=128.",
-          "title": "Resource Spec",
           "type": "object"
         },
-        "temporal_context": {
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The resource/sweep spec in effect at the moment of failure (e.g. GPU type/count, scheduler-level params, sampling width). The discriminator that turns a shared signature into opposite fixes — e.g. OOM at tp_size=2 vs OOM at n=128.",
+      "title": "Resource Spec"
+    },
+    "temporal_context": {
+      "anyOf": [
+        {
           "$ref": "#/$defs/_TemporalContext"
         },
-        "attempts_this_episode": {
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "attempts_this_episode": {
+      "anyOf": [
+        {
           "$ref": "#/$defs/_AttemptsThisEpisode"
         },
-        "liveness_vs_correctness": {
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "liveness_vs_correctness": {
+      "anyOf": [
+        {
           "$ref": "#/$defs/_LivenessVsCorrectness"
         },
-        "log_tail": {
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "log_tail": {
+      "anyOf": [
+        {
           "$ref": "#/$defs/_LogTail"
         },
-        "probes": {
-          "description": "Optional targeted probe outputs from caller-supplied probe hooks.",
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "probes": {
+      "anyOf": [
+        {
           "items": {
             "$ref": "#/$defs/_Probe"
           },
           "type": "array"
-        }
-      },
-      "title": "FailureFeatures",
-      "type": "object"
-    },
-    "_TemporalContext": {
-      "additionalProperties": false,
-      "description": "When in the operation's life did it fail — the single most discriminating feature (structural vs. runtime).",
-      "properties": {
-        "phase": {
-          "description": "'first_attempt' = failed before any unit of work succeeded (points at a structural/config problem). 'after_progress' = failed after N units succeeded (points at a runtime/data-dependent problem). 'unknown' when the operation cannot tell.",
-          "enum": [
-            "first_attempt",
-            "after_progress",
-            "unknown"
-          ],
-          "title": "Phase",
-          "type": "string"
         },
-        "successful_units": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Count of units (tasks, requests, rounds) that succeeded before the failure, when known.",
-          "title": "Successful Units"
+        {
+          "type": "null"
         }
-      },
-      "required": [
-        "phase"
       ],
-      "title": "_TemporalContext",
-      "type": "object"
-    },
+      "default": null,
+      "description": "Optional targeted probe outputs from caller-supplied probe hooks.",
+      "title": "Probes"
+    }
+  },
+  "$defs": {
     "_AttemptsThisEpisode": {
       "additionalProperties": false,
-      "description": "What recovery has already been tried in this failure episode — lets a decision-maker avoid re-trying an exhausted strategy.",
+      "description": "What recovery has already been tried this failure episode — lets a\ndecision-maker avoid re-trying an exhausted strategy.",
       "properties": {
         "count": {
           "description": "Number of recovery attempts already made this episode.",
@@ -103,11 +131,20 @@
           "type": "integer"
         },
         "strategies": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "Ordered list of recovery strategies already applied (e.g. 'retry', 'resubmit', 'restart_service', 'increase_walltime').",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+          "title": "Strategies"
         }
       },
       "required": [
@@ -118,7 +155,7 @@
     },
     "_LivenessVsCorrectness": {
       "additionalProperties": false,
-      "description": "Distinguishes 'down' from 'up-but-broken' by separating a liveness signal (does it respond?) from a correctness signal (does a real request return a valid result?). The classic silent-rot case is liveness=pass, correctness=fail.",
+      "description": "Distinguishes 'down' from 'up-but-broken' by separating a liveness\nsignal (does it respond?) from a correctness signal (does a real request\nreturn a valid result?). The classic silent-rot case is liveness=pass,\ncorrectness=fail.",
       "properties": {
         "liveness": {
           "description": "Result of a liveness check (port open / process alive / health endpoint).",
@@ -162,7 +199,7 @@
     },
     "_LogTail": {
       "additionalProperties": false,
-      "description": "Bounded, normalized tail of the relevant log. Callers MUST bound this (the schema does not transport unbounded logs) and SHOULD normalize volatile tokens (timestamps, paths, addresses) so signatures cluster.",
+      "description": "Bounded, normalized tail of the relevant log. Callers MUST bound this\n(the schema does not transport unbounded logs) and SHOULD normalize\nvolatile tokens (timestamps, paths, addresses) so signatures cluster.",
       "properties": {
         "text": {
           "description": "The normalized log tail.",
@@ -228,7 +265,41 @@
       ],
       "title": "_Probe",
       "type": "object"
+    },
+    "_TemporalContext": {
+      "additionalProperties": false,
+      "description": "When in the operation's life it failed — the single most\ndiscriminating feature (structural vs. runtime).",
+      "properties": {
+        "phase": {
+          "description": "'first_attempt' = failed before any unit of work succeeded (points at a structural/config problem). 'after_progress' = failed after N units succeeded (points at a runtime/data-dependent problem). 'unknown' when the operation cannot tell.",
+          "enum": [
+            "first_attempt",
+            "after_progress",
+            "unknown"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "successful_units": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Count of units (tasks, requests, rounds) that succeeded before the failure, when known.",
+          "title": "Successful Units"
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "title": "_TemporalContext",
+      "type": "object"
     }
-  },
-  "$ref": "#/$defs/FailureFeatures"
+  }
 }
