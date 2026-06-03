@@ -12,9 +12,11 @@ parent session's permissions.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -24,51 +26,36 @@ _AGENT = Path(__file__).resolve().parents[2] / "src/slash_commands/agents/hpc-wo
 
 
 def _find_bash() -> str | None:
-    """A real POSIX bash interpreter.
+    """Locate a POSIX bash for running the hook.
 
-    On ``windows-latest`` the ``bash`` first on PATH is the WSL launcher stub
-    in ``System32`` — with no distro installed it prints an error and exits 1
-    for *any* input, so the fence hook never runs and every assertion fails on
-    a spurious rc=1. Prefer Git Bash (always present on the runner) there; fall
-    back to PATH ``bash`` elsewhere.
+    On Windows a bare ``bash`` resolves to the WSL launcher stub
+    (``C:\\Windows\\System32\\bash.exe``), which exits 1 for *every* command
+    when no distro is installed — so the fence script never runs and all
+    cases fail uniformly. Prefer Git Bash (always present on the GitHub
+    windows runner) and return ``None`` if no real POSIX bash is found so the
+    test skips rather than exercising the stub.
     """
-    if sys.platform == "win32":
-        for p in (
-            r"C:\Program Files\Git\bin\bash.exe",
-            r"C:\Program Files\Git\usr\bin\bash.exe",
-        ):
-            if Path(p).is_file():
-                return p
-    return shutil.which("bash")
+    if sys.platform != "win32":
+        return "bash"
+    candidates: list[Path] = []
+    git = shutil.which("git")
+    if git:
+        # ...\Git\cmd\git.exe -> ...\Git\bin\bash.exe
+        candidates.append(Path(git).resolve().parents[1] / "bin" / "bash.exe")
+    for env in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+        base = os.environ.get(env)
+        if base:
+            candidates.append(Path(base) / "Git" / "bin" / "bash.exe")
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
 
 
 _BASH = _find_bash()
 
-
-def _bash_has_jq() -> bool:
-    """True iff the resolved bash can actually run ``jq`` (the hook shells it).
-
-    Probes through *that* bash rather than the host PATH so a Git-Bash that
-    can't see ``jq`` is detected (and skipped) instead of failing mid-hook.
-    """
-    if _BASH is None:
-        return False
-    try:
-        return (
-            subprocess.run(
-                [_BASH, "-c", "command -v jq"],
-                capture_output=True,
-                timeout=30,
-            ).returncode
-            == 0
-        )
-    except OSError:
-        return False
-
-
-needs_jq = pytest.mark.skipif(
-    not _bash_has_jq(), reason="the hook needs a POSIX bash that can run jq"
-)
+needs_jq = pytest.mark.skipif(shutil.which("jq") is None, reason="the hook shells jq")
+needs_bash = pytest.mark.skipif(_BASH is None, reason="no POSIX bash (Git Bash) found")
 
 
 def _hook_command() -> str:
@@ -81,15 +68,27 @@ def _hook_command() -> str:
 
 def _rc(cmd: str) -> int:
     payload = json.dumps({"tool_input": {"command": cmd}})
-    return subprocess.run(
-        [_BASH, "-c", _hook_command()],
-        input=payload,
-        text=True,
-        capture_output=True,
-        timeout=30,
-    ).returncode
+    # Run the hook from an LF-forced temp script via an explicit POSIX bash
+    # (Git Bash on Windows — see _find_bash). Forward-slash the path so Git
+    # Bash accepts it. mkstemp + explicit unlink so Windows can reopen the
+    # closed file for bash to read.
+    assert _BASH is not None  # guarded by @needs_bash
+    fd, path = tempfile.mkstemp(suffix=".sh")
+    try:
+        with os.fdopen(fd, "w", newline="\n") as f:
+            f.write(_hook_command())
+        return subprocess.run(
+            [_BASH, path.replace("\\", "/")],
+            input=payload,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        ).returncode
+    finally:
+        os.unlink(path)
 
 
+@needs_bash
 @needs_jq
 @pytest.mark.parametrize(
     "cmd",
@@ -103,6 +102,7 @@ def test_allows_hpc_agent_and_git(cmd: str) -> None:
     assert _rc(cmd) == 0
 
 
+@needs_bash
 @needs_jq
 @pytest.mark.parametrize(
     "cmd",
