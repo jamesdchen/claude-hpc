@@ -926,9 +926,7 @@ def _main() -> int:
         help="Comma-separated scheduler job IDs (optional)",
     )
     parser.add_argument("--job-name", default="", help="Job name for error-log lookup")
-    parser.add_argument(
-        "--scheduler", default=None, choices=[None, *get_args(Scheduler)]
-    )
+    parser.add_argument("--scheduler", default=None, choices=[None, *get_args(Scheduler)])
     parser.add_argument("--file-glob", default="*", help="Glob for per-task result files")
     parser.add_argument("--log-dir", default="", help="SLURM log directory")
     parser.add_argument("--scratch-dir", default="", help="SGE scratch log directory")
