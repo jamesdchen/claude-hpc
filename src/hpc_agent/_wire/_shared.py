@@ -147,6 +147,20 @@ FailureCategoryResubmittable = Literal[
     "preempted",
 ]
 
+# ── campaign optimization ─────────────────────────────────────────────────────
+
+# Optimization direction for campaign convergence / target checks. Shared by
+# the CampaignManifest wire model and the campaign atoms (campaign-advance,
+# campaign-converged) so the vocabulary is single-sourced instead of restated
+# as inline Literals + argparse choices in each.
+OptimizationDirection = Literal["minimize", "maximize"]
+
+# Plateau-detection baseline for campaign convergence. 'all_time_best' fires
+# when the recent window fails to beat the all-time prior best ('no new record
+# in N iters'); 'prior_window' fires when it fails to beat the prior window of
+# equal size ('improvements have stalled').
+PlateauMode = Literal["prior_window", "all_time_best"]
+
 # ── runtime ──────────────────────────────────────────────────────────────────
 
 # Optional execution runtime override. Today only ``uv`` is supported.
