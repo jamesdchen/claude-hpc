@@ -18,6 +18,7 @@ we always pass an explicit ``log_dir`` and ``remote_repo``.
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -385,11 +386,19 @@ class TestLogPaths:
 
     def test_slurm_err_log_disk_path(self):
         cls = get_backend_class("slurm")
-        assert cls.err_log_disk_path("logs", "scratch", "foo", "99", 3) == "logs/foo_99_3.err"
+        # err_log_disk_path is a LOCAL-disk path (os.path.join), so compare
+        # against os.path.join rather than a hardcoded '/' — on Windows the
+        # separator is '\\' and a literal '/' would spuriously fail (the
+        # cluster-side stderr_log_path stays POSIX, tested separately).
+        assert cls.err_log_disk_path("logs", "scratch", "foo", "99", 3) == os.path.join(
+            "logs", "foo_99_3.err"
+        )
 
     def test_sge_err_log_disk_path_uses_scratch(self):
         cls = get_backend_class("sge")
-        assert cls.err_log_disk_path("logs", "scratch", "foo", "99", 3) == "scratch/foo.o99.3"
+        assert cls.err_log_disk_path("logs", "scratch", "foo", "99", 3) == os.path.join(
+            "scratch", "foo.o99.3"
+        )
 
 
 # ---------------------------------------------------------------------------
