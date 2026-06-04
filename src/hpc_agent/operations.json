@@ -311,6 +311,17 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent detect-entry-point --experiment-dir <experiment_dir>",
+    "idempotent": true,
+    "input_schema": "detect_entry_point.input.json",
+    "name": "detect-entry-point",
+    "output_schema": "detect_entry_point.output.json",
+    "python": "hpc_agent.ops.detect_entry_point.detect_entry_point",
+    "side_effects": [],
+    "verb": "query"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent discover [--experiment-dir <dir>] [--search-dirs <search_dirs>]",
     "idempotent": true,
     "input_schema": null,
