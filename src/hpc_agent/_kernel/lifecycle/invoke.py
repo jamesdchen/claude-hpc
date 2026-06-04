@@ -269,7 +269,8 @@ def _extract_cache_stats(envelope: dict[str, object]) -> dict[str, int] | None:
 # cannot express (a non-empty ``why`` at judgement points), so the two are
 # complementary, not substitutes. Off by default until a live ``claude -p
 # --json-schema`` run is validated against the ``--bare`` agent loop — flip the
-# env var to enable; the plain text transport is otherwise untouched.
+# env var to enable; the plain text transport is otherwise untouched. Making
+# this the default once validated is tracked in issue #269.
 _WORKER_JSON_SCHEMA_ENV = "HPC_AGENT_WORKER_JSON_SCHEMA"
 
 
