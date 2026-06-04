@@ -655,6 +655,7 @@ def _make_single_array_submission(
     job_env: dict[str, str],
     cwd: Path,
     resources: object = None,
+    extra_flags: list[str] | None = None,
 ) -> list[str]:
     """Submit one array of size ``total_tasks`` and return the job IDs.
 
@@ -665,11 +666,13 @@ def _make_single_array_submission(
 
     *resources* (a ``SubmitResources`` or ``None``) is translated by the
     backend into scheduler resource flags; ``None``/empty emits none, so
-    the template directives apply unchanged.
+    the template directives apply unchanged. *extra_flags* (e.g. an afterok
+    scheduler-dependency, #250) are appended after the resource flags.
     """
     backend._setup_log_dir()  # type: ignore[attr-defined]
+    flags = backend.resource_flags(resources) + list(extra_flags or [])
     cmd = backend._build_command(  # type: ignore[attr-defined]
-        f"1-{total_tasks}", job_name, job_env, extra_flags=backend.resource_flags(resources)
+        f"1-{total_tasks}", job_name, job_env, extra_flags=flags
     )
     result = backend._execute_command(cmd, job_env, cwd)  # type: ignore[attr-defined]
     if result.returncode != 0:
@@ -921,6 +924,21 @@ def _submit_one_spec(
             main_launched=False,
         )
 
+    # #250: gate the main array on the canary SUCCEEDING via a scheduler-level
+    # afterok dependency, so it co-submits now (no orchestrator wait+verify
+    # round-trip) yet the scheduler drops main if the canary fails. Only when
+    # the canary actually fired this call (canary_job_ids), the spec opted in,
+    # and the scheduler supports afterok (SGE has none → left un-gated, as today).
+    afterok_flags: list[str] = []
+    if (
+        spec.enable_afterok_dependency
+        and canary_job_ids
+        and backend_obj.supports_afterok  # type: ignore[attr-defined]
+    ):
+        afterok_flags = backend_obj._build_afterok_dependency_flag(  # type: ignore[attr-defined]
+            list(canary_job_ids)
+        )
+
     job_ids = _make_single_array_submission(
         backend_obj,
         job_name=spec.job_name,
@@ -928,6 +946,7 @@ def _submit_one_spec(
         job_env=job_env_full,
         cwd=experiment_dir,
         resources=spec.resources,
+        extra_flags=afterok_flags,
     )
     from hpc_agent._wire.actions.submit import SubmitSpec as _SubmitSpec
 

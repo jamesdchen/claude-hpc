@@ -193,6 +193,18 @@ class SubmitFlowSpec(BaseModel):
             "small-but-expensive batch where the extra safety is worth it."
         ),
     )
+    enable_afterok_dependency: bool = Field(
+        default=False,
+        description=(
+            "Gate the main array on the canary SUCCEEDING via a scheduler-level "
+            "afterok dependency (#250) instead of the canary running independently "
+            "of main. When the canary fires AND the scheduler supports afterok "
+            "(SLURM / PBS; SGE has no native afterok and is left un-gated), the "
+            "main array is submitted immediately holding on afterok:<canary_job_id> "
+            "— the scheduler drops main if the canary fails — so there is no "
+            "orchestrator wait+verify+resubmit round-trip. Opt-in (default off)."
+        ),
+    )
     campaign_id: CampaignId | None = Field(default=None)
     runtime: Runtime | None = Field(default=None)
     resources: SubmitResources | None = Field(
