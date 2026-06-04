@@ -67,7 +67,21 @@ Idempotent: a no-op when assets are already installed (the same byte content lan
 hpc-agent load-context --experiment-dir <experiment_dir>
 ```
 
-If `data.next_step_hint == "monitor"`, return `spec_invalid: already_in_flight` with the run_id (different from `needs_resolution` — this isn't an ambiguity, it's a state conflict). The error envelope should name three concrete recovery paths in the remediation: (a) `/monitor-hpc` to drive the run to terminal (the normal case — the prior submit really is still running); (b) `hpc-agent reconcile --run-id <id> --scheduler <sge|slurm|pbspro|torque>` when the operator knows the cluster state is gone (scratch wiped, job manually cancelled, cluster bounced) — reconcile polls the cluster, sees the dir/job is missing, and marks the journal `abandoned` so the next submit isn't blocked; (c) `--no-canary` only when the prior run's *canary* is the in-flight one and the operator has independently confirmed it succeeded. Do NOT skip canary as a generic workaround for a journal-cluster mismatch — (b) is the right tool, not (c).
+If `data.next_step_hint == "monitor"`, there is a journal-recorded in-flight run for this profile. **Do NOT refuse from the journal alone** (#257) — `load-context` reports run state *from the journal*, which can lag the cluster: the scheduler may have completed, failed, killed, or purged the job after the last poll, yet the journal still records `in_flight` / `next_step_hint == "monitor"`. Trusting it blindly refuses a fresh submit with `already_in_flight` for a run that has actually finished or been purged — with no escape but a manual recovery prompt. Reconcile against live cluster state first (Step 1b). This is the **symmetric** recovery to `hpc-aggregate`'s Step 1b, which already reconciles before declaring "nothing to aggregate."
+
+#### 1b. Reconcile the in-flight run against the cluster
+
+```bash
+hpc-agent reconcile --run-id <in_flight_run_id> --scheduler <sge|slurm|pbspro|torque> --experiment-dir <experiment_dir>
+```
+
+`reconcile` polls the cluster once and updates the journal. Branch on `data.lifecycle_state`:
+
+- **terminal** (`complete` / `failed` / `timeout`) — the prior run actually finished; the journal is now marked terminal and the `already_in_flight` blocker is gone. **Proceed with this submit.**
+- **`abandoned`** — recorded `job_ids` exist but none are alive on the scheduler (scratch wiped, job manually cancelled, scheduler retention purged the record). The journal is now marked `abandoned`, freeing the `cmd_sha` to claim. **Proceed with this submit.**
+- **still in-flight** (the cluster confirms work genuinely running) — now *confirmed against the cluster*, return `spec_invalid: already_in_flight` with the run_id (a state conflict, not an ambiguity). Name three concrete recovery paths in the remediation: (a) `/monitor-hpc` to drive the run to terminal (the **primary recommendation** — the prior submit really is still running); (b) `hpc-agent reconcile --run-id <id> --scheduler <sge|slurm|pbspro|torque>` for a later manual recheck if the operator independently learns the cluster state went away; (c) `--no-canary` only when the prior run's *canary* is the in-flight one and the operator has independently confirmed it succeeded. Do NOT skip canary as a generic workaround for a journal-cluster mismatch — reconcile is the right tool, not (c).
+
+The skill **never** refuses `already_in_flight` from `next_step_hint` alone — only after reconcile has *confirmed against the cluster* that the run is genuinely still in-flight. Skip Step 1b when `load-context` already shows a terminal run for the profile (the normal post-monitor path) — there's nothing to reconcile.
 
 ### 2. Resolve cluster
 

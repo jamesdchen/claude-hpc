@@ -183,6 +183,51 @@ def _preflight_runtime_check(
         )
 
 
+def _run_uv_preflight_for_batch(
+    *,
+    ssh_target: str,
+    job_envs: list[dict[str, str]],
+    skip_preflight: bool,
+) -> None:
+    """Cluster-side ``uv`` preflight for the first uv-runtime spec, TTL-cached (#255).
+
+    A batch's specs share ``(ssh_target, remote_path)`` ⇒ same cluster, so one
+    probe on the first ``runtime=uv`` spec's activation fields covers the
+    batch. A *successful* probe is cached per
+    ``(host, env-activation, framework-version)`` for a TTL (default 15min): a
+    re-submit of the same target within the window skips the SSH round-trip.
+
+    The env-activation (``MODULES`` + ``CONDA_SOURCE`` + ``CONDA_ENV``) and the
+    framework version are folded into the cache key, so a conda-env edit or a
+    ``pip install -U`` misses and re-probes. ``skip_preflight`` and
+    ``HPC_NO_PREFLIGHT_CACHE=1`` both bypass the cache. Only successes are
+    recorded — a failure surfaces as :class:`errors.SpecInvalid` from
+    :func:`_preflight_runtime_check` and is never cached.
+    """
+    from hpc_agent import __version__ as _pkg_version
+    from hpc_agent.state import preflight_cache
+
+    for job_env in job_envs:
+        if (job_env or {}).get("HPC_RUNTIME") != "uv":
+            continue
+        activation = "|".join(
+            (
+                (job_env.get("MODULES") or "").strip(),
+                (job_env.get("CONDA_SOURCE") or "").strip(),
+                (job_env.get("CONDA_ENV") or "").strip(),
+            )
+        )
+        cache_key = preflight_cache.preflight_cache_key(
+            host=ssh_target, activation=activation, version=_pkg_version or ""
+        )
+        if not skip_preflight and preflight_cache.is_preflight_fresh(cache_key):
+            return  # validated within TTL — skip the cluster round-trip (#255)
+        _preflight_runtime_check(ssh_target, job_env=dict(job_env), skip=skip_preflight)
+        if not skip_preflight:
+            preflight_cache.record_preflight(cache_key, checks=["uv_present"])
+        return
+
+
 # Paths a scaffolded ``.gitignore`` marks as generated but the cluster
 # node *needs*: the executor package built at Step 0 (``src/``) and the
 # dispatch contract (``.hpc/tasks.py`` / ``.hpc/cli.py``). A caller derives
@@ -1092,15 +1137,13 @@ def _submit_flow_batch_locked(
     # verify ``uv`` is actually on PATH after the cluster env is activated
     # — before the canary qsub. All specs in a batch share
     # ``(ssh_target, remote_path)`` ⇒ same cluster, so a single probe
-    # using the first uv-runtime spec's activation fields is enough.
-    for i in fresh_indices:
-        if (specs[i].job_env or {}).get("HPC_RUNTIME") == "uv":
-            _preflight_runtime_check(
-                ssh_target,
-                job_env=dict(specs[i].job_env or {}),
-                skip=skip_preflight,
-            )
-            break
+    # using the first uv-runtime spec's activation fields is enough. The TTL
+    # cache (#255) lets a re-submit within the window skip the SSH round-trip.
+    _run_uv_preflight_for_batch(
+        ssh_target=ssh_target,
+        job_envs=[dict(specs[i].job_env or {}) for i in fresh_indices],
+        skip_preflight=skip_preflight,
+    )
     # #185: Phase 2 of submit.md's two-phase canary gate re-invokes
     # submit-flow with the same target right after Phase 1 deployed —
     # the rsync+deploy is a no-op in normal use, but still pays the SSH

@@ -45,6 +45,31 @@ def test_aggregate_nothing_to_aggregate_is_cluster_confirmed():
     )
 
 
+def test_submit_skill_reconciles_before_already_in_flight():
+    # #257: the submit skill must reconcile a journal-only in-flight run against
+    # the cluster BEFORE refusing `already_in_flight` — the symmetric gap to
+    # #248 (aggregate). It must never refuse from `next_step_hint` alone.
+    text = _read("hpc-submit")
+    assert "hpc-agent reconcile" in text, "submit skill must call `hpc-agent reconcile`"
+    assert "lifecycle_state" in text, "submit skill must branch on reconcile's lifecycle_state"
+    assert "Step 1b" in text, "submit skill must add a reconcile Step 1b"
+    assert "already_in_flight" in text
+    # The trigger condition the gap missed: trusting next_step_hint == monitor.
+    assert "next_step_hint" in text
+    # Reconcile must surface an abandoned run (frees the cmd_sha to proceed).
+    assert "abandoned" in text
+    assert "confirmed against the cluster" in text.lower()
+
+
+def test_submit_already_in_flight_is_cluster_confirmed():
+    # The `already_in_flight` refusal must be gated on the reconcile step
+    # (Step 1b), not the journal's next_step_hint alone.
+    text = _read("hpc-submit")
+    # The reconcile section precedes the (now cluster-confirmed) refusal.
+    assert "1b" in text
+    assert "never" in text.lower() and "next_step_hint" in text
+
+
 def test_submit_skill_guards_task_generator_mismatch():
     # #247: a cached interview.json must not silently override a divergent
     # caller-supplied task_generator (the 8-vs-100 drift).
