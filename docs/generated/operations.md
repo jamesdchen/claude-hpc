@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**79 operations total**: 72 primitive atoms + 7 workflow atoms.
+**81 operations total**: 74 primitive atoms + 7 workflow atoms.
 
 ## How to read this page
 
@@ -14,7 +14,7 @@ Every operation in `hpc-agent` is a CLI atom or a Python-only primitive that emi
 
 **Discoverability**: `hpc-agent capabilities` returns this same catalog at runtime in `data.operations`. Agents that don't have access to this page can introspect the framework via that subprocess call.
 
-## `query` (39)
+## `query` (40)
 
 Read-only, no side effects. Freely composable; cacheable.
 
@@ -55,12 +55,13 @@ Read-only, no side effects. Freely composable; cacheable.
 | [`recommend-partition`](../primitives/recommend-partition.md) | ✓ | _none_ | `hpc-agent recommend-partition --spec <path> [--experiment-dir <dir>]` | `hpc_agent.ops.submit.recommend_partition.recommend_partition` | `hpc_agent/schemas/recommend_partition.input.json` | `hpc_agent/schemas/recommend_partition.output.json` |
 | [`recoveries-list`](../primitives/recoveries-list.md) | ✓ | _none_ | `hpc-agent recoveries list` | `hpc_agent.recovery.cli.recoveries_list` | — | — |
 | [`recoveries-show`](../primitives/recoveries-show.md) | ✓ | _none_ | `hpc-agent recoveries show --kind <kind> [--placeholders <placeholders>]` | `hpc_agent.recovery.cli.recoveries_show` | — | — |
+| [`resolve-resources`](../primitives/resolve-resources.md) | ✓ | _none_ | `hpc-agent resolve-resources --cluster <cluster> [--experiment-dir <experiment_dir>] [--profile <profile>] [--cmd-sha <cmd_sha>] [--walltime-sec <walltime_sec>] [--gpu-type <gpu_type>] [--safety-mult <safety_mult>] [--partition <partition>] [--user-preferred-partition <user_preferred_partition>]` | `hpc_agent.ops.resolve_resources.resolve_resources` | `hpc_agent/schemas/resolve_resources.input.json` | `hpc_agent/schemas/resolve_resources.output.json` |
 | [`suggest-setup-action`](../primitives/suggest-setup-action.md) | ✓ | _none_ | `hpc-agent suggest-setup-action [--experiment-dir <dir>]` | `hpc_agent.cli.setup_actions.suggest_setup_action` | — | `hpc_agent/schemas/suggest_setup_action.output.json` |
 | [`summarize-submit-plan`](../primitives/summarize-submit-plan.md) | ✓ | _none_ | `hpc-agent summarize-submit-plan --spec <path>` | `hpc_agent.ops.submit.plan_summary.summarize_submit_plan` | — | `hpc_agent/schemas/summarize_submit_plan.output.json` |
 | [`verify-aggregation-complete`](../primitives/verify-aggregation-complete.md) | ✓ | _none_ | `hpc-agent verify-aggregation-complete [--experiment-dir <dir>] --run-id <run_id> [--combiner-dir <combiner_dir_local>] [--results-dir <results_dir_local>]` | `hpc_agent.ops.aggregate.invariants.verify_aggregation_complete` | — | `hpc_agent/schemas/verify_aggregation_complete.output.json` |
 | [`verify-submitted`](../primitives/verify-submitted.md) | ✓ | ssh | `hpc-agent verify-submitted [--experiment-dir <dir>] --run-id <run_id>` | `hpc_agent.ops.verify_submitted.verify_submitted` | — | `hpc_agent/schemas/verify_submitted.output.json` |
 
-## `validate` (12)
+## `validate` (13)
 
 Read + binary health check. Same composability as `query`.
 
@@ -68,6 +69,7 @@ Read + binary health check. Same composability as `query`.
 |---|---|---|---|---|---|---|
 | [`aggregate-preflight`](../primitives/aggregate-preflight.md) | ✓ | _none_ | `hpc-agent aggregate-preflight --experiment-dir <experiment_dir> [--reconcile-scheduler <reconcile_scheduler>]` | `hpc_agent.ops.aggregate_preflight.aggregate_preflight` | `hpc_agent/schemas/aggregate_preflight.input.json` | `hpc_agent/schemas/aggregate_preflight.output.json` |
 | [`check-preflight`](../primitives/check-preflight.md) | ✓ | _none_ | `hpc-agent preflight [--cluster <cluster>]` | `hpc_agent.ops.preflight.check.check_preflight` | — | `hpc_agent/schemas/preflight.output.json` |
+| [`check-task-generator-mismatch`](../primitives/check-task-generator-mismatch.md) | ✓ | _none_ | `hpc-agent check-task-generator-mismatch --caller-task-generator <caller_task_generator> [--cached-task-generator <cached_task_generator>]` | `hpc_agent.ops.check_task_generator_mismatch.check_task_generator_mismatch` | `hpc_agent/schemas/check_task_generator_mismatch.input.json` | `hpc_agent/schemas/check_task_generator_mismatch.output.json` |
 | [`classify-axis-preflight`](../primitives/classify-axis-preflight.md) | ✓ | _none_ | `hpc-agent classify-axis-preflight --experiment-dir <experiment_dir> [--run-name <run_name>] [--run-signature-sha <run_signature_sha>] [--root <root>] [--task-kind <task_kind>] [--data-axis-supplied]` | `hpc_agent.ops.classify_axis_preflight.classify_axis_preflight` | `hpc_agent/schemas/classify_axis_preflight.input.json` | `hpc_agent/schemas/classify_axis_preflight.output.json` |
 | [`dry-run-local`](../primitives/dry-run-local.md) | ✓ | _none_ | `_(Python-only)_` | `hpc_agent.ops.validate.dry_run_local.dry_run_local` | `hpc_agent/schemas/dry_run_local.input.json` | `hpc_agent/schemas/dry_run_local.output.json` |
 | [`smoke-test-executor`](../primitives/smoke-test-executor.md) | ✓ | filesystem; runs | `hpc-agent smoke-test-executor --module-path <module_path> [--output-file <output_file>]` | `hpc_agent.ops.smoke_test_executor.smoke_test_executor` | `hpc_agent/schemas/smoke_test_executor.input.json` | `hpc_agent/schemas/smoke_test_executor.output.json` |

@@ -518,6 +518,17 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent resolve-resources --cluster <cluster> [--experiment-dir <experiment_dir>] [--profile <profile>] [--cmd-sha <cmd_sha>] [--walltime-sec <walltime_sec>] [--gpu-type <gpu_type>] [--safety-mult <safety_mult>] [--partition <partition>] [--user-preferred-partition <user_preferred_partition>]",
+    "idempotent": true,
+    "input_schema": "resolve_resources.input.json",
+    "name": "resolve-resources",
+    "output_schema": "resolve_resources.output.json",
+    "python": "hpc_agent.ops.resolve_resources.resolve_resources",
+    "side_effects": [],
+    "verb": "query"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent suggest-setup-action [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": null,
@@ -737,6 +748,17 @@
     "name": "check-preflight",
     "output_schema": "preflight.output.json",
     "python": "hpc_agent.ops.preflight.check.check_preflight",
+    "side_effects": [],
+    "verb": "validate"
+  },
+  {
+    "agent_facing": true,
+    "cli": "hpc-agent check-task-generator-mismatch --caller-task-generator <caller_task_generator> [--cached-task-generator <cached_task_generator>]",
+    "idempotent": true,
+    "input_schema": "check_task_generator_mismatch.input.json",
+    "name": "check-task-generator-mismatch",
+    "output_schema": "check_task_generator_mismatch.output.json",
+    "python": "hpc_agent.ops.check_task_generator_mismatch.check_task_generator_mismatch",
     "side_effects": [],
     "verb": "validate"
   },

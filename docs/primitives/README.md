@@ -120,6 +120,7 @@ The verb partitions primitives into bands the reader can scan independently:
 | [recommend-partition](recommend-partition.md) | yes | _none_ | `hpc-agent recommend-partition --spec <path> [--experiment-dir <dir>]` |
 | [recoveries-list](recoveries-list.md) | yes | _none_ | `hpc-agent recoveries list` |
 | [recoveries-show](recoveries-show.md) | yes | _none_ | `hpc-agent recoveries show --kind <kind> [--placeholders <placeholders>]` |
+| [resolve-resources](resolve-resources.md) | yes | _none_ | `hpc-agent resolve-resources --cluster <cluster> [--experiment-dir <experiment_dir>] [--profile <profile>] [--cmd-sha <cmd_sha>] [--walltime-sec <walltime_sec>] [--gpu-type <gpu_type>] [--safety-mult <safety_mult>] [--partition <partition>] [--user-preferred-partition <user_preferred_partition>]` |
 | [suggest-setup-action](suggest-setup-action.md) | yes | _none_ | `hpc-agent suggest-setup-action [--experiment-dir <dir>]` |
 | [summarize-submit-plan](summarize-submit-plan.md) | yes | _none_ | `hpc-agent summarize-submit-plan --spec <path>` |
 | [verify-aggregation-complete](verify-aggregation-complete.md) | yes | _none_ | `hpc-agent verify-aggregation-complete [--experiment-dir <dir>] --run-id <run_id> [--combiner-dir <combiner_dir_local>] [--results-dir <results_dir_local>]` |
@@ -131,6 +132,7 @@ The verb partitions primitives into bands the reader can scan independently:
 |---|---|---|---|
 | [aggregate-preflight](aggregate-preflight.md) | yes | _none_ | `hpc-agent aggregate-preflight --experiment-dir <experiment_dir> [--reconcile-scheduler <reconcile_scheduler>]` |
 | [check-preflight](check-preflight.md) | yes | _none_ | `hpc-agent preflight [--cluster <cluster>]` |
+| [check-task-generator-mismatch](check-task-generator-mismatch.md) | yes | _none_ | `hpc-agent check-task-generator-mismatch --caller-task-generator <caller_task_generator> [--cached-task-generator <cached_task_generator>]` |
 | [classify-axis-preflight](classify-axis-preflight.md) | yes | _none_ | `hpc-agent classify-axis-preflight --experiment-dir <experiment_dir> [--run-name <run_name>] [--run-signature-sha <run_signature_sha>] [--root <root>] [--task-kind <task_kind>] [--data-axis-supplied]` |
 | [dry-run-local](dry-run-local.md) | yes | _none_ | `(none — Python-only primitive)` |
 | [smoke-test-executor](smoke-test-executor.md) | yes | runs: `user`; filesystem: `<output_file>` | `hpc-agent smoke-test-executor --module-path <module_path> [--output-file <output_file>]` |
