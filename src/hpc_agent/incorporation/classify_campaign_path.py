@@ -141,7 +141,8 @@ def classify_campaign_path(*, source_path: str) -> dict[str, Any]:
     # Optuna's `constant_liar=True` is the canonical signal. Conservative: only
     # claim async support when the evidence is explicit.
     supports_async = bool(signals) and (
-        "constant_liar" in source or any(s.startswith(("import:optuna", "from:optuna")) for s in signals)
+        "constant_liar" in source
+        or any(s.startswith(("import:optuna", "from:optuna")) for s in signals)
     )
 
     def _strategy_rule(_: Any) -> CandidateAction | None:

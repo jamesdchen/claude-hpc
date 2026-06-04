@@ -139,7 +139,9 @@ def test_verdict_history_is_append_only_across_multiple_verdicts(tmp_path: Path)
     clear_pending_verdict(tmp_path, "r1", verdict={"chosen": "a", "why": "first"})
     mark_pending_verdict(tmp_path, "r1", escalation=_ESCALATION)
     clear_pending_verdict(
-        tmp_path, "r1", verdict={"chosen": "b", "why": "second", "applied_at": "2026-06-04T01:02:03Z"}
+        tmp_path,
+        "r1",
+        verdict={"chosen": "b", "why": "second", "applied_at": "2026-06-04T01:02:03Z"},
     )
 
     history = load_run(tmp_path, "r1").verdict_history
