@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from hpc_agent.infra import remote, transport
-from hpc_agent.infra.ssh_options import _scp_binary, _ssh_binary
+from hpc_agent.infra.ssh_options import _ssh_binary
 
 
 @pytest.fixture(autouse=True)

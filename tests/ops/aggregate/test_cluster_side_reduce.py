@@ -159,5 +159,8 @@ def test_cluster_final_reduce_pulls_only_the_aggregate(tmp_path, monkeypatch):
     assert aggregated == {"a": {"acc": 0.86}}
     assert incomplete == [2]
     # Single aggregate pull, NOT the wave_*.json tree.
-    assert calls["pull"] == {"remote_subdir": "_aggregated/r1", "include": ["metrics_aggregate.json"]}
+    assert calls["pull"] == {
+        "remote_subdir": "_aggregated/r1",
+        "include": ["metrics_aggregate.json"],
+    }
     assert calls["final"][3] is True  # force=True (idempotent refresh)
