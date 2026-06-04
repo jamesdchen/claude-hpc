@@ -86,30 +86,51 @@ def decide(
     evidence: E,
     *,
     rules: Sequence[Callable[[E], CandidateAction | None]],
-    on_abstain: Callable[[E], Escalation],
+    on_abstain: Callable[[E], Escalation] | None = None,
+    default: CandidateAction | None = None,
     reason_for: Callable[[CandidateAction], str] | None = None,
 ) -> Decision[E]:
-    """Evaluate *rules* over *evidence*; resolve on the first hit, else escalate.
+    """Evaluate *rules* over *evidence*; resolve on the first hit, else fall back.
 
     First-match wins: rules are tried in order and the first to return a
-    :class:`CandidateAction` resolves the point as ``decided_by="code"``. If
-    every rule abstains (returns ``None``), *on_abstain* builds the
-    :class:`Escalation` and the point is ``decided_by="judgement"``. The code
-    path's ``reason`` is ``reason_for(hit)`` when supplied, else the chosen
-    candidate's own ``rationale``; the judgement path's ``reason`` is the
-    escalation's.
+    :class:`CandidateAction` resolves the point as ``decided_by="code"``. When
+    every rule abstains (returns ``None``), the fallback is one of two shapes,
+    and a point picks exactly one:
+
+    * **escalate** — pass *on_abstain*; it builds the :class:`Escalation` and
+      the point is ``decided_by="judgement"``. This is the resolvable-or-decide
+      seam: a failure recovery, a judgement branch the deterministic layer
+      cannot make.
+    * **default** — pass a *default* :class:`CandidateAction`; the point stays
+      ``decided_by="code"`` with that catch-all branch. This is a *total*
+      deterministic ladder (e.g. campaign-advance's ``continue``,
+      suggest-setup-action's ``fresh``) — a precedence list whose last branch
+      always applies, so it never escalates.
+
+    The code path's ``reason`` is ``reason_for(hit)`` when supplied, else the
+    chosen candidate's own ``rationale``; the judgement path's ``reason`` is
+    the escalation's. Passing neither *on_abstain* nor *default* is a misuse —
+    rules abstained with no fallback configured — and raises ``ValueError``.
     """
     for rule in rules:
         hit = rule(evidence)
         if hit is not None:
             reason = reason_for(hit) if reason_for is not None else hit.rationale
             return Decision(point=point, decided_by="code", chosen=hit, reason=reason)
-    escalation = on_abstain(evidence)
-    return Decision(
-        point=point,
-        decided_by="judgement",
-        escalation=escalation,
-        reason=escalation.reason,
+    if default is not None:
+        reason = reason_for(default) if reason_for is not None else default.rationale
+        return Decision(point=point, decided_by="code", chosen=default, reason=reason)
+    if on_abstain is not None:
+        escalation = on_abstain(evidence)
+        return Decision(
+            point=point,
+            decided_by="judgement",
+            escalation=escalation,
+            reason=escalation.reason,
+        )
+    raise ValueError(
+        f"decide({point!r}): all rules abstained but neither a default branch nor "
+        "an on_abstain escalation handler was given"
     )
 
 
