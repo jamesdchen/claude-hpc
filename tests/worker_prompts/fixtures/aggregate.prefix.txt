@@ -21,9 +21,9 @@ Two fields on the worker report carry observations back to the caller — they a
   - `mode` (backed by `aggregate-flow` — auto / combiner-only)
   - `partial_handling` (proceed on incomplete waves or not)
   - `completeness` (backed by `verify-aggregation-complete`)
-  - `reduce_locality` (where the reduce ran)
+  - `reduce_locality` (backed by `aggregate-flow` — deterministic: `mode=auto` reduces where the data sits)
 
-  Each entry is `{point, outcome, why, chosen?, rejected?}` — `outcome` is a short tag (e.g. `unexpected_tasks`, `partial`, `manual_pending`). At a **judgement** point (a genuine control-flow branch the deterministic layer could not decide for you — here `partial_handling` and `reduce_locality`), `why` is **required** (`parse_worker_report` rejects an empty one), and you should set `chosen` (the branch taken) and `rejected` (the alternatives you weighed and discarded). At a deterministic point `why` is a free-form one-liner.
+  Each entry is `{point, outcome, why, chosen?, rejected?}` — `outcome` is a short tag (e.g. `unexpected_tasks`, `partial`, `manual_pending`). At a **judgement** point (a genuine control-flow branch the deterministic layer could not decide for you — here `partial_handling`), `why` is **required** (`parse_worker_report` rejects an empty one), and you should set `chosen` (the branch taken) and `rejected` (the alternatives you weighed and discarded). At a deterministic point `why` is a free-form one-liner.
 
 - **`anomalies`** is a **free-form multi-line string** for everything else: the specific violation lists (`missing_waves` / `missing_tasks` / `unexpected_tasks` / `provenance_present`), failed-wave ids, raw evidence — anything that isn't one of the four points.
 

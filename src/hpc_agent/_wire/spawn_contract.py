@@ -131,10 +131,20 @@ DECISION_POINTS: dict[str, tuple[DecisionPoint, ...]] = {
         DecisionPoint("mode", "selection", "code", "aggregate-flow"),
         DecisionPoint("partial_handling", "branch", "judgement", None),
         DecisionPoint("completeness", "gate", "code", "verify-aggregation-complete"),
-        DecisionPoint("reduce_locality", "branch", "judgement", None),
+        # 'reduce_locality' is decided deterministically by aggregate-flow's
+        # mode=auto routing (cluster-reduce iff aggregate_cmd is set, else
+        # combiner-only) — reduce where the data sits. It is not an LLM
+        # judgement; the override is a caller spec field, not a branch the
+        # worker reasons. Demoted judgement→code (the prior tag was inert).
+        DecisionPoint("reduce_locality", "branch", "code", "aggregate-flow"),
     ),
     "campaign": (
-        DecisionPoint("path", "selection", "judgement", None),
+        # 'path' (manual grid vs strategy-driven) is a structural fact about
+        # tasks.py — classify-campaign-path resolves the common cases by AST
+        # scan (decided_by=code) and escalates only the unparseable/unknown
+        # tail, mirroring axis_class→classify-axis. Stays tagged judgement
+        # because that escalating tail is the worst case it can reach.
+        DecisionPoint("path", "selection", "judgement", "classify-campaign-path"),
         DecisionPoint("stochastic_marker", "gate", "code", "validate-stochastic-marker"),
         DecisionPoint("decide", "plan", "judgement", "campaign-advance"),
         DecisionPoint("convergence", "gate", "code", "campaign-converged"),

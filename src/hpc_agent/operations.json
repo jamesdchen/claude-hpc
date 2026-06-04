@@ -210,6 +210,17 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent classify-campaign-path --source-path <source_path>",
+    "idempotent": true,
+    "input_schema": null,
+    "name": "classify-campaign-path",
+    "output_schema": null,
+    "python": "hpc_agent.incorporation.classify_campaign_path.classify_campaign_path",
+    "side_effects": [],
+    "verb": "query"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent clusters describe <name> [--strict]",
     "idempotent": true,
     "input_schema": null,
