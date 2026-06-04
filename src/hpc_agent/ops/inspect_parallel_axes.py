@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from hpc_agent._kernel.registry.primitive import primitive
-from hpc_agent.cli._dispatch import CliArg, CliShape
+from hpc_agent.cli._dispatch import CliShape
 
 __all__ = ["inspect_parallel_axes"]
 
