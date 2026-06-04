@@ -78,3 +78,58 @@ def test_scan_is_total_on_garbage() -> None:
     signals, parsed = scan_campaign_path("@@@ not python @@@")
     assert parsed is False
     assert signals == set()
+
+
+_MANUAL_WITH_LOCAL_PRIOR = """
+def prior(i):
+    return i - 1
+
+def total():
+    return 5
+
+def resolve(i):
+    return {"x": prior(i)}
+"""
+
+_STRATEGY_PRIOR_ONLY = """
+from hpc_agent.models.mapreduce.reduce.history import prior
+
+def resolve(i):
+    past = prior(".", "camp")
+    return {"x": len(past)}
+"""
+
+_MANUAL_WITH_LOCAL_ASK = """
+def ask(i):
+    return i
+
+def total():
+    return 3
+
+def resolve(i):
+    return {"x": ask(i)}
+"""
+
+
+def test_local_prior_is_not_a_strategy_signal(tmp_path: Path) -> None:
+    # A manual grid that defines its own prior() must NOT be misread as strategy.
+    out = classify_campaign_path(source_path=_write(tmp_path, _MANUAL_WITH_LOCAL_PRIOR))
+    assert out["path"] == "manual"
+    assert out["decided_by"] == "code"
+    assert "call:prior" not in out["signals"]
+
+
+def test_history_imported_prior_is_a_strategy_signal(tmp_path: Path) -> None:
+    # prior() imported from the framework *history* module is a real Path-B tell,
+    # even with no optimizer import present.
+    out = classify_campaign_path(source_path=_write(tmp_path, _STRATEGY_PRIOR_ONLY))
+    assert out["path"] == "strategy"
+    assert out["decided_by"] == "code"
+    assert "call:prior" in out["signals"]
+
+
+def test_bare_local_ask_is_not_a_strategy_signal(tmp_path: Path) -> None:
+    # ask/tell count only as method calls (study.ask()); a bare local ask() must not.
+    out = classify_campaign_path(source_path=_write(tmp_path, _MANUAL_WITH_LOCAL_ASK))
+    assert out["path"] == "manual"
+    assert "call:ask" not in out["signals"]

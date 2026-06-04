@@ -47,11 +47,20 @@ _OPTIMIZER_MODULES: frozenset[str] = frozenset(
 _OPTIMIZER_NAMES: frozenset[str] = frozenset(
     {"RandomizedSearchCV", "BayesSearchCV", "HalvingRandomSearchCV", "Study", "Trial"}
 )
-# Call attribute/function names that signal an ask/tell optimization loop.
-# ``prior`` is the framework's own history reader — a strong Path-B tell.
+# Distinctive optimizer-construction / search calls — counted whether bare or a
+# method. ``ask``/``tell`` are the ask-tell loop but common as bare names, so
+# they count only as *method* calls (``study.ask()`` / ``study.tell()``). Note
+# ``prior`` is deliberately NOT here: it's a common identifier, so a bare local
+# ``prior()`` must not classify a manual grid as strategy — it counts only when
+# it is genuinely the framework's history reader (see below).
 _STRATEGY_CALLS: frozenset[str] = frozenset(
-    {"ask", "tell", "create_study", "prior", "fmin", "minimize", "RandomizedSearchCV"}
+    {"create_study", "fmin", "minimize", "RandomizedSearchCV"}
 )
+_METHOD_STRATEGY_CALLS: frozenset[str] = frozenset({"ask", "tell"})
+# A module path containing this segment is the framework's history reader
+# (``hpc_agent.models.mapreduce.reduce.history.prior``). Only a ``prior`` bound
+# to / called on such a module is a Path-B signal.
+_HISTORY_MODULE_MARK = "history"
 
 
 def scan_campaign_path(source: str) -> tuple[set[str], bool]:
@@ -60,6 +69,12 @@ def scan_campaign_path(source: str) -> tuple[set[str], bool]:
     *signals* is the set of optimizer imports / ask-tell calls found;
     *parsed* is False when the source is not valid Python (→ unclassifiable).
     Total: never raises.
+
+    The framework's ``prior()`` history reader counts only when it is *actually*
+    that reader — a name imported from a ``*history*`` module, or called on a
+    history-module alias (``history.prior(...)``). A bare local ``prior()`` is
+    not a signal, so a manual grid that happens to define one isn't
+    misclassified as strategy-driven.
     """
     try:
         tree = ast.parse(source)
@@ -67,28 +82,50 @@ def scan_campaign_path(source: str) -> tuple[set[str], bool]:
         return set(), False
 
     signals: set[str] = set()
+    history_names: set[str] = set()  # names imported FROM a *history* module
+    history_aliases: set[str] = set()  # aliases bound TO a *history* module
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                top = alias.name.split(".")[0]
-                if top in _OPTIMIZER_MODULES:
-                    signals.add(f"import:{top}")
+                parts = alias.name.split(".")
+                if parts[0] in _OPTIMIZER_MODULES:
+                    signals.add(f"import:{parts[0]}")
+                if _HISTORY_MODULE_MARK in parts:
+                    history_aliases.add(alias.asname or parts[0])
         elif isinstance(node, ast.ImportFrom):
-            top = (node.module or "").split(".")[0]
-            if top in _OPTIMIZER_MODULES:
-                signals.add(f"from:{top}")
+            mod_parts = (node.module or "").split(".")
+            if mod_parts and mod_parts[0] in _OPTIMIZER_MODULES:
+                signals.add(f"from:{mod_parts[0]}")
+            from_history = _HISTORY_MODULE_MARK in mod_parts
             for alias in node.names:
                 if alias.name in _OPTIMIZER_NAMES:
                     signals.add(f"name:{alias.name}")
-        elif isinstance(node, ast.Call):
-            func = node.func
-            attr = ""
-            if isinstance(func, ast.Attribute):
-                attr = func.attr
-            elif isinstance(func, ast.Name):
-                attr = func.id
-            if attr in _STRATEGY_CALLS or attr.startswith("suggest_"):
+                if from_history:
+                    history_names.add(alias.asname or alias.name)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            attr = func.attr
+            if (
+                attr in _STRATEGY_CALLS
+                or attr.startswith("suggest_")
+                or attr in _METHOD_STRATEGY_CALLS
+            ):
                 signals.add(f"call:{attr}")
+            elif (
+                attr == "prior"
+                and isinstance(func.value, ast.Name)
+                and func.value.id in history_aliases
+            ):
+                signals.add("call:prior")  # history_module.prior(...)
+        elif isinstance(func, ast.Name):
+            name = func.id
+            if name in _STRATEGY_CALLS or name.startswith("suggest_"):
+                signals.add(f"call:{name}")
+            elif name in history_names:
+                signals.add("call:prior")  # a name imported from a *history* module
     return signals, True
 
 
