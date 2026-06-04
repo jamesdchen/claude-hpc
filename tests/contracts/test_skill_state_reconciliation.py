@@ -70,6 +70,17 @@ def test_submit_already_in_flight_is_cluster_confirmed():
     assert "never" in text.lower() and "next_step_hint" in text
 
 
+def test_wrap_entry_point_scopes_data_axis_hint_to_shell_command():
+    # #260: data_axis_hint is only valid on shell_command entries; the skill
+    # must say so explicitly, else the agent emits it on a register_run spec
+    # and eats a schema-validate / retry round-trip.
+    text = _read("hpc-wrap-entry-point")
+    assert "data_axis_hint" in text
+    # The kind constraint must be explicit and name both shapes.
+    assert "shell_command" in text and "register_run" in text
+    assert "only on `entry_point.kind: shell_command`" in text
+
+
 def test_submit_skill_guards_task_generator_mismatch():
     # #247: a cached interview.json must not silently override a divergent
     # caller-supplied task_generator (the 8-vs-100 drift).

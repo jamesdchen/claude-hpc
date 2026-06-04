@@ -36,7 +36,7 @@ Caller may pre-resolve to skip detection:
 | `shape` (`script` \| `notebook`, greenfield only) | `script` (the dominant case at scale-up time) |
 | `argv` template + `signature` (wrapper path only) | Derived from the entry point's CLI surface |
 | `frozen_configs` | All `configs/*.yaml` / `configs/*.yml` / `conf/*.yaml` detected by Step 4 |
-| `data_axis_hint` | Walked from the decision tree (Step 6); ambiguous → omitted (the framework re-asks at submit) |
+| `data_axis_hint` | Walked from the decision tree (Step 6); ambiguous → omitted (the framework re-asks at submit). **Valid only on `entry_point.kind: shell_command`** — omit it on `register_run` (#260) |
 
 ## When to run
 
@@ -209,6 +209,8 @@ Apply the same decision tree as `hpc-classify-axis` Step 4 (autonomous; no confi
 
 When the tree resolves to ambiguous, **omit** `data_axis_hint` from the spec — `classify-axis` will surface the boundary at submit time and the caller can resolve it then. (Sequential as a default is correct for `hpc-classify-axis` recording; here we leave the field absent so the framework still has a chance to interview.)
 
+**`data_axis_hint` is valid only on `entry_point.kind: shell_command` (#260).** When the entry_point is `register_run`, omit it unconditionally — the schema (`interview.input.json`) only accepts the field on the `shell_command` shape (a `register_run` carries its classification through the decorated function's `@register_run` arguments / type hints), so emitting it on a `register_run` spec fails schema validation and costs an avoidable validate-fail / retry round-trip.
+
 ### 7. Build the spec and invoke the `interview` primitive
 
 Assemble the `InterviewSpec` JSON. The `entry_point` block differs by pathway:
@@ -246,7 +248,7 @@ Assemble the `InterviewSpec` JSON. The `entry_point` block differs by pathway:
     "signature": { ... from Step 3b.i ... },
     "frozen_configs": [ ... from Step 4 ... ],
     "fixed_params": { ... uncovered required params from Step 5b, else omit ... },
-    "data_axis_hint": { ... from Step 6 if resolved, else omit ... }
+    "data_axis_hint": { ... from Step 6 if resolved, else omit — shell_command ONLY; never emit on a register_run entry_point (#260) ... }
   }
 }
 ```
