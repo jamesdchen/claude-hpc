@@ -193,9 +193,7 @@ def _scan_console_scripts(root: Path) -> list[dict[str, str]]:
     if not isinstance(scripts, dict):
         return []
     return [
-        {"path": name, "argv_kind": "console_script"}
-        for name in scripts
-        if isinstance(name, str)
+        {"path": name, "argv_kind": "console_script"} for name in scripts if isinstance(name, str)
     ]
 
 

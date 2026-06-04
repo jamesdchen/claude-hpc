@@ -106,6 +106,7 @@ class TestGpuType:
 class TestWalltimeCaller:
     def test_caller_override_skips_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_clusters(monkeypatch, {"hoffman2": {"gpu_types": ["a100"]}})
+
         # If the probe ran it would blow up; assert it does NOT.
         def boom(*_a: Any, **_k: Any) -> None:
             raise AssertionError("read-runtime-prior must not run when caller supplies walltime")
@@ -136,9 +137,7 @@ class TestWalltimePrior:
         _patch_clusters(monkeypatch, {"hoffman2": {"gpu_types": ["a100"]}})
         _patch_prior(
             monkeypatch,
-            _prior_envelope(
-                {"v100": {"p50": 10, "p95": 99}, "a100": {"p50": 100, "p95": 1000}}
-            ),
+            _prior_envelope({"v100": {"p50": 10, "p95": 99}, "a100": {"p50": 100, "p95": 1000}}),
         )
         out = rr.resolve_resources(cluster="hoffman2", profile="train")
         assert out["walltime_sec"] == 1300  # 1000 * 1.30, the a100 row
@@ -168,9 +167,7 @@ class TestWalltimeColdStart:
 
     def test_timeout_is_cold_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_clusters(monkeypatch, {"hoffman2": {"gpu_types": ["a100"]}})
-        _patch_prior(
-            monkeypatch, None, raises=subprocess.TimeoutExpired(cmd="x", timeout=30.0)
-        )
+        _patch_prior(monkeypatch, None, raises=subprocess.TimeoutExpired(cmd="x", timeout=30.0))
         out = rr.resolve_resources(cluster="hoffman2", profile="train")
         assert out["walltime_sec"] is None
         assert out["provenance"]["walltime_sec"] == "cold_start_prior_verb_unavailable"

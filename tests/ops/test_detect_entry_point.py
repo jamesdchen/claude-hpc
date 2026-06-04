@@ -66,11 +66,7 @@ class TestArgvClassification:
 
     def test_typer(self, tmp_path: Path) -> None:
         (tmp_path / "run.py").write_text(
-            "import typer\n"
-            "app = typer.Typer()\n"
-            "@app.command()\n"
-            "def run(seed: int):\n"
-            "    ...\n"
+            "import typer\napp = typer.Typer()\n@app.command()\ndef run(seed: int):\n    ...\n"
         )
         result = dep.detect_entry_point(experiment_dir=tmp_path)
         assert _argv_kind_for(result["candidates"], "run.py") == "typer"
@@ -102,10 +98,7 @@ class TestArgvClassification:
     def test_bare_main_block(self, tmp_path: Path) -> None:
         # No CLI library, just a bare __main__ block → "__main__".
         (tmp_path / "experiment.py").write_text(
-            "def main():\n"
-            "    print('hi')\n"
-            'if __name__ == "__main__":\n'
-            "    main()\n"
+            "def main():\n    print('hi')\nif __name__ == \"__main__\":\n    main()\n"
         )
         result = dep.detect_entry_point(experiment_dir=tmp_path)
         assert _argv_kind_for(result["candidates"], "experiment.py") == "__main__"
@@ -124,9 +117,7 @@ class TestPackageMain:
     def test_package_main_with_argparse(self, tmp_path: Path) -> None:
         pkg = tmp_path / "mypkg"
         pkg.mkdir()
-        (pkg / "__main__.py").write_text(
-            "import argparse\nargparse.ArgumentParser()\n"
-        )
+        (pkg / "__main__.py").write_text("import argparse\nargparse.ArgumentParser()\n")
         result = dep.detect_entry_point(experiment_dir=tmp_path)
         assert _argv_kind_for(result["candidates"], "mypkg/__main__.py") == "argparse"
 
@@ -201,10 +192,7 @@ class TestDecoration:
 
     def test_root_py_decoration(self, tmp_path: Path) -> None:
         (tmp_path / "train.py").write_text(
-            "from hpc_agent import register_run\n"
-            "@register_run\n"
-            "def run(seed: int):\n"
-            "    ...\n"
+            "from hpc_agent import register_run\n@register_run\ndef run(seed: int):\n    ...\n"
         )
         result = dep.detect_entry_point(experiment_dir=tmp_path)
         assert "train.py" in result["decoration_found"]

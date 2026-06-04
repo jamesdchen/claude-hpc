@@ -136,9 +136,7 @@ def test_preserves_existing_settings_and_hooks(tmp_path: Path) -> None:
 
 def test_creates_post_tool_use_when_hooks_exist_without_it(tmp_path: Path) -> None:
     settings_path = tmp_path / "settings.json"
-    settings_path.write_text(
-        json.dumps({"hooks": {"PreToolUse": []}}), encoding="utf-8"
-    )
+    settings_path.write_text(json.dumps({"hooks": {"PreToolUse": []}}), encoding="utf-8")
 
     install_agent_assets(claude_dir=tmp_path)
     settings = _settings(tmp_path)

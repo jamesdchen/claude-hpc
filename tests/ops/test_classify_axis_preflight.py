@@ -126,9 +126,7 @@ class TestBuildSubcalls:
 class TestCacheCheckDecision:
     """``_run_cache_check`` — hit requires run_name AND a matching sha."""
 
-    def test_hit_when_sha_matches(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_hit_when_sha_matches(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _patch_read_executor(
             monkeypatch, {"run_signature_sha": _SHA, "data_axis": {"kind": "independent"}}
         )
@@ -139,9 +137,7 @@ class TestCacheCheckDecision:
         assert result["envelope"]["data"]["hit"] is True
         assert result["envelope"]["data"]["stored_run_signature_sha"] == _SHA
 
-    def test_miss_on_sha_mismatch(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_miss_on_sha_mismatch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         # Signature drift — stored entry exists but sha changed.
         _patch_read_executor(monkeypatch, {"run_signature_sha": _OTHER_SHA})
         result = cp._run_cache_check(
@@ -150,9 +146,7 @@ class TestCacheCheckDecision:
         assert result["ok"] is True
         assert result["envelope"]["data"]["hit"] is False
 
-    def test_miss_on_absent_entry(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_miss_on_absent_entry(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _patch_read_executor(monkeypatch, None)
         result = cp._run_cache_check(
             experiment_dir=tmp_path, run_name="forecast", run_signature_sha=_SHA
@@ -166,16 +160,12 @@ class TestCacheCheckDecision:
     ) -> None:
         record: list[tuple[str | None]] = []
         _patch_read_executor(monkeypatch, {"run_signature_sha": _SHA}, record=record)
-        result = cp._run_cache_check(
-            experiment_dir=tmp_path, run_name=None, run_signature_sha=_SHA
-        )
+        result = cp._run_cache_check(experiment_dir=tmp_path, run_name=None, run_signature_sha=_SHA)
         # No run_name → no read attempted, reported as a miss.
         assert record == []
         assert result["envelope"]["data"]["hit"] is False
 
-    def test_miss_when_sha_none(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_miss_when_sha_none(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         # An entry exists but we have no current sha to compare → miss.
         _patch_read_executor(monkeypatch, {"run_signature_sha": _SHA})
         result = cp._run_cache_check(
@@ -270,9 +260,7 @@ class TestConditionalRecall:
         # Even on a cache miss, an interview-resolved axis skips recall.
         ordered: list[str] = []
         _patch_read_executor(monkeypatch, {"run_signature_sha": _OTHER_SHA})  # miss
-        _patch_run_subprocess(
-            monkeypatch, {"discover-runs": _ok_subresult()}, record_order=ordered
-        )
+        _patch_run_subprocess(monkeypatch, {"discover-runs": _ok_subresult()}, record_order=ordered)
         result = cp.classify_axis_preflight(
             experiment_dir=tmp_path,
             run_name="forecast",
@@ -360,9 +348,7 @@ class TestOverallDerivation:
 class TestExecutionOrder:
     """Sequential — discover-runs MUST run before the (conditional) recall."""
 
-    def test_discover_runs_first(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_discover_runs_first(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         ordered: list[str] = []
         _patch_read_executor(monkeypatch, None)
         _patch_run_subprocess(
@@ -398,9 +384,7 @@ class TestSynthErrorSubresult:
 class TestOutputSchema:
     """The returned ``data`` block validates against the output schema."""
 
-    def test_result_validates(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_result_validates(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         import json
 
         from hpc_agent._kernel.contract.schema import validate

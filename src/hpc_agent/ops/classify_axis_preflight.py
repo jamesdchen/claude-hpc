@@ -206,9 +206,7 @@ def _run_cache_check(
 
     started = time.monotonic()
     try:
-        entry = (
-            read_executor(experiment_dir, run_name) if run_name is not None else None
-        )
+        entry = read_executor(experiment_dir, run_name) if run_name is not None else None
     except Exception as exc:  # noqa: BLE001 - surface corruption as a SubResult, never raise
         return {
             "envelope": {
@@ -223,11 +221,7 @@ def _run_cache_check(
         }
 
     stored_sha = entry.get("run_signature_sha") if isinstance(entry, dict) else None
-    hit = (
-        entry is not None
-        and run_signature_sha is not None
-        and stored_sha == run_signature_sha
-    )
+    hit = entry is not None and run_signature_sha is not None and stored_sha == run_signature_sha
     return {
         "envelope": {
             "ok": True,
