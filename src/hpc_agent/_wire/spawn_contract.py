@@ -129,7 +129,12 @@ DECISION_POINTS: dict[str, tuple[DecisionPoint, ...]] = {
     ),
     "aggregate": (
         DecisionPoint("mode", "selection", "code", "aggregate-flow"),
-        DecisionPoint("partial_handling", "branch", "judgement", None),
+        # 'partial_handling' switches on observable evidence via
+        # decide-partial-handling: retry resolves decided_by=code while
+        # combiner retries remain; once exhausted, the accept-partial-vs-retry
+        # acceptability call escalates (the residue). Stays tagged judgement —
+        # that escalating residue is the worst case it can reach.
+        DecisionPoint("partial_handling", "branch", "judgement", "decide-partial-handling"),
         DecisionPoint("completeness", "gate", "code", "verify-aggregation-complete"),
         # 'reduce_locality' is decided deterministically by aggregate-flow's
         # mode=auto routing (cluster-reduce iff aggregate_cmd is set, else
@@ -149,7 +154,11 @@ DECISION_POINTS: dict[str, tuple[DecisionPoint, ...]] = {
         DecisionPoint("decide", "plan", "judgement", "campaign-advance"),
         DecisionPoint("convergence", "gate", "code", "campaign-converged"),
         DecisionPoint("budget", "gate", "code", "campaign-budget"),
-        DecisionPoint("concurrency", "selection", "judgement", None),
+        # 'concurrency' switches on observable evidence via decide-concurrency:
+        # sequential resolves decided_by=code (no async support or no budget
+        # headroom); only how-aggressive-within-the-safe-bound escalates (the
+        # risk-appetite residue). Stays tagged judgement for that residue.
+        DecisionPoint("concurrency", "selection", "judgement", "decide-concurrency"),
     ),
 }
 

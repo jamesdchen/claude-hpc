@@ -23,7 +23,7 @@ Two fields on the worker report carry observations back to the caller — they a
   - `decide` (backed by `campaign-advance`)
   - `convergence` (backed by `campaign-converged`)
   - `budget` (backed by `campaign-budget`)
-  - `concurrency` (how many iterations in flight)
+  - `concurrency` (backed by `decide-concurrency` — how many iterations in flight)
 
   Each entry is `{point, outcome, why, chosen?, rejected?}` — `outcome` is a short tag (e.g. `missing`, `converged`, `exhausted`). At a **judgement** point (a genuine control-flow branch the deterministic layer could not decide for you — here `path`, `decide`, and `concurrency`), `why` is **required** (`parse_worker_report` rejects an empty one), and you should set `chosen` (the branch taken) and `rejected` (the alternatives you weighed and discarded). At a deterministic point `why` is a free-form one-liner.
 
@@ -105,7 +105,7 @@ Per iteration, three workflow-atom invocations:
 
 Three CLI calls per iteration, all emitting the same JSON envelope shape. The same loop runs identically under Claude Code, cron, or any external orchestrator because composition is at the CLI-atom level.
 
-Concurrency is opt-in: invoke `submit-flow` again before the previous iteration's `monitor-flow` returns if you want K iterations in flight (Optuna's `constant_liar=True` is built for this). **Whether the strategy *can* run async is a code fact — `classify-campaign-path`'s `supports_async_concurrency` already told you** (True only when the optimizer is built for parallel asks). Let it gate the choice: if False, stay sequential. If True, *how aggressively* to parallelize (K) is the genuine judgement — weigh it against the campaign budget and record a `concurrency` decision with `chosen`/`rejected`/`why`. Default to sequential when in doubt.
+Concurrency is opt-in: invoke `submit-flow` again before the previous iteration's `monitor-flow` returns if you want K iterations in flight (Optuna's `constant_liar=True` is built for this). **Don't reason this from scratch — call [decide-concurrency](../../docs/primitives/decide-concurrency.md):** pass `--supports-async` (from `classify-campaign-path`'s `supports_async_concurrency`), `--remaining-jobs` (from `campaign-budget`'s `remaining.max_jobs`), and `--in-flight`. On `decided_by="code"` it resolved `sequential` (no async support, or no headroom) — follow it. On `decided_by="judgement"` it computed the safe `max_in_flight` bound and the only open choice is *how aggressive* within it: pick K ∈ [1, `max_in_flight`] and record a `concurrency` decision with `chosen`/`rejected`/`why`. Default to sequential when in doubt.
 
 For headless overnight runs, do not hand-write a loop script. Wrap the driver in a recurring trigger (e.g. `/loop 30m hpc-campaign-driver --experiment-dir . --allow-agent-steps`) — each tick advances exactly one step off the on-disk `delegate` block, and `tasks.total() == 0` ends the campaign automatically (the driver finds nothing in flight and emits a `submit` hint with no work).
 
