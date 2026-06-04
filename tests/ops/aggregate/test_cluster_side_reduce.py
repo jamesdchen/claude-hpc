@@ -82,9 +82,7 @@ def test_runtime_sidecars_are_not_treated_as_wave_partials(tmp_path, monkeypatch
 
 def test_final_reduce_records_incomplete_waves(tmp_path, monkeypatch):
     combiner_dir = tmp_path / "_combiner"
-    _write_wave(
-        combiner_dir, 0, {"a": {"acc": 1.0}}, errors=["task 5: metrics.json not found"]
-    )
+    _write_wave(combiner_dir, 0, {"a": {"acc": 1.0}}, errors=["task 5: metrics.json not found"])
     monkeypatch.chdir(tmp_path)
     combiner.main(argv=["--final", "--run-id", "r1"])
     agg = _aggregate(tmp_path)

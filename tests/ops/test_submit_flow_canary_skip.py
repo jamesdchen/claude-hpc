@@ -123,6 +123,9 @@ def test_cache_ttl_expiry():
 def test_cache_version_keying():
     canary_cache.record_canary_validated(canary_cache.canary_cache_key(cmd_sha="x", version="1"))
     # A different framework version is a different key → miss.
-    assert canary_cache.is_canary_validated_fresh(
-        canary_cache.canary_cache_key(cmd_sha="x", version="2")
-    ) is False
+    assert (
+        canary_cache.is_canary_validated_fresh(
+            canary_cache.canary_cache_key(cmd_sha="x", version="2")
+        )
+        is False
+    )

@@ -111,13 +111,7 @@ def test_sandbox_ssh_preflight_surfaced_in_worker_and_skill():
     skill = _read("hpc-submit")
     assert "sandbox_blocks_cluster_ssh" in skill
     worker = (
-        REPO_ROOT
-        / "src"
-        / "hpc_agent"
-        / "_kernel"
-        / "extension"
-        / "worker_prompts"
-        / "submit.md"
+        REPO_ROOT / "src" / "hpc_agent" / "_kernel" / "extension" / "worker_prompts" / "submit.md"
     ).read_text(encoding="utf-8")
     assert "sandbox_blocks_cluster_ssh" in worker
     assert "check-preflight" in worker  # the upfront preflight verb

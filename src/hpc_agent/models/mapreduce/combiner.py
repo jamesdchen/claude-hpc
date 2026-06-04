@@ -295,10 +295,7 @@ def _final_reduce(*, run_id, force):
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
-    print(
-        f"[combiner] wrote {agg_path} "
-        f"(waves={len(waves_reduced)} grid_points={len(aggregated)})"
-    )
+    print(f"[combiner] wrote {agg_path} (waves={len(waves_reduced)} grid_points={len(aggregated)})")
 
 
 def main(max_workers=None, argv=None):

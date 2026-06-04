@@ -472,6 +472,7 @@ def rsync_push(
 # placed there, alongside the package version that produced them.
 _DEPLOY_MANIFEST_REL: Final[str] = ".hpc/.deploy_state.json"
 
+
 def _sha256_bytes(data: bytes) -> str:
     """Hex sha256 of *data* — the content identity used by the deploy cache."""
     return hashlib.sha256(data).hexdigest()

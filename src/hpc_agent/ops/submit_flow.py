@@ -931,9 +931,7 @@ def _submit_one_spec(
     # and the scheduler supports afterok (SGE has none → left un-gated, as today).
     afterok_flags: list[str] = []
     if (
-        spec.enable_afterok_dependency
-        and canary_job_ids
-        and backend_obj.supports_afterok  # type: ignore[attr-defined]
+        spec.enable_afterok_dependency and canary_job_ids and backend_obj.supports_afterok  # type: ignore[attr-defined]
     ):
         afterok_flags = backend_obj._build_afterok_dependency_flag(  # type: ignore[attr-defined]
             list(canary_job_ids)

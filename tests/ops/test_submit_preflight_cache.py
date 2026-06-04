@@ -130,21 +130,15 @@ def test_submit_flow_runs_and_records_on_miss(monkeypatch):
         "CONDA_SOURCE": "/c/conda.sh",
         "CONDA_ENV": "envY",
     }
-    sf._run_uv_preflight_for_batch(
-        ssh_target="u@host2", job_envs=[job_env], skip_preflight=False
-    )
+    sf._run_uv_preflight_for_batch(ssh_target="u@host2", job_envs=[job_env], skip_preflight=False)
     # First time: probe runs once, and the success is now cached.
     assert calls == ["u@host2"]
     activation = "|".join(("modB", "/c/conda.sh", "envY"))
-    key = preflight_cache.preflight_cache_key(
-        host="u@host2", activation=activation, version=_ver()
-    )
+    key = preflight_cache.preflight_cache_key(host="u@host2", activation=activation, version=_ver())
     assert preflight_cache.is_preflight_fresh(key) is True
 
     # Second time within TTL: no further probe.
-    sf._run_uv_preflight_for_batch(
-        ssh_target="u@host2", job_envs=[job_env], skip_preflight=False
-    )
+    sf._run_uv_preflight_for_batch(ssh_target="u@host2", job_envs=[job_env], skip_preflight=False)
     assert calls == ["u@host2"]
 
 
