@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**65 operations total**: 58 primitive atoms + 7 workflow atoms.
+**66 operations total**: 59 primitive atoms + 7 workflow atoms.
 
 ## How to read this page
 
@@ -14,7 +14,7 @@ Every operation in `hpc-agent` is a CLI atom or a Python-only primitive that emi
 
 **Discoverability**: `hpc-agent capabilities` returns this same catalog at runtime in `data.operations`. Agents that don't have access to this page can introspect the framework via that subprocess call.
 
-## `query` (31)
+## `query` (32)
 
 Read-only, no side effects. Freely composable; cacheable.
 
@@ -29,6 +29,7 @@ Read-only, no side effects. Freely composable; cacheable.
 | [`campaign-status`](../primitives/campaign-status.md) | ✓ | _none_ | `hpc-agent campaign status [--experiment-dir <dir>] --campaign-id <campaign_id>` | `hpc_agent.meta.campaign.atoms.status.campaign_status` | — | — |
 | [`capabilities`](../primitives/capabilities.md) | ✓ | _none_ | `hpc-agent capabilities [--full]` | `hpc_agent._kernel.extension.capabilities.capabilities` | — | `hpc_agent/schemas/capabilities.output.json` |
 | [`classify-axis-easy`](../primitives/classify-axis-easy.md) | ✓ | _none_ | `hpc-agent classify-axis-easy --source-path <source_path> --run-name <run_name>` | `hpc_agent.incorporation.classify_axis_easy.classify_axis_easy` | — | — |
+| [`classify-campaign-path`](../primitives/classify-campaign-path.md) | ✓ | _none_ | `hpc-agent classify-campaign-path --source-path <source_path>` | `hpc_agent.incorporation.classify_campaign_path.classify_campaign_path` | — | — |
 | [`clusters-describe`](../primitives/clusters-describe.md) | ✓ | _none_ | `hpc-agent clusters describe <name> [--strict]` | `hpc_agent.ops.clusters.describe.describe_cluster` | — | `hpc_agent/schemas/clusters_describe.output.json` |
 | [`clusters-list`](../primitives/clusters-list.md) | ✓ | _none_ | `hpc-agent clusters list` | `hpc_agent.ops.clusters.list.list_clusters` | — | `hpc_agent/schemas/clusters_list.output.json` |
 | [`compute-run-id`](../primitives/compute-run-id.md) | ✓ | _none_ | `hpc-agent compute-run-id [--experiment-dir <dir>] --run-name <run_name>` | `hpc_agent.incorporation.build.compute_run_id.compute_run_id` | — | — |

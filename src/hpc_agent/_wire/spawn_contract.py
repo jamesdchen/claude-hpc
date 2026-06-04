@@ -168,9 +168,7 @@ def judgement_point_ids(workflow: str) -> frozenset[str]:
     the bug worth catching, not a state worth silently accepting.
     """
     return frozenset(
-        point.id
-        for point in DECISION_POINTS.get(workflow, ())
-        if point.decided_by == "judgement"
+        point.id for point in DECISION_POINTS.get(workflow, ()) if point.decided_by == "judgement"
     )
 
 
