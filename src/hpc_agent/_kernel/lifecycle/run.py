@@ -60,9 +60,7 @@ def run_workflow(
     # written against the original ``invoke(prompt, *, cwd)`` signature keep
     # working on the default (no-stats) path.
     if report_cache_stats:
-        invocation = invoker.invoke(
-            prompt, cwd=Path(experiment_dir), report_cache_stats=True
-        )
+        invocation = invoker.invoke(prompt, cwd=Path(experiment_dir), report_cache_stats=True)
     else:
         invocation = invoker.invoke(prompt, cwd=Path(experiment_dir))
     try:

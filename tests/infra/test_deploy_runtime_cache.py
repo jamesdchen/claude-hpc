@@ -110,9 +110,7 @@ def test_no_deploy_cache_env_skips_manifest_entirely(monkeypatch):
     with (
         patch(
             "hpc_agent.infra.transport.ssh_run",
-            return_value=SimpleNamespace(
-                returncode=0, stdout=json.dumps(manifest), stderr=""
-            ),
+            return_value=SimpleNamespace(returncode=0, stdout=json.dumps(manifest), stderr=""),
         ) as mock_ssh,
         patch("hpc_agent.infra.transport.subprocess.run") as mock_run,
     ):
@@ -133,9 +131,7 @@ def test_use_cache_false_param_overrides_default():
     with (
         patch(
             "hpc_agent.infra.transport.ssh_run",
-            return_value=SimpleNamespace(
-                returncode=0, stdout=json.dumps(manifest), stderr=""
-            ),
+            return_value=SimpleNamespace(returncode=0, stdout=json.dumps(manifest), stderr=""),
         ),
         patch("hpc_agent.infra.transport.subprocess.run") as mock_run,
     ):

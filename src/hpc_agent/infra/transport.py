@@ -537,9 +537,7 @@ def _build_deploy_items(*, scheduler: str | None) -> list[_DeployItem]:
         items.append(_DeployItem(dst_rel, _sha256_bytes(src.read_bytes()), src, None))
 
     def add_text(content: str, dst_rel: str) -> None:
-        items.append(
-            _DeployItem(dst_rel, _sha256_bytes(content.encode("utf-8")), None, content)
-        )
+        items.append(_DeployItem(dst_rel, _sha256_bytes(content.encode("utf-8")), None, content))
 
     # Importable stubs (used inside cluster jobs by user code):
     #   - ``from hpc_agent.models.mapreduce.metrics_io import write_metrics``
