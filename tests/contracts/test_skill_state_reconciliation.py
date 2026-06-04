@@ -92,6 +92,17 @@ def test_submit_inline_branch_forbids_shell_and_disk_prompt_extraction():
     assert "data.prompt" in text
 
 
+def test_submit_inline_branch_handles_prompt_path_forwarding():
+    # #262B/C: the inline branch must document data.prompt_path (large prompts
+    # forwarded by reference) and tell the subagent to Read it — without the
+    # orchestrator reading it into its own context.
+    text = _read("hpc-submit")
+    assert "prompt_path" in text
+    assert "Read" in text
+    # Both shapes are named.
+    assert "data.prompt" in text
+
+
 def test_submit_skill_guards_task_generator_mismatch():
     # #247: a cached interview.json must not silently override a divergent
     # caller-supplied task_generator (the 8-vs-100 drift).
