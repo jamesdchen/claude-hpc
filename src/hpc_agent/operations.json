@@ -720,6 +720,17 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent classify-axis-preflight --experiment-dir <experiment_dir> [--run-name <run_name>] [--run-signature-sha <run_signature_sha>] [--root <root>] [--task-kind <task_kind>] [--data-axis-supplied]",
+    "idempotent": true,
+    "input_schema": "classify_axis_preflight.input.json",
+    "name": "classify-axis-preflight",
+    "output_schema": "classify_axis_preflight.output.json",
+    "python": "hpc_agent.ops.classify_axis_preflight.classify_axis_preflight",
+    "side_effects": [],
+    "verb": "validate"
+  },
+  {
+    "agent_facing": true,
     "cli": null,
     "idempotent": true,
     "input_schema": "dry_run_local.input.json",

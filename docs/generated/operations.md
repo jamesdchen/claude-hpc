@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**75 operations total**: 68 primitive atoms + 7 workflow atoms.
+**76 operations total**: 69 primitive atoms + 7 workflow atoms.
 
 ## How to read this page
 
@@ -58,7 +58,7 @@ Read-only, no side effects. Freely composable; cacheable.
 | [`verify-aggregation-complete`](../primitives/verify-aggregation-complete.md) | ✓ | _none_ | `hpc-agent verify-aggregation-complete [--experiment-dir <dir>] --run-id <run_id> [--combiner-dir <combiner_dir_local>] [--results-dir <results_dir_local>]` | `hpc_agent.ops.aggregate.invariants.verify_aggregation_complete` | — | `hpc_agent/schemas/verify_aggregation_complete.output.json` |
 | [`verify-submitted`](../primitives/verify-submitted.md) | ✓ | ssh | `hpc-agent verify-submitted [--experiment-dir <dir>] --run-id <run_id>` | `hpc_agent.ops.verify_submitted.verify_submitted` | — | `hpc_agent/schemas/verify_submitted.output.json` |
 
-## `validate` (10)
+## `validate` (11)
 
 Read + binary health check. Same composability as `query`.
 
@@ -66,6 +66,7 @@ Read + binary health check. Same composability as `query`.
 |---|---|---|---|---|---|---|
 | [`aggregate-preflight`](../primitives/aggregate-preflight.md) | ✓ | _none_ | `hpc-agent aggregate-preflight --experiment-dir <experiment_dir> [--reconcile-scheduler <reconcile_scheduler>]` | `hpc_agent.ops.aggregate_preflight.aggregate_preflight` | `hpc_agent/schemas/aggregate_preflight.input.json` | `hpc_agent/schemas/aggregate_preflight.output.json` |
 | [`check-preflight`](../primitives/check-preflight.md) | ✓ | _none_ | `hpc-agent preflight [--cluster <cluster>]` | `hpc_agent.ops.preflight.check.check_preflight` | — | `hpc_agent/schemas/preflight.output.json` |
+| [`classify-axis-preflight`](../primitives/classify-axis-preflight.md) | ✓ | _none_ | `hpc-agent classify-axis-preflight --experiment-dir <experiment_dir> [--run-name <run_name>] [--run-signature-sha <run_signature_sha>] [--root <root>] [--task-kind <task_kind>] [--data-axis-supplied]` | `hpc_agent.ops.classify_axis_preflight.classify_axis_preflight` | `hpc_agent/schemas/classify_axis_preflight.input.json` | `hpc_agent/schemas/classify_axis_preflight.output.json` |
 | [`dry-run-local`](../primitives/dry-run-local.md) | ✓ | _none_ | `_(Python-only)_` | `hpc_agent.ops.validate.dry_run_local.dry_run_local` | `hpc_agent/schemas/dry_run_local.input.json` | `hpc_agent/schemas/dry_run_local.output.json` |
 | [`status-preflight`](../primitives/status-preflight.md) | ✓ | _none_ | `hpc-agent status-preflight --experiment-dir <experiment_dir>` | `hpc_agent.ops.status_preflight.status_preflight` | `hpc_agent/schemas/status_preflight.input.json` | `hpc_agent/schemas/status_preflight.output.json` |
 | [`submit-preflight`](../primitives/submit-preflight.md) | ✓ | _none_ | `hpc-agent submit-preflight --experiment-dir <experiment_dir> [--cluster <cluster>]` | `hpc_agent.ops.submit_preflight.submit_preflight` | `hpc_agent/schemas/submit_preflight.input.json` | `hpc_agent/schemas/submit_preflight.output.json` |
