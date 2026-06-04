@@ -103,6 +103,26 @@ def test_submit_inline_branch_handles_prompt_path_forwarding():
     assert "data.prompt" in text
 
 
+def test_sandbox_ssh_preflight_surfaced_in_worker_and_skill():
+    # #265: an inline worker in a sandboxed session must detect the structural
+    # cluster-SSH block UP FRONT (Step-0 preflight) and surface
+    # sandbox_blocks_cluster_ssh, not run all local prep then return a buried
+    # near-success.
+    skill = _read("hpc-submit")
+    assert "sandbox_blocks_cluster_ssh" in skill
+    worker = (
+        REPO_ROOT
+        / "src"
+        / "hpc_agent"
+        / "_kernel"
+        / "extension"
+        / "worker_prompts"
+        / "submit.md"
+    ).read_text(encoding="utf-8")
+    assert "sandbox_blocks_cluster_ssh" in worker
+    assert "check-preflight" in worker  # the upfront preflight verb
+
+
 def test_submit_skill_guards_task_generator_mismatch():
     # #247: a cached interview.json must not silently override a divergent
     # caller-supplied task_generator (the 8-vs-100 drift).
