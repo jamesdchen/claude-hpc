@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**74 operations total**: 67 primitive atoms + 7 workflow atoms.
+**75 operations total**: 68 primitive atoms + 7 workflow atoms.
 
 ## How to read this page
 
@@ -52,18 +52,19 @@ Read-only, no side effects. Freely composable; cacheable.
 | [`recall`](../primitives/recall.md) | ✓ | _none_ | `hpc-agent recall [--limit <limit>] [--include-runtime] [--include-generator-stats] [--root <root>] [--task-kind <task_kind>] [--operator <operator>] [--since <since>]` | `hpc_agent.ops.memory.recall.recall_campaigns` | `hpc_agent/schemas/recall.input.json` | `hpc_agent/schemas/recall.output.json` |
 | [`recommend-partition`](../primitives/recommend-partition.md) | ✓ | _none_ | `hpc-agent recommend-partition --spec <path> [--experiment-dir <dir>]` | `hpc_agent.ops.submit.recommend_partition.recommend_partition` | `hpc_agent/schemas/recommend_partition.input.json` | `hpc_agent/schemas/recommend_partition.output.json` |
 | [`recoveries-list`](../primitives/recoveries-list.md) | ✓ | _none_ | `hpc-agent recoveries list` | `hpc_agent.recovery.cli.recoveries_list` | — | — |
-| [`recoveries-show`](../primitives/recoveries-show.md) | ✓ | _none_ | `hpc-agent recoveries show --kind <kind>` | `hpc_agent.recovery.cli.recoveries_show` | — | — |
+| [`recoveries-show`](../primitives/recoveries-show.md) | ✓ | _none_ | `hpc-agent recoveries show --kind <kind> [--placeholders <placeholders>]` | `hpc_agent.recovery.cli.recoveries_show` | — | — |
 | [`suggest-setup-action`](../primitives/suggest-setup-action.md) | ✓ | _none_ | `hpc-agent suggest-setup-action [--experiment-dir <dir>]` | `hpc_agent.cli.setup_actions.suggest_setup_action` | — | `hpc_agent/schemas/suggest_setup_action.output.json` |
 | [`summarize-submit-plan`](../primitives/summarize-submit-plan.md) | ✓ | _none_ | `hpc-agent summarize-submit-plan --spec <path>` | `hpc_agent.ops.submit.plan_summary.summarize_submit_plan` | — | `hpc_agent/schemas/summarize_submit_plan.output.json` |
 | [`verify-aggregation-complete`](../primitives/verify-aggregation-complete.md) | ✓ | _none_ | `hpc-agent verify-aggregation-complete [--experiment-dir <dir>] --run-id <run_id> [--combiner-dir <combiner_dir_local>] [--results-dir <results_dir_local>]` | `hpc_agent.ops.aggregate.invariants.verify_aggregation_complete` | — | `hpc_agent/schemas/verify_aggregation_complete.output.json` |
 | [`verify-submitted`](../primitives/verify-submitted.md) | ✓ | ssh | `hpc-agent verify-submitted [--experiment-dir <dir>] --run-id <run_id>` | `hpc_agent.ops.verify_submitted.verify_submitted` | — | `hpc_agent/schemas/verify_submitted.output.json` |
 
-## `validate` (9)
+## `validate` (10)
 
 Read + binary health check. Same composability as `query`.
 
 | Operation | Idempotent | Side effects | CLI | Python | Input schema | Output schema |
 |---|---|---|---|---|---|---|
+| [`aggregate-preflight`](../primitives/aggregate-preflight.md) | ✓ | _none_ | `hpc-agent aggregate-preflight --experiment-dir <experiment_dir> [--reconcile-scheduler <reconcile_scheduler>]` | `hpc_agent.ops.aggregate_preflight.aggregate_preflight` | `hpc_agent/schemas/aggregate_preflight.input.json` | `hpc_agent/schemas/aggregate_preflight.output.json` |
 | [`check-preflight`](../primitives/check-preflight.md) | ✓ | _none_ | `hpc-agent preflight [--cluster <cluster>]` | `hpc_agent.ops.preflight.check.check_preflight` | — | `hpc_agent/schemas/preflight.output.json` |
 | [`dry-run-local`](../primitives/dry-run-local.md) | ✓ | _none_ | `_(Python-only)_` | `hpc_agent.ops.validate.dry_run_local.dry_run_local` | `hpc_agent/schemas/dry_run_local.input.json` | `hpc_agent/schemas/dry_run_local.output.json` |
 | [`status-preflight`](../primitives/status-preflight.md) | ✓ | _none_ | `hpc-agent status-preflight --experiment-dir <experiment_dir>` | `hpc_agent.ops.status_preflight.status_preflight` | `hpc_agent/schemas/status_preflight.input.json` | `hpc_agent/schemas/status_preflight.output.json` |

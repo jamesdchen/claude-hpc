@@ -698,6 +698,17 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent aggregate-preflight --experiment-dir <experiment_dir> [--reconcile-scheduler <reconcile_scheduler>]",
+    "idempotent": true,
+    "input_schema": "aggregate_preflight.input.json",
+    "name": "aggregate-preflight",
+    "output_schema": "aggregate_preflight.output.json",
+    "python": "hpc_agent.ops.aggregate_preflight.aggregate_preflight",
+    "side_effects": [],
+    "verb": "validate"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent preflight [--cluster <cluster>]",
     "idempotent": true,
     "input_schema": null,
