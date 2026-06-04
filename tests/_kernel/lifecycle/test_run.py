@@ -22,7 +22,9 @@ class _StubInvoker:
         self._exit_code = exit_code
         self._remediation = remediation
 
-    def invoke(self, prompt: RenderedPrompt, *, cwd: Path) -> InvocationResult:
+    def invoke(
+        self, prompt: RenderedPrompt, *, cwd: Path, report_cache_stats: bool = False
+    ) -> InvocationResult:
         return InvocationResult(exit_code=self._exit_code, output=self._output)
 
     def missing_credential_remediation(self) -> str | None:
@@ -40,10 +42,14 @@ def test_run_workflow_parses_a_valid_report(monkeypatch: pytest.MonkeyPatch) -> 
         '"anomalies": ""}'
     )
     _use(monkeypatch, _StubInvoker(out))
-    report, code = run_workflow(workflow="submit", experiment_dir=".", fields={"cluster": "sge1"})
+    report, code, cache_stats = run_workflow(
+        workflow="submit", experiment_dir=".", fields={"cluster": "sge1"}
+    )
     assert code == 0
     assert report.result == {"run_id": "r1"}
     assert report.decisions[0].point == "canary"
+    # No cache stats requested → None (the default path is untouched).
+    assert cache_stats is None
 
 
 def test_run_workflow_rejects_an_invalid_request() -> None:
@@ -122,7 +128,7 @@ def test_cmd_run_success_envelope(
     # at call time, so patch the symbol there (its canonical home).
     monkeypatch.setattr(
         "hpc_agent._kernel.lifecycle.run.run_workflow",
-        lambda **kwargs: (report, 0),
+        lambda **kwargs: (report, 0, None),
     )
     rc = cmd_run(argparse.Namespace(workflow="submit", experiment_dir=Path("."), fields_json="{}"))
     assert rc == 0
@@ -131,6 +137,8 @@ def test_cmd_run_success_envelope(
     assert env["data"]["mode"] == "spawn"
     assert env["data"]["report"]["result"] == {"run_id": "r1"}
     assert env["data"]["worker_exit_code"] == 0
+    # cache_stats only appears when --report-cache-stats was passed.
+    assert "cache_stats" not in env["data"]
 
 
 def _no_spawn(monkeypatch: pytest.MonkeyPatch) -> None:

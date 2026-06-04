@@ -234,11 +234,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             idempotent=False,
         )
         return EXIT_OK
+    report_cache_stats = bool(getattr(args, "report_cache_stats", False))
     try:
-        report, exit_code = run_workflow(
+        report, exit_code, cache_stats = run_workflow(
             workflow=args.workflow,
             experiment_dir=str(args.experiment_dir),
             fields=fields,
+            report_cache_stats=report_cache_stats,
         )
     except SpawnContractError as exc:
         return _err(
@@ -250,10 +252,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     # The ``run`` verb spawns a fresh-context worker — side-effectful by
     # design. Mark the envelope non-idempotent so caller retry logic
     # treats it as such (``_ok`` defaults to idempotent=True).
-    _ok(
-        {"mode": "spawn", "report": report.model_dump(), "worker_exit_code": exit_code},
-        idempotent=False,
-    )
+    data = {"mode": "spawn", "report": report.model_dump(), "worker_exit_code": exit_code}
+    if report_cache_stats:
+        # Surface the worker's prompt-cache accounting so an operator can
+        # confirm the cacheable prefix actually hit cache (#244). ``None`` when
+        # the transport didn't expose usage (e.g. the worker crashed before
+        # emitting an envelope) — reported as-is so the gap is visible.
+        data["cache_stats"] = cache_stats
+    _ok(data, idempotent=False)
     return EXIT_OK
 
 
@@ -301,6 +307,19 @@ def register(sub: argparse._SubParsersAction) -> None:
             "over --fields-json. Use this to avoid shell-escaping inline JSON "
             "(notably Windows backslash paths, which a quoting layer can mangle "
             "into invalid JSON escapes)."
+        ),
+    )
+    p_run.add_argument(
+        "--report-cache-stats",
+        action="store_true",
+        help=(
+            "Surface the spawned worker's prompt-cache token accounting under "
+            "`data.cache_stats` (cache_read_input_tokens / "
+            "cache_creation_input_tokens / input_tokens / output_tokens). Runs "
+            "the worker with `--output-format json` to capture billing usage; a "
+            "cache_read on the second+ spawn of the same workflow confirms the "
+            "cacheable prompt prefix is hitting cache (#244). Ignored by "
+            "--inline (no worker is spawned)."
         ),
     )
     p_run.add_argument(
