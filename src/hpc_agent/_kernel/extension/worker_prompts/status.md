@@ -10,7 +10,7 @@ Both write the same journal `last_status` and the same `.monitor.jsonl` tick log
 Two fields on the worker report carry observations back to the caller — they are NOT interchangeable:
 
 - **`decisions`** is the **strict enumerated record** of which judgement points this workflow reached. For the **status** workflow there are exactly four allowed `point` IDs — any other value is rejected by `parse_worker_report`:
-  - `surface` (snapshot vs wait-until-terminal)
+  - `surface` (caller-determined via the `blocking` spawn field — snapshot vs wait-until-terminal)
   - `lifecycle_dispatch` (backed by `poll-run-status` — the branch on `lifecycle_state`)
   - `resubmit` (backed by `resubmit-failed`)
   - `monitor_cadence` (backed by `decide-monitor-arm`)
@@ -35,9 +35,11 @@ If a value you need is absent here, derive it from the run sidecar on disk — n
 
 1. **If `run_id` is unknown**, pick it from `data.in_flight` returned by Step 0 (filter by `profile`, `cluster`, or `submitted_at`). `list-in-flight` is the same data if you need a standalone call.
 
-2. **Pick the surface** based on the caller's need:
-   - Snapshot: `hpc-agent status --run-id <id>`. Returns immediately. (The `status` subcommand is the CLI alias for the [poll-run-status](../../docs/primitives/poll-run-status.md) primitive.)
-   - Wait-until-terminal: `hpc-agent monitor-flow --spec foo.json` (with `run_id` + `wall_clock_budget_seconds`). Blocks until terminal/budget.
+2. **Pick the surface — caller-determined via the `blocking` field, not your judgement.** Read `blocking` from the spawn `fields` (the JSON block above):
+   - `blocking: true` → **wait-until-terminal**: `hpc-agent monitor-flow --spec foo.json` (with `run_id` + `wall_clock_budget_seconds`). Blocks until terminal/budget. The canonical campaign-loop case — the driver sets this.
+   - `blocking: false`, or **absent** → **snapshot**: `hpc-agent status --run-id <id>`. Returns immediately. (The `status` subcommand is the CLI alias for the [poll-run-status](../../docs/primitives/poll-run-status.md) primitive.) Snapshot is the default for an ad-hoc check.
+
+   Surface is the caller's `blocking` intent, lifted into the spawn spec — it is *not* a branch you reason from scratch. Only when `blocking` is absent **and** the caller's context unmistakably wants a synchronous wait do you record a `surface` decision (with `chosen`/`why`); otherwise just follow the flag.
 
 3. **Parse the envelope** per the chosen primitive's `outputs:` contract: both expose `lifecycle_state`, `last_status`, `combined_waves`, `failed_waves`. `monitor-flow` adds `ticks`, `elapsed_seconds`, `escalation_reason`.
 
