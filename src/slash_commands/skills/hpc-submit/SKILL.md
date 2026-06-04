@@ -229,6 +229,8 @@ If the envelope you got back has `data.mode == "inline"` (instead of `data.mode 
 
 Either path stays in-session: do NOT start another `claude -p` worker, do NOT re-invoke `hpc-agent run`, and the subagent (when used) is the leaf — it runs every step and spawns nothing further.
 
+**Never shell out to extract or relay `data.prompt`, and never go to disk for it (#262).** Do NOT pipe the envelope through `python -c`, `bash -c`, `jq`, `powershell -Command`, `pwsh -Command`, `cmd /c`, or **any** shell-via-flag that takes a code string as an argument — the auto-mode classifier denies these as compound / code-injection commands, costing a rejected round-trip before you even start. And NEVER read the harness's internal `.claude/projects/…/tool-results/*.txt` files to recover the prompt: that path is harness-managed, undocumented, and unstable. `data.prompt` is the **subagent's** task, not something the orchestrator must hold, transform, or reconstruct — pass it (or the envelope reference you already have) to the subagent and let IT read what it needs. If the prompt seems "too large to read directly," that is precisely the signal to forward it to the subagent, not to improvise a shell extraction.
+
 <!-- decision-content:inline-isolation-ceiling start -->
 **Isolation ceiling:** a subagent recovers *context* isolation but not *environment* isolation — it shares this session's sandbox posture and auto-loads project CLAUDE.md, unlike the default `--bare` spawn (sandbox forced off, CLAUDE.md stripped). If a sandboxed session would block the cluster SSH, or project memory must not color the run, that's a sign the *user* wants the default spawn, not inline.
 <!-- decision-content:inline-isolation-ceiling end -->

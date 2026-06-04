@@ -81,6 +81,17 @@ def test_wrap_entry_point_scopes_data_axis_hint_to_shell_command():
     assert "only on `entry_point.kind: shell_command`" in text
 
 
+def test_submit_inline_branch_forbids_shell_and_disk_prompt_extraction():
+    # #262: the inline branch must forbid shell-extraction of data.prompt
+    # (including PowerShell/pwsh/cmd) and reading internal tool-results files.
+    text = _read("hpc-submit")
+    assert "powershell" in text.lower()
+    assert "pwsh" in text.lower()
+    assert "tool-results" in text
+    # Anchored to the inline prompt-forwarding guidance.
+    assert "data.prompt" in text
+
+
 def test_submit_skill_guards_task_generator_mismatch():
     # #247: a cached interview.json must not silently override a divergent
     # caller-supplied task_generator (the 8-vs-100 drift).
