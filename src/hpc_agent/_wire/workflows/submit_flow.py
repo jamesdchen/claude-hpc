@@ -173,6 +173,26 @@ class SubmitFlowSpec(BaseModel):
             "full run. Requires canary=true."
         ),
     )
+    canary_skip_threshold: int = Field(
+        default=4,
+        ge=0,
+        description=(
+            "Auto-skip the canary when total_tasks <= this threshold (#263): for "
+            "a tiny batch the main array's own first tasks catch a broken "
+            "executor as fast as a canary would, so the canary is pure friction. "
+            "Default 4. Set 0 to always canary. Env HPC_CANARY_SKIP_THRESHOLD "
+            "overrides per-invocation. Ignored when canary_only=true (an explicit "
+            "two-phase gate) or force_canary=true."
+        ),
+    )
+    force_canary: bool = Field(
+        default=False,
+        description=(
+            "Always submit a canary, overriding both the total_tasks<=threshold "
+            "auto-skip (#263) and the cached-cmd_sha skip (#249). For the rare "
+            "small-but-expensive batch where the extra safety is worth it."
+        ),
+    )
     campaign_id: CampaignId | None = Field(default=None)
     runtime: Runtime | None = Field(default=None)
     resources: SubmitResources | None = Field(

@@ -25,6 +25,7 @@ journal arbiter since the framework began.
 from __future__ import annotations
 
 import contextlib
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -181,6 +182,55 @@ def _preflight_runtime_check(
             f"Activation command attempted: `{cmd}` (exit {probe.returncode}; "
             f"stderr: {(probe.stderr or '').strip()[:200]})."
         )
+
+
+def _canary_skip_threshold(spec: SubmitFlowSpec) -> int:
+    """Effective tiny-batch canary-skip threshold (#263): env over spec field."""
+    raw = os.environ.get("HPC_CANARY_SKIP_THRESHOLD")
+    if raw:
+        try:
+            val = int(raw)
+        except ValueError:
+            val = -1
+        if val >= 0:
+            return val
+    return int(getattr(spec, "canary_skip_threshold", 4))
+
+
+def _should_run_canary(spec: SubmitFlowSpec) -> bool:
+    """Decide whether to fire a canary for *spec* (#263 + #249).
+
+    Order:
+
+    * ``canary=false`` → no canary (the caller's explicit opt-out).
+    * ``canary_only=true`` → ALWAYS canary — the two-phase gate is an explicit
+      request to validate before main; neither optimization applies.
+    * ``force_canary=true`` → ALWAYS canary (override both skips).
+    * ``total_tasks <= threshold`` (#263) → skip: for a tiny batch the main
+      array's own first tasks catch a broken executor as fast as a canary would.
+    * same ``cmd_sha`` validated within TTL (#249) → skip: a canary for this
+      exact ``cmd_sha`` already proved the runtime boots; re-running it gets
+      nothing new.
+
+    Otherwise → canary.
+    """
+    if not spec.canary:
+        return False
+    if spec.canary_only or getattr(spec, "force_canary", False):
+        return True
+    # #263: tiny-batch auto-skip.
+    if spec.total_tasks <= _canary_skip_threshold(spec):
+        return False
+    # #249: skip when this cmd_sha was canary-validated within the TTL.
+    from hpc_agent import __version__ as _pkg_version
+    from hpc_agent.state import canary_cache
+
+    cmd_sha = (spec.job_env or {}).get("HPC_CMD_SHA") or ""
+    if cmd_sha and not canary_cache.cache_disabled():
+        key = canary_cache.canary_cache_key(cmd_sha=cmd_sha, version=_pkg_version or "")
+        if canary_cache.is_canary_validated_fresh(key):
+            return False
+    return True
 
 
 def _run_uv_preflight_for_batch(
@@ -807,7 +857,10 @@ def _submit_one_spec(
     canary_run_id: str | None = None
     canary_job_ids: list[str] | None = None
     canary_done = False
-    if spec.canary:
+    # #263/#249: a tiny batch (total_tasks <= threshold) or a cmd_sha already
+    # canary-validated within the TTL skips the canary and goes straight to
+    # main; canary_only / force_canary always canary. See _should_run_canary.
+    if _should_run_canary(spec):
         canary_run_id = f"{spec.run_id}-canary"
         existing_canary = load_run(experiment_dir, canary_run_id)
         if existing_canary is not None:
