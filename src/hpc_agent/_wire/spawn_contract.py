@@ -147,11 +147,38 @@ DECISION_POINTS: dict[str, tuple[DecisionPoint, ...]] = {
 # ── report side ──────────────────────────────────────────────────────────────
 
 
+def judgement_point_ids(workflow: str) -> frozenset[str]:
+    """The ids of *workflow*'s ``decided_by="judgement"`` decision points.
+
+    These are the genuine breaks in control flow — the branches a worker
+    *chose* rather than the deterministic ``code``/``plan`` points whose
+    outcome a backing primitive's envelope already records on disk. The
+    judgement set is what :func:`parse_worker_report` requires a non-empty
+    ``why`` for: a control-flow branch taken with no recorded rationale is
+    the bug worth catching, not a state worth silently accepting.
+    """
+    return frozenset(
+        point.id
+        for point in DECISION_POINTS.get(workflow, ())
+        if point.decided_by == "judgement"
+    )
+
+
 class WorkerDecision(BaseModel):
     """One decision a delegated worker reports making.
 
     ``point`` must be a :class:`DecisionPoint` id for the worker's
     workflow — cross-checked by ``parse_worker_report``.
+
+    At a ``decided_by="judgement"`` point — a genuine break in the control
+    flow, not a parameter the deterministic layer computed — the rationale
+    is the thing worth capturing (see :class:`DecisionPoint`): ``why`` is
+    **required** (``parse_worker_report`` rejects an empty one at a
+    judgement point), ``chosen`` names the branch taken, and ``rejected``
+    lists the alternatives weighed and discarded — so the record is the
+    *choice*, not merely an outcome tag. At a deterministic point these
+    stay optional; the backing primitive's envelope is the authoritative
+    record there.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -159,6 +186,8 @@ class WorkerDecision(BaseModel):
     point: str
     outcome: str
     why: str = ""
+    chosen: str | None = None
+    rejected: list[str] = []
 
 
 class WorkerReport(BaseModel):

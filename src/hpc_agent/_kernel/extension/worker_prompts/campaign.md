@@ -12,7 +12,7 @@ Two fields on the worker report carry observations back to the caller — they a
   - `budget` (backed by `campaign-budget`)
   - `concurrency` (how many iterations in flight)
 
-  Each entry is `{point, outcome, why}` — `outcome` is a short tag (e.g. `missing`, `converged`, `exhausted`), `why` is a free-form one-liner.
+  Each entry is `{point, outcome, why, chosen?, rejected?}` — `outcome` is a short tag (e.g. `missing`, `converged`, `exhausted`). At a **judgement** point (a genuine control-flow branch the deterministic layer could not decide for you — here `path`, `decide`, and `concurrency`), `why` is **required** (`parse_worker_report` rejects an empty one), and you should set `chosen` (the branch taken) and `rejected` (the alternatives you weighed and discarded). At a deterministic point `why` is a free-form one-liner.
 
 - **`anomalies`** is a **free-form multi-line string** for everything else: the finding `code`, the colliding iteration's `cmd_sha`, a `suggested_fix`, raw evidence — anything that isn't one of the six points.
 

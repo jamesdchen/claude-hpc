@@ -15,7 +15,7 @@ Two fields on the worker report carry observations back to the caller — they a
   - `resubmit` (backed by `resubmit-failed`)
   - `monitor_cadence` (backed by `decide-monitor-arm`)
 
-  Each entry is `{point, outcome, why}` — `outcome` is a short tag describing what happened at that point (e.g. `complete`, `failed_nonrecoverable`, `resubmitted`), `why` is a free-form one-liner.
+  Each entry is `{point, outcome, why, chosen?, rejected?}` — `outcome` is a short tag describing what happened at that point (e.g. `complete`, `failed_nonrecoverable`, `resubmitted`). At a **judgement** point (a genuine control-flow branch the deterministic layer could not decide for you — here `surface` and `resubmit`), `why` is **required** (`parse_worker_report` rejects an empty one), and you should set `chosen` (the branch taken) and `rejected` (the alternatives you weighed and discarded). At a deterministic point `why` is a free-form one-liner.
 
 - **`anomalies`** is a **free-form multi-line string** for everything else: raw `stderr` tails, the specific failure category, reconcile findings, no-cancel notes — anything that isn't one of the four points.
 
