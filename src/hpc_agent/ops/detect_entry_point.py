@@ -163,9 +163,67 @@ def _scan_python_candidates(root: Path) -> list[dict[str, str]]:
         # -not -path '*/.*': skip any dotfile directory (.venv, .git, …).
         if any(part.startswith(".") for part in parts[:-1]):
             continue
-        _add(str(rel), is_package_main=True)
+        # ``.as_posix()`` so the relative path uses ``/`` on every OS —
+        # the schema + the conventional-name candidates emit POSIX-style
+        # paths, and consumers (and tests) compare against ``src/...``.
+        _add(rel.as_posix(), is_package_main=True)
 
     return candidates
+
+
+def _project_script_names(text: str) -> list[str]:
+    """Return the ``[project.scripts]`` keys declared in *text*.
+
+    Uses ``tomllib`` when available (Python 3.11+). On 3.10 — where
+    ``tomllib`` is not in the stdlib and this project declares no
+    ``tomli`` dependency — falls back to a minimal line scan of the
+    ``[project.scripts]`` table, the same declarative shape the original
+    ``grep -A1 '[project.scripts]'`` shell probe keyed on. Returns
+    ``[]`` on malformed input.
+    """
+    try:
+        import tomllib
+    except ImportError:
+        return _scan_scripts_table_lines(text)
+    try:
+        data = tomllib.loads(text)
+    except ValueError:
+        return []
+    scripts = (data.get("project") or {}).get("scripts") or {}
+    if not isinstance(scripts, dict):
+        return []
+    return [name for name in scripts if isinstance(name, str)]
+
+
+def _scan_scripts_table_lines(text: str) -> list[str]:
+    """Stdlib-only ``[project.scripts]`` parse — the Python 3.10 fallback.
+
+    Collects the key of each ``name = "..."`` line inside the
+    ``[project.scripts]`` table, stopping at the next table header.
+    Quoted keys are unquoted. This covers the common declarative form the
+    shell probe targeted; exotic TOML (dotted-key or inline-table
+    ``scripts``) is out of scope — it never appeared in the prose the
+    probe approximated, and on 3.11+ the ``tomllib`` path handles it
+    anyway.
+    """
+    names: list[str] = []
+    in_table = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            in_table = line.split("#", 1)[0].strip() == "[project.scripts]"
+            continue
+        if not in_table:
+            continue
+        key, sep, _value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip().strip("\"'").strip()
+        if key:
+            names.append(key)
+    return names
 
 
 def _scan_console_scripts(root: Path) -> list[dict[str, str]]:
@@ -183,18 +241,7 @@ def _scan_console_scripts(root: Path) -> list[dict[str, str]]:
     text = _read_text(pyproject)
     if not text:
         return []
-    try:
-        import tomllib
-
-        data = tomllib.loads(text)
-    except (ValueError, ImportError):
-        return []
-    scripts = (data.get("project") or {}).get("scripts") or {}
-    if not isinstance(scripts, dict):
-        return []
-    return [
-        {"path": name, "argv_kind": "console_script"} for name in scripts if isinstance(name, str)
-    ]
+    return [{"path": name, "argv_kind": "console_script"} for name in _project_script_names(text)]
 
 
 def _scan_shell_candidates(root: Path) -> list[dict[str, str]]:
@@ -221,7 +268,9 @@ def _scan_decoration(root: Path) -> list[str]:
         if not path.is_file():
             return
         if pattern.search(_read_text(path)):
-            found.add(str(path.relative_to(root)))
+            # POSIX-style ``/`` separators on every OS (Windows would
+            # otherwise emit ``src\\foo.py`` and break the contract).
+            found.add(path.relative_to(root).as_posix())
 
     # ``*.py`` at the repo root.
     for path in sorted(root.glob("*.py")):
