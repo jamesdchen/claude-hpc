@@ -137,7 +137,68 @@ def test_cmd_run_success_envelope(
     assert env["data"]["mode"] == "spawn"
     assert env["data"]["report"]["result"] == {"run_id": "r1"}
     assert env["data"]["worker_exit_code"] == 0
-    # cache_stats only appears when --report-cache-stats was passed.
+    # Cache-stat monitoring is on by default now (#244): the key is always
+    # present, None here since the stub reports no usage.
+    assert env["data"]["cache_stats"] is None
+
+
+def test_cmd_run_reports_cache_stats_by_default(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # #244 always-on: with no flag and no env opt-out, cmd_run asks
+    # run_workflow for cache stats and surfaces them in the envelope.
+    import argparse
+    import json
+
+    from hpc_agent._wire.spawn_contract import WorkerReport
+    from hpc_agent.cli.spawn import cmd_run
+
+    monkeypatch.delenv("HPC_AGENT_INVOKER", raising=False)
+    monkeypatch.delenv("HPC_AGENT_REPORT_CACHE_STATS", raising=False)
+    report = WorkerReport(result={"run_id": "r1"}, anomalies="")
+    captured: dict[str, object] = {}
+
+    def _fake(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return (report, 0, {"cache_read_input_tokens": 4000, "cache_creation_input_tokens": 12})
+
+    monkeypatch.setattr("hpc_agent._kernel.lifecycle.run.run_workflow", _fake)
+    rc = cmd_run(argparse.Namespace(workflow="submit", experiment_dir=Path("."), fields_json="{}"))
+    assert rc == 0
+    assert captured["report_cache_stats"] is True
+    env = json.loads(capsys.readouterr().out.strip())
+    assert env["data"]["cache_stats"] == {
+        "cache_read_input_tokens": 4000,
+        "cache_creation_input_tokens": 12,
+    }
+
+
+def test_cmd_run_cache_stats_env_opt_out(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # HPC_AGENT_REPORT_CACHE_STATS=0 disables the monitoring (and the
+    # --output-format json transport): run_workflow is asked NOT to report,
+    # and no cache_stats key appears.
+    import argparse
+    import json
+
+    from hpc_agent._wire.spawn_contract import WorkerReport
+    from hpc_agent.cli.spawn import cmd_run
+
+    monkeypatch.delenv("HPC_AGENT_INVOKER", raising=False)
+    monkeypatch.setenv("HPC_AGENT_REPORT_CACHE_STATS", "0")
+    report = WorkerReport(result={"run_id": "r1"}, anomalies="")
+    captured: dict[str, object] = {}
+
+    def _fake(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return (report, 0, None)
+
+    monkeypatch.setattr("hpc_agent._kernel.lifecycle.run.run_workflow", _fake)
+    rc = cmd_run(argparse.Namespace(workflow="submit", experiment_dir=Path("."), fields_json="{}"))
+    assert rc == 0
+    assert captured["report_cache_stats"] is False
+    env = json.loads(capsys.readouterr().out.strip())
     assert "cache_stats" not in env["data"]
 
 

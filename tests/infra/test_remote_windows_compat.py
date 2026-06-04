@@ -35,8 +35,13 @@ def _ensure_multiplex_enabled(monkeypatch):
     monkeypatch.delenv("HPC_SSH_PERSIST_INTERVAL", raising=False)
     monkeypatch.delenv("HPC_SSH_NAMED_PIPE", raising=False)
     ssh_options._windows_openssh_named_pipe_supported.cache_clear()
+    ssh_options._ssh_config_forces_no_multiplex.cache_clear()
+    # Default: no ~/.ssh/config in play, so the #243 probe never fires unless a
+    # test opts in by stubbing this. Keeps tests off the runner's real home.
+    monkeypatch.setattr(ssh_options, "_read_ssh_config_text", lambda: None)
     yield
     ssh_options._windows_openssh_named_pipe_supported.cache_clear()
+    ssh_options._ssh_config_forces_no_multiplex.cache_clear()
 
 
 def _control_path_values(opts: list[str]) -> list[str]:
@@ -335,3 +340,107 @@ class TestLocalOpenSshProbe:
             lambda *a, **k: SimpleNamespace(stdout="", stderr="garbage with no version\n"),
         )
         assert ssh_options._local_openssh_major() is None
+
+
+_UNIX_SOCKET_GLOBAL_CONFIG = """
+Host *
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10m
+"""
+
+_NAMED_PIPE_GLOBAL_CONFIG = r"""
+Host *
+    ControlMaster auto
+    ControlPath \\.\pipe\openssh-cm-%r@%h:%p
+    ControlPersist 10m
+"""
+
+_SCOPED_UNIX_SOCKET_CONFIG = """
+Host hoffman2 discovery
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+"""
+
+
+class TestSshConfigDeclaresProblem:
+    """The pure scanner over ~/.ssh/config text (no platform / IO)."""
+
+    def test_detects_global_unix_socket_master(self):
+        assert ssh_options._ssh_config_declares_unix_socket_global_master(
+            _UNIX_SOCKET_GLOBAL_CONFIG
+        )
+
+    def test_named_pipe_global_is_fine(self):
+        assert not ssh_options._ssh_config_declares_unix_socket_global_master(
+            _NAMED_PIPE_GLOBAL_CONFIG
+        )
+
+    def test_scoped_host_block_is_not_global(self):
+        # The breakage the probe guards is specifically a `Host *` default; a
+        # host-scoped block is the recommended fix shape, not a trigger.
+        assert not ssh_options._ssh_config_declares_unix_socket_global_master(
+            _SCOPED_UNIX_SOCKET_CONFIG
+        )
+
+    def test_controlmaster_no_is_not_a_problem(self):
+        assert not ssh_options._ssh_config_declares_unix_socket_global_master(
+            "Host *\n    ControlMaster no\n    ControlPath ~/.ssh/cm-%r\n"
+        )
+
+    def test_controlpath_none_is_fine(self):
+        assert not ssh_options._ssh_config_declares_unix_socket_global_master(
+            "Host *\n    ControlMaster auto\n    ControlPath none\n"
+        )
+
+    def test_equals_syntax_and_case_insensitivity(self):
+        assert ssh_options._ssh_config_declares_unix_socket_global_master(
+            "host=*\n  CONTROLMASTER=auto\n  controlpath=~/.ssh/cm\n"
+        )
+
+
+class TestSshConfigForcesNoMultiplex:
+    """The cached, Windows-only probe that wires the scanner into the gate."""
+
+    def test_problematic_config_disables_multiplex_and_warns(self, monkeypatch, capsys):
+        monkeypatch.setattr(ssh_options.sys, "platform", "win32")
+        monkeypatch.setattr(
+            ssh_options, "_read_ssh_config_text", lambda: _UNIX_SOCKET_GLOBAL_CONFIG
+        )
+        # Even with OpenSSH ≥ 8.x (named pipe otherwise available), a broken
+        # global config forces the no-flags fallback.
+        monkeypatch.setattr(ssh_options, "_local_openssh_major", lambda: 9)
+        assert ssh_options._ssh_multiplex_opts() == []
+        # The transfer path is forced off too (same HPC_NO_SSH_MULTIPLEX shape).
+        assert ssh_options._ssh_config_override_opts() == []
+        assert "getsockname" in capsys.readouterr().err
+
+    def test_warns_only_once(self, monkeypatch, capsys):
+        monkeypatch.setattr(ssh_options.sys, "platform", "win32")
+        monkeypatch.setattr(
+            ssh_options, "_read_ssh_config_text", lambda: _UNIX_SOCKET_GLOBAL_CONFIG
+        )
+        ssh_options._ssh_config_forces_no_multiplex()
+        ssh_options._ssh_config_forces_no_multiplex()
+        # Cached → the file is read and the warning printed exactly once.
+        assert capsys.readouterr().err.count("getsockname") == 1
+
+    def test_probe_is_windows_only(self, monkeypatch):
+        # On POSIX a Unix-socket ControlPath is exactly what works, so the same
+        # config must NOT disable multiplexing.
+        monkeypatch.setattr(ssh_options.sys, "platform", "linux")
+        monkeypatch.setattr(
+            ssh_options, "_read_ssh_config_text", lambda: _UNIX_SOCKET_GLOBAL_CONFIG
+        )
+        assert ssh_options._ssh_config_forces_no_multiplex() is False
+        opts = ssh_options._ssh_multiplex_opts()
+        assert "ControlMaster=auto" in opts  # POSIX multiplexing intact
+
+    def test_named_pipe_config_keeps_default_multiplex(self, monkeypatch):
+        # A Windows-friendly named-pipe global config is not a problem, so the
+        # named-pipe default still applies.
+        monkeypatch.setattr(ssh_options.sys, "platform", "win32")
+        monkeypatch.setattr(ssh_options, "_read_ssh_config_text", lambda: _NAMED_PIPE_GLOBAL_CONFIG)
+        monkeypatch.setattr(ssh_options, "_local_openssh_major", lambda: 9)
+        paths = _control_path_values(ssh_options._ssh_multiplex_opts())
+        assert paths == [r"\\.\pipe\openssh-hpc-cm-%C"]

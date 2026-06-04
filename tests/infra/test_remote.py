@@ -220,8 +220,12 @@ class TestDeployRuntime:
 
         # Ten file pushes + one cache-manifest write = 11 scp's via
         # subprocess.run. Concurrency makes order non-deterministic, so work
-        # off the set of destinations.
-        argvs = [c[0][0] for c in mock_run.call_args_list]
+        # off the set of destinations. On Windows, _ssh_multiplex_opts runs a
+        # one-time `ssh -V` version probe (#243) that also goes through
+        # subprocess.run — filter to the scp calls (every scp carries
+        # ``-o BatchMode=yes``; the probe does not) so the count is stable
+        # across platforms.
+        argvs = [c[0][0] for c in mock_run.call_args_list if "BatchMode=yes" in c[0][0]]
         assert len(argvs) == 11, [a[:3] for a in argvs]
 
         # Each scp call carries ``-o BatchMode=yes`` before src/dst so a
@@ -537,9 +541,14 @@ class TestDeployRuntimeTimeout:
             mock_run.return_value = _cp()
             transport.deploy_runtime(ssh_target="u@c", remote_path="/p")
         # The ssh mkdir (capture seam) and every scp (subprocess.run) must
-        # carry the SSH timeout so a stuck cluster cannot block submit.
+        # carry the SSH timeout so a stuck cluster cannot block submit. Filter
+        # to the scp calls (``-o BatchMode=yes``): on Windows the one-time
+        # `ssh -V` version probe (#243) also goes through subprocess.run but
+        # carries its own short probe timeout, not the SSH transfer timeout.
         assert mock_ssh.call_args.kwargs.get("timeout") == remote.SSH_TIMEOUT_SEC
-        for call in mock_run.call_args_list:
+        scp_calls = [c for c in mock_run.call_args_list if "BatchMode=yes" in c[0][0]]
+        assert scp_calls, "expected at least one scp call"
+        for call in scp_calls:
             assert call.kwargs.get("timeout") == remote.SSH_TIMEOUT_SEC
 
 

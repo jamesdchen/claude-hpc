@@ -234,7 +234,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             idempotent=False,
         )
         return EXIT_OK
-    report_cache_stats = bool(getattr(args, "report_cache_stats", False))
+    # Prompt-cache accounting is collected on EVERY spawn by default (#244) so
+    # a silent cache miss surfaces continuously, not only under an opt-in flag.
+    # The worker then runs with ``--output-format json``; if that ever
+    # misbehaves the unwrap falls back to the raw stdout, and an operator can
+    # disable it outright with HPC_AGENT_REPORT_CACHE_STATS=0. The legacy
+    # ``--report-cache-stats`` flag is retained (now redundant) for back-compat.
+    report_cache_stats = os.environ.get("HPC_AGENT_REPORT_CACHE_STATS", "1") != "0"
     try:
         report, exit_code, cache_stats = run_workflow(
             workflow=args.workflow,
@@ -255,8 +261,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     data = {"mode": "spawn", "report": report.model_dump(), "worker_exit_code": exit_code}
     if report_cache_stats:
         # Surface the worker's prompt-cache accounting so an operator can
-        # confirm the cacheable prefix actually hit cache (#244). ``None`` when
-        # the transport didn't expose usage (e.g. the worker crashed before
+        # confirm the cacheable prefix actually hit cache. ``None`` when the
+        # transport didn't expose usage (e.g. the worker crashed before
         # emitting an envelope) — reported as-is so the gap is visible.
         data["cache_stats"] = cache_stats
     _ok(data, idempotent=False)
@@ -313,13 +319,13 @@ def register(sub: argparse._SubParsersAction) -> None:
         "--report-cache-stats",
         action="store_true",
         help=(
-            "Surface the spawned worker's prompt-cache token accounting under "
-            "`data.cache_stats` (cache_read_input_tokens / "
-            "cache_creation_input_tokens / input_tokens / output_tokens). Runs "
-            "the worker with `--output-format json` to capture billing usage; a "
-            "cache_read on the second+ spawn of the same workflow confirms the "
-            "cacheable prompt prefix is hitting cache (#244). Ignored by "
-            "--inline (no worker is spawned)."
+            "Deprecated/no-op: the spawned worker's prompt-cache token "
+            "accounting (cache_read_input_tokens / cache_creation_input_tokens "
+            "/ input_tokens / output_tokens) is now reported under "
+            "`data.cache_stats` on EVERY spawn run by default (#244), so this "
+            "flag is no longer needed. The worker runs with `--output-format "
+            "json` to capture billing usage; disable the whole behaviour with "
+            "HPC_AGENT_REPORT_CACHE_STATS=0. Ignored by --inline (no worker)."
         ),
     )
     p_run.add_argument(
