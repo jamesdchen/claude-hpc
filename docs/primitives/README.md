@@ -108,6 +108,7 @@ The verb partitions primitives into bands the reader can scan independently:
 | [failures](failures.md) | yes | ssh: `<cluster>` | `hpc-agent failures [--experiment-dir <dir>] --run-id <run_id> [--lines <lines>]` |
 | [fetch-skill-return](fetch-skill-return.md) | yes | filesystem: `<experiment_dir>/.hpc/_returns/` | `hpc-agent fetch-skill-return [--experiment-dir <dir>] --skill <skill> [--no-clear]` |
 | [find-prior-run](find-prior-run.md) | yes | _none_ | `hpc-agent find-prior-run [--experiment-dir <dir>] --cmd-sha <cmd_sha>` |
+| [inspect-parallel-axes](inspect-parallel-axes.md) | yes | _none_ | `hpc-agent inspect-parallel-axes [--experiment-dir <dir>]` |
 | [list-in-flight](list-in-flight.md) | yes | _none_ | `hpc-agent list-in-flight [--experiment-dir <dir>]` |
 | [load-context](load-context.md) | yes | _none_ | `hpc-agent load-context [--experiment-dir <dir>]` |
 | [logs](logs.md) | yes | ssh: `<cluster>` | `hpc-agent logs [--experiment-dir <dir>] --run-id <run_id> [--task-id <task_ids>] [--all-failed] [--lines <lines>]` |
@@ -131,6 +132,7 @@ The verb partitions primitives into bands the reader can scan independently:
 | [check-preflight](check-preflight.md) | yes | _none_ | `hpc-agent preflight [--cluster <cluster>]` |
 | [classify-axis-preflight](classify-axis-preflight.md) | yes | _none_ | `hpc-agent classify-axis-preflight --experiment-dir <experiment_dir> [--run-name <run_name>] [--run-signature-sha <run_signature_sha>] [--root <root>] [--task-kind <task_kind>] [--data-axis-supplied]` |
 | [dry-run-local](dry-run-local.md) | yes | _none_ | `(none — Python-only primitive)` |
+| [smoke-test-executor](smoke-test-executor.md) | yes | runs: `user`; filesystem: `<output_file>` | `hpc-agent smoke-test-executor --module-path <module_path> [--output-file <output_file>]` |
 | [status-preflight](status-preflight.md) | yes | _none_ | `hpc-agent status-preflight --experiment-dir <experiment_dir>` |
 | [submit-preflight](submit-preflight.md) | yes | _none_ | `hpc-agent submit-preflight --experiment-dir <experiment_dir> [--cluster <cluster>]` |
 | [validate-executor-signatures](validate-executor-signatures.md) | yes | _none_ | `(none — Python-only primitive)` |

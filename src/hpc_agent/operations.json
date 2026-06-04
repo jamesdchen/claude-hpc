@@ -381,6 +381,17 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent inspect-parallel-axes [--experiment-dir <dir>]",
+    "idempotent": true,
+    "input_schema": "inspect_parallel_axes.input.json",
+    "name": "inspect-parallel-axes",
+    "output_schema": "inspect_parallel_axes.output.json",
+    "python": "hpc_agent.ops.inspect_parallel_axes.inspect_parallel_axes",
+    "side_effects": [],
+    "verb": "query"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent list-in-flight [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": null,
@@ -738,6 +749,20 @@
     "output_schema": "dry_run_local.output.json",
     "python": "hpc_agent.ops.validate.dry_run_local.dry_run_local",
     "side_effects": [],
+    "verb": "validate"
+  },
+  {
+    "agent_facing": true,
+    "cli": "hpc-agent smoke-test-executor --module-path <module_path> [--output-file <output_file>]",
+    "idempotent": true,
+    "input_schema": "smoke_test_executor.input.json",
+    "name": "smoke-test-executor",
+    "output_schema": "smoke_test_executor.output.json",
+    "python": "hpc_agent.ops.smoke_test_executor.smoke_test_executor",
+    "side_effects": [
+      "filesystem",
+      "runs"
+    ],
     "verb": "validate"
   },
   {
