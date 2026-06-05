@@ -956,6 +956,19 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent resolve-submit-inputs --spec <path> [--experiment-dir <dir>]",
+    "idempotent": true,
+    "input_schema": "resolve_submit_inputs.input.json",
+    "name": "resolve-submit-inputs",
+    "output_schema": "resolve_submit_inputs.output.json",
+    "python": "hpc_agent.ops.resolve_submit_inputs.resolve_submit_inputs",
+    "side_effects": [
+      "writes-sidecar"
+    ],
+    "verb": "workflow"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent status-pipeline --spec <path> [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": "status_pipeline.input.json",
