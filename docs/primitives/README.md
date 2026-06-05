@@ -188,6 +188,7 @@ The verb partitions primitives into bands the reader can scan independently:
 | Primitive | Idempotent | Side effects | CLI |
 |---|---|---|---|
 | [aggregate-flow](aggregate-flow.md) | yes | ssh: `<cluster>`; sync-pull: `<ssh_target>:<remote_path>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent aggregate-flow [--spec <path>] [--experiment-dir <dir>] [--dry-run] [--run-id <run_id>]` |
+| [campaign-run](campaign-run.md) | yes | scheduler-submit: `<cluster>`; ssh: `<cluster>`; writes-aggregate-output: `<experiment_dir>/_aggregated/<run_id>/` | `hpc-agent campaign-run --spec <path> [--experiment-dir <dir>]` |
 | [monitor-flow](monitor-flow.md) | yes | ssh: `<cluster>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent monitor-flow --spec <path> [--experiment-dir <dir>] [--dry-run]` |
 | [status-pipeline](status-pipeline.md) | yes | ssh: `<cluster>`; writes-tick-log: `<experiment_dir>/<run_id>.monitor.jsonl` | `hpc-agent status-pipeline --spec <path> [--experiment-dir <dir>]` |
 | [submit-and-verify](submit-and-verify.md) | yes | scheduler-submit: `<cluster>`; ssh: `<cluster>` | `hpc-agent submit-and-verify --spec <path> [--experiment-dir <dir>]` |
