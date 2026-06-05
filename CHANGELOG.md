@@ -13,6 +13,14 @@ on the wire surface enumerated in
 
 This is the layer **above** the in-worker pipeline parallelism of #277–#280 (which overlaps stages *inside* the worker). It is a **slash-side change only** — the `hpc-submit` skill and the worker contract are unchanged, so the `scripts/count_llm_touchpoints.py` baseline (which measures `worker_prompts/`, not the slashes) is unmoved. Piloted on `/submit-hpc`; `/aggregate-hpc` and `/monitor-hpc` are candidate follow-ups. Design notes: [`docs/design/submit-parallel-canvass.md`](docs/design/submit-parallel-canvass.md).
 
+### Added — `scaffold-spec`: break the schema-divination loop with a context-populated skeleton (#287)
+
+New read-only `scaffold-spec` query verb. When an agent must invoke a verb that takes a `--spec` JSON, it had no way to get a valid skeleton — each missing field / wrong type / stray `extra=forbid` key surfaced ONE at a time as a `spec_invalid` envelope, so the agent walked the schema by failed-validation feedback (the 2026-06-05 demo burned 11 rounds on `resolve-submit-inputs`, 7 on `build-submit-spec`, 3 on `validate-campaign`). `scaffold-spec` composes the read-only context sources — `load-context` + `clusters.yaml` + `compute-run-id` + `discover-executors` — into a populated skeleton for the named verb, **validated against that verb's own input model before it is returned** (it refuses to emit a spec the verb would reject). The handful of fields context can't supply come back as schema-valid placeholders listed in `unresolved_fields`, with per-field `sources` provenance. The loop collapses to one scaffold + one edit + one invoke.
+
+- Covers the three submit-family verbs with measured divination loops: `build-submit-spec`, `validate-campaign`, `resolve-submit-inputs` (which reuses the `submit` + `sidecar` block builders). `campaign-run` — which composes three nested *workflow* specs — returns an actionable "follow-up" message naming the supported verbs.
+- Emits only the **coherent** conda-activation pair: a `conda_env` without a `conda_source` (#281) crashes the cluster preamble, so the half-state is never produced.
+- Read-only (`verb: query`, no side effects): the skeleton rides the envelope `data`, never written to disk. New `scaffold_spec.output.json`; docs at `docs/primitives/scaffold-spec.md`.
+
 ## 0.10.9 — 2026-06-05
 
 A control-flow-out-of-the-LLM batch: pipeline parallelism + guard tightening (PR #282 + the first half of PR #285) followed by four workflow composites that fold the deterministic worker-prompt spines into single typed calls (PR #285 stage 3).
