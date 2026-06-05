@@ -134,7 +134,9 @@ def _emit() -> str:
             "escalation_points is the legitimate LLM residual (judgement "
             "points handed back to the caller) and is expected to STAY."
         ),
-        "prompts_dir": str(PROMPTS_DIR.relative_to(REPO_ROOT)),
+        # ``as_posix()`` so the baseline is byte-identical on Windows and POSIX
+        # (``str()`` would emit backslashes on win32 and break the --check gate).
+        "prompts_dir": PROMPTS_DIR.relative_to(REPO_ROOT).as_posix(),
         "workflows": list(sorted(WORKFLOWS)),
     }
     return json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
