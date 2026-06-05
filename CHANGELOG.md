@@ -5,6 +5,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## Unreleased
+
+### Added — main-agent / worker parallelism: parallel canvassing during worker startup (#286)
+
+`/submit-hpc` no longer serialises human-thinking time behind worker-startup time. The slash now dispatches the `hpc-submit` skill in the **background** (Claude Code's `Agent` tool `run_in_background: true`, autonomous mode) and, in parallel, canvasses the predictable runtime-behaviour questions (`overwrite_prior_run`, `on_task_generator_mismatch`, the `data_axis` confirmation when the classifier is `unclassifiable`, `k_in_flight`) and runs local config validation (`clusters.yaml` coherence, `.hpc/axes.yaml` freshness, working-tree dirtiness) + surfaces recent history — none of which need worker output. At the **join** it reconciles the user's answers against the speculative dispatch: a no-op merge in the common case (the answers are runtime knobs the built spec doesn't depend on), or a cheap cancel + re-dispatch on the rare *spec conflict* (a cancelled dispatch has done preflight + maybe rsync, not the main-array `qsub`).
+
+This is the layer **above** the in-worker pipeline parallelism of #277–#280 (which overlaps stages *inside* the worker). It is a **slash-side change only** — the `hpc-submit` skill and the worker contract are unchanged, so the `scripts/count_llm_touchpoints.py` baseline (which measures `worker_prompts/`, not the slashes) is unmoved. Piloted on `/submit-hpc`; `/aggregate-hpc` and `/monitor-hpc` are candidate follow-ups. Design notes: [`docs/design/submit-parallel-canvass.md`](docs/design/submit-parallel-canvass.md).
+
 ## 0.10.9 — 2026-06-05
 
 A control-flow-out-of-the-LLM batch: pipeline parallelism + guard tightening (PR #282 + the first half of PR #285) followed by four workflow composites that fold the deterministic worker-prompt spines into single typed calls (PR #285 stage 3).
