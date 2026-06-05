@@ -24,11 +24,11 @@
     "total_touchpoints": 21
   },
   "status": {
-    "branches": 9,
+    "branches": 6,
     "escalation_points": 3,
     "retry_loops": 13,
     "stop_gates": 1,
-    "total_touchpoints": 23
+    "total_touchpoints": 20
   },
   "submit": {
     "branches": 22,
