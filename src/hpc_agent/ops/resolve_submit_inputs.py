@@ -17,7 +17,12 @@ to produce a ready-to-submit context.
 Composition:
 
     compute-run-id  →  find-prior-run  →  (build-tasks-py if tasks.py absent)
-                    →  build-submit-spec
+                    →  build-submit-spec  →  write-run-sidecar
+
+The ``resolved`` terminal is fully submit-ready: the submit-flow spec is built
+AND the per-run sidecar is written (the #171 write-first precondition), so the
+caller hands ``submit_spec`` straight to ``submit-pipeline`` with no
+intervening deterministic step.
 
 The genuine JUDGEMENT that precedes this spine stays UPSTREAM as escalations
 — parsing the user's natural-language intent (Step 2), classifying the
@@ -54,6 +59,7 @@ from hpc_agent.cli.setup_actions import find_prior_run
 from hpc_agent.incorporation.build.compute_run_id import compute_run_id
 from hpc_agent.incorporation.build.submit_spec import build_submit_spec
 from hpc_agent.incorporation.build.tasks_py import build_tasks_py
+from hpc_agent.ops.write_run_sidecar import write_run_sidecar
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -71,10 +77,17 @@ _LIVE_PRIOR_STATUSES: frozenset[str] = frozenset({"complete", "in_flight"})
 @primitive(
     name="resolve-submit-inputs",
     verb="workflow",
-    composes=["compute-run-id", "find-prior-run", "build-tasks-py", "build-submit-spec"],
+    composes=[
+        "compute-run-id",
+        "find-prior-run",
+        "build-tasks-py",
+        "build-submit-spec",
+        "write-run-sidecar",
+    ],
     side_effects=[
         SideEffect("writes-sidecar", "<experiment>/.hpc/tasks.py (when scaffolded)"),
         SideEffect("writes-sidecar", "<experiment>/.hpc/cli.py (when scaffolded)"),
+        SideEffect("writes-sidecar", "<experiment>/.hpc/runs/<run_id>.json (the per-run sidecar)"),
     ],
     error_codes=[errors.SpecInvalid],
     idempotent=True,
@@ -160,17 +173,33 @@ def resolve_submit_inputs(
             prior_status=fp["status"],
         )
 
-    # 4. build-submit-spec: assemble + validate the submit-flow spec.
-    submit_spec = build_submit_spec(spec=spec.submit)
+    # 4. build-submit-spec: assemble + validate the submit-flow spec. Inject the
+    #    compute-run-id values — the spec's run_id/cmd_sha are placeholders — so
+    #    the built spec always matches the reported run_id, not a stale caller value.
+    submit_spec = build_submit_spec(
+        spec=spec.submit.model_copy(update={"run_id": run_id, "cmd_sha": cmd_sha})
+    )
+
+    # 5. write-run-sidecar: write the per-run sidecar so the #171 write-first
+    #    precondition is satisfied BEFORE submit-pipeline runs — the `resolved`
+    #    output is fully submit-ready. Same run_id/cmd_sha injection (after the
+    #    find-prior-run resume check cleared, so no sidecar is written for a
+    #    resume-or-escalate path).
+    sidecar = write_run_sidecar(
+        experiment_dir=experiment_dir,
+        spec=spec.sidecar.model_copy(update={"run_id": run_id, "cmd_sha": cmd_sha}),
+    )
 
     return ResolveSubmitInputsResult(
         stage_reached="resolved",
         needs_decision=False,
         reason=(
             "inputs resolved: tasks.py present, no live prior, submit-flow spec "
-            "built and validated — hand submit_spec to submit-pipeline / submit-flow."
+            "built + validated, and the per-run sidecar written (#171) — hand "
+            "submit_spec to submit-pipeline."
         ),
         run_id=run_id,
         cmd_sha=cmd_sha,
         submit_spec=submit_spec,
+        sidecar_path=sidecar.get("path"),
     )

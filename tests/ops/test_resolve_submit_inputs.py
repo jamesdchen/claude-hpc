@@ -14,6 +14,7 @@ from unittest import mock
 
 from hpc_agent._wire.actions.build_submit_spec import BuildSubmitSpecInput
 from hpc_agent._wire.actions.build_tasks_py import BuildTasksPyInput
+from hpc_agent._wire.actions.write_run_sidecar import WriteRunSidecarInput
 from hpc_agent._wire.workflows.resolve_submit_inputs import ResolveSubmitInputsSpec
 
 if TYPE_CHECKING:
@@ -35,6 +36,20 @@ def _submit_input() -> BuildSubmitSpecInput:
     )
 
 
+def _sidecar_input() -> WriteRunSidecarInput:
+    return WriteRunSidecarInput(
+        run_id="ridge-placeholder",  # overridden by compute-run-id inside the composite
+        cmd_sha="0" * 8,  # placeholder; overridden too
+        executor="python -m src.ridge --alpha $alpha",
+        result_dir_template="results/{run_id}",
+        task_count=4,
+    )
+
+
+def _sidecar_ret() -> dict[str, Any]:
+    return {"path": "/tmp/exp/.hpc/runs/ridge-abcd1234.json"}
+
+
 def _build_tasks_input() -> BuildTasksPyInput:
     return BuildTasksPyInput(
         axes=[{"name": "exp_alpha", "values": [0.1, 1.0]}],
@@ -46,6 +61,7 @@ def _spec(build_tasks: BuildTasksPyInput | None = None) -> ResolveSubmitInputsSp
     return ResolveSubmitInputsSpec(
         run_name="ridge",
         submit=_submit_input(),
+        sidecar=_sidecar_input(),
         build_tasks=build_tasks,
     )
 
@@ -91,6 +107,7 @@ def test_resolved_builds_submit_spec(tmp_path: Path) -> None:
         mock.patch(f"{_SEAM}.compute_run_id", return_value=_cr()),
         mock.patch(f"{_SEAM}.find_prior_run", return_value=_fp(found=False)) as fp,
         mock.patch(f"{_SEAM}.build_submit_spec", return_value=built) as bs,
+        mock.patch(f"{_SEAM}.write_run_sidecar", return_value=_sidecar_ret()) as ws,
         mock.patch(f"{_SEAM}.build_tasks_py") as bt,
     ):
         res = resolve_submit_inputs(tmp_path, spec=_spec())
@@ -100,9 +117,17 @@ def test_resolved_builds_submit_spec(tmp_path: Path) -> None:
     assert res.run_id == "ridge-abcd1234"
     assert res.cmd_sha == "a" * 64
     assert res.submit_spec == built
+    assert res.sidecar_path == "/tmp/exp/.hpc/runs/ridge-abcd1234.json"
     assert res.prior_run_id is None
     fp.assert_called_once()
     bs.assert_called_once()
+    ws.assert_called_once()  # per-run sidecar written on the resolved path (#171)
+    # compute-run-id values are injected into BOTH downstream inputs, overriding
+    # the placeholders the caller passed — so the built spec + sidecar match the
+    # reported run_id.
+    assert bs.call_args.kwargs["spec"].run_id == "ridge-abcd1234"
+    assert ws.call_args.kwargs["spec"].run_id == "ridge-abcd1234"
+    assert ws.call_args.kwargs["spec"].cmd_sha == "a" * 64
     bt.assert_not_called()  # tasks.py present → no scaffold
 
 
@@ -119,6 +144,7 @@ def test_terminal_failed_prior_is_not_live_proceeds_fresh(tmp_path: Path) -> Non
             return_value=_fp(found=True, status="failed", prior_run_id="ridge-dead0000"),
         ),
         mock.patch(f"{_SEAM}.build_submit_spec", return_value=built),
+        mock.patch(f"{_SEAM}.write_run_sidecar", return_value=_sidecar_ret()),
     ):
         res = resolve_submit_inputs(tmp_path, spec=_spec())
 
@@ -139,6 +165,7 @@ def test_live_prior_complete_escalates(tmp_path: Path) -> None:
             return_value=_fp(found=True, status="complete", prior_run_id="ridge-abcd1234"),
         ),
         mock.patch(f"{_SEAM}.build_submit_spec") as bs,
+        mock.patch(f"{_SEAM}.write_run_sidecar") as ws,
     ):
         res = resolve_submit_inputs(tmp_path, spec=_spec())
 
@@ -147,7 +174,9 @@ def test_live_prior_complete_escalates(tmp_path: Path) -> None:
     assert res.prior_run_id == "ridge-abcd1234"
     assert res.prior_status == "complete"
     assert res.submit_spec is None
+    assert res.sidecar_path is None
     bs.assert_not_called()  # stopped before building the spec
+    ws.assert_not_called()  # and before writing the sidecar
 
 
 def test_live_prior_in_flight_escalates(tmp_path: Path) -> None:
@@ -162,6 +191,7 @@ def test_live_prior_in_flight_escalates(tmp_path: Path) -> None:
             return_value=_fp(found=True, status="in_flight", prior_run_id="ridge-abcd1234"),
         ),
         mock.patch(f"{_SEAM}.build_submit_spec"),
+        mock.patch(f"{_SEAM}.write_run_sidecar"),
     ):
         res = resolve_submit_inputs(tmp_path, spec=_spec())
 
@@ -182,6 +212,7 @@ def test_orphan_prior_is_not_live_proceeds_fresh(tmp_path: Path) -> None:
             return_value=_fp(found=True, is_orphan=True, status="complete"),
         ),
         mock.patch(f"{_SEAM}.build_submit_spec", return_value={"ok": 1}),
+        mock.patch(f"{_SEAM}.write_run_sidecar", return_value=_sidecar_ret()),
     ):
         res = resolve_submit_inputs(tmp_path, spec=_spec())
 
@@ -198,6 +229,7 @@ def test_absent_tasks_no_scaffold_spec_escalates(tmp_path: Path) -> None:
         mock.patch(f"{_SEAM}.compute_run_id") as cr,
         mock.patch(f"{_SEAM}.find_prior_run") as fp,
         mock.patch(f"{_SEAM}.build_submit_spec") as bs,
+        mock.patch(f"{_SEAM}.write_run_sidecar") as ws,
         mock.patch(f"{_SEAM}.build_tasks_py") as bt,
     ):
         res = resolve_submit_inputs(tmp_path, spec=_spec(build_tasks=None))
@@ -206,10 +238,12 @@ def test_absent_tasks_no_scaffold_spec_escalates(tmp_path: Path) -> None:
     assert res.needs_decision is True
     assert res.run_id is None
     assert res.submit_spec is None
+    assert res.sidecar_path is None
     # Stopped at the escalation — none of the downstream atoms ran.
     cr.assert_not_called()
     fp.assert_not_called()
     bs.assert_not_called()
+    ws.assert_not_called()
     bt.assert_not_called()
 
 
@@ -225,6 +259,7 @@ def test_absent_tasks_with_scaffold_spec_builds_then_resolves(tmp_path: Path) ->
         mock.patch(f"{_SEAM}.compute_run_id", return_value=_cr()),
         mock.patch(f"{_SEAM}.find_prior_run", return_value=_fp(found=False)),
         mock.patch(f"{_SEAM}.build_submit_spec", return_value=built),
+        mock.patch(f"{_SEAM}.write_run_sidecar", return_value=_sidecar_ret()),
     ):
         res = resolve_submit_inputs(tmp_path, spec=_spec(build_tasks=_build_tasks_input()))
 

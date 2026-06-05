@@ -71,6 +71,19 @@
       "description": "The built + validated submit-flow spec (a submit_flow.input.json dict), ready to hand to submit-pipeline / submit-flow. Set only on stage_reached='resolved'.",
       "title": "Submit Spec"
     },
+    "sidecar_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Absolute path of the per-run sidecar written on the 'resolved' path (.hpc/runs/<run_id>.json) — the #171 write-first precondition is satisfied, so submit-pipeline can run directly. Set only on stage_reached='resolved'.",
+      "title": "Sidecar Path"
+    },
     "prior_run_id": {
       "anyOf": [
         {

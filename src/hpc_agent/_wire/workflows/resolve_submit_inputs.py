@@ -13,7 +13,11 @@ outcome, so the agent stops hand-walking (and hand-branching) the four verbs.
 Composition (all on the laptop, no cluster / SSH):
 
     compute-run-id  →  find-prior-run  →  (build-tasks-py if tasks.py absent)
-                    →  build-submit-spec
+                    →  build-submit-spec  →  write-run-sidecar
+
+The ``resolved`` terminal is fully submit-ready — the submit-flow spec is built
+AND the per-run sidecar is written (the #171 write-first precondition) — so the
+caller hands ``submit_spec`` straight to ``submit-pipeline``.
 
 The genuine JUDGEMENT that precedes this spine stays UPSTREAM as
 escalations — parsing the user's natural-language intent (Step 2),
@@ -43,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from hpc_agent._wire.actions.build_submit_spec import BuildSubmitSpecInput
 from hpc_agent._wire.actions.build_tasks_py import BuildTasksPyInput
+from hpc_agent._wire.actions.write_run_sidecar import WriteRunSidecarInput
 
 
 class ResolveSubmitInputsSpec(BaseModel):
@@ -69,10 +74,24 @@ class ResolveSubmitInputsSpec(BaseModel):
     submit: BuildSubmitSpecInput = Field(
         description=(
             "The resolved build-submit-spec input (profile / cluster / "
-            "ssh_target / remote_path / run_id / total_tasks / backend / "
-            "job_env knobs). resolve-submit-inputs feeds this to "
-            "build-submit-spec to assemble the validated submit-flow spec "
-            "after the run_id / prior-run / tasks.py branches clear."
+            "ssh_target / remote_path / total_tasks / backend / job_env knobs). "
+            "resolve-submit-inputs feeds this to build-submit-spec to assemble "
+            "the validated submit-flow spec after the run_id / prior-run / "
+            "tasks.py branches clear. Its ``run_id`` / ``cmd_sha`` are "
+            "PLACEHOLDERS — the composite overrides them with the values "
+            "compute-run-id derives, so the built spec always matches the "
+            "reported run_id."
+        ),
+    )
+    sidecar: WriteRunSidecarInput = Field(
+        description=(
+            "The resolved write-run-sidecar input (the v2 config snapshot: the "
+            "REAL per-task ``executor``, result_dir_template, task_count, "
+            "resources, env, constraints, runtime). resolve-submit-inputs writes "
+            "the per-run sidecar from this on the ``resolved`` path, so the "
+            "output is fully submit-ready (the #171 write-first precondition is "
+            "already satisfied before submit-pipeline runs). Its ``run_id`` / "
+            "``cmd_sha`` are PLACEHOLDERS overridden with compute-run-id's values."
         ),
     )
     build_tasks: BuildTasksPyInput | None = Field(
@@ -125,6 +144,15 @@ class ResolveSubmitInputsResult(BaseModel):
         description=(
             "The built + validated submit-flow spec (a submit_flow.input.json "
             "dict), ready to hand to submit-pipeline / submit-flow. Set only on "
+            "stage_reached='resolved'."
+        ),
+    )
+    sidecar_path: str | None = Field(
+        default=None,
+        description=(
+            "Absolute path of the per-run sidecar written on the 'resolved' path "
+            "(.hpc/runs/<run_id>.json) — the #171 write-first precondition is "
+            "satisfied, so submit-pipeline can run directly. Set only on "
             "stage_reached='resolved'."
         ),
     )
