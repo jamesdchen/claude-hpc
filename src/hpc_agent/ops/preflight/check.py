@@ -12,6 +12,16 @@ File transfer is satisfied by ``rsync`` *or* the ``scp``+``tar`` pair
 without WSL/MSYS rsync), so a missing ``rsync`` alone does not fail
 preflight.
 
+When ``--cluster`` is paired with ``--runtime uv``, preflight also runs
+the cluster-side ``command -v uv`` probe by calling into submit-flow's
+existing :func:`hpc_agent.ops.submit_flow._preflight_runtime_check`
+(``module load … && source $CONDA_SOURCE && conda activate $CONDA_ENV &&
+command -v uv`` over SSH). This closes #275 Fix 1: that uv guard used to
+live ONLY inside submit-flow, so the worker's Step 6b ``check-preflight
+--cluster`` call could not reach it — now there is one implementation,
+reachable from both. The probe is added only when ``runtime == "uv"``;
+callers passing just ``--cluster`` are byte-for-byte unaffected.
+
 Also exposes :func:`write_preflight_marker`, the one-line helper that
 writes the per-cluster 24h cache marker consumed by ``/submit-hpc``'s
 Step 6b gate. Called by ``hpc-agent setup --cluster <name>`` after a
@@ -28,6 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import primitive
 from hpc_agent.cli._dispatch import CliArg, CliShape
 from hpc_agent.infra.clusters import load_clusters_config
@@ -78,6 +89,35 @@ def _placeholder_fields(entry: dict[str, Any]) -> list[str]:
                     "ssh_argv / multiplex / crypto path."
                 ),
             ),
+            CliArg(
+                "--runtime",
+                type=str,
+                default=None,
+                help=(
+                    "Optional runtime selector. When ``uv`` (and ``--cluster`` "
+                    "names a reachable host), also runs the cluster-side "
+                    "``command -v uv`` probe via submit-flow's "
+                    "``_preflight_runtime_check`` (#275 Fix 1)."
+                ),
+            ),
+            CliArg(
+                "--modules",
+                type=str,
+                default=None,
+                help="Space-separated module names for the uv probe's `module load`.",
+            ),
+            CliArg(
+                "--conda-source",
+                type=str,
+                default=None,
+                help="Path to `source` (e.g. conda.sh) before activation in the uv probe.",
+            ),
+            CliArg(
+                "--conda-env",
+                type=str,
+                default=None,
+                help="Conda env to `conda activate` before the uv probe's `command -v uv`.",
+            ),
         ),
         # Conditional: only fires when ``--cluster`` is supplied. The
         # contract is conservative — declare requires_ssh so the
@@ -87,7 +127,14 @@ def _placeholder_fields(entry: dict[str, Any]) -> list[str]:
     ),
     agent_facing=True,
 )
-def check_preflight(*, cluster: str | None = None) -> dict[str, Any]:
+def check_preflight(
+    *,
+    cluster: str | None = None,
+    runtime: str | None = None,
+    modules: str | None = None,
+    conda_source: str | None = None,
+    conda_env: str | None = None,
+) -> dict[str, Any]:
     """Run all preflight checks; return a dict with ``all_ok`` and ``checks``.
 
     *cluster*: optional cluster name; when supplied, adds the
@@ -99,6 +146,20 @@ def check_preflight(*, cluster: str | None = None) -> dict[str, Any]:
     surfaced the inert-guard mismatch). When omitted, all three are
     skipped. The SSH round-trip is skipped when the TCP probe fails (no
     point burning the 5s ssh timeout on an unreachable host).
+
+    *runtime* / *modules* / *conda_source* / *conda_env*: optional uv
+    probe. When *runtime* is ``"uv"`` AND the cluster is TCP-reachable,
+    preflight additionally runs the cluster-side ``command -v uv`` check
+    by calling submit-flow's existing
+    :func:`hpc_agent.ops.submit_flow._preflight_runtime_check` — a single
+    implementation shared with submit-flow rather than a second copy.
+    This closes #275 Fix 1: the uv guard, which used to live only inside
+    submit-flow, is now reachable from the worker's Step 6b
+    ``check-preflight --cluster`` call. A pass adds a passing
+    ``runtime_uv_on_path`` check; a missing-uv :class:`errors.SpecInvalid`
+    adds a failing one. When *runtime* is not ``"uv"`` (or no cluster is
+    given) NO ``runtime_uv_on_path`` check is added — existing
+    ``--cluster``-only callers are unaffected.
 
     Returns ``{"all_ok": bool, "checks": list[dict]}``. The CLI adapter
     maps ``all_ok=False`` to the cluster-error exit code.
@@ -292,6 +353,37 @@ def check_preflight(*, cluster: str | None = None) -> dict[str, Any]:
                                 f"{host} ssh round-trip raised: {exc}",
                             )
                         )
+
+                    # uv guard (#275 Fix 1): when runtime=uv, run the SAME
+                    # cluster-side ``command -v uv`` probe submit-flow runs, so
+                    # it's reachable from check-preflight, not only from inside
+                    # submit-flow. ONE implementation, in ``infra.uv_preflight``
+                    # — ``ops/preflight`` may not import ``ops/submit_flow`` (the
+                    # subject-import boundary), so the shared probe lives in
+                    # infra. Only fires for runtime=uv; ``--cluster``-only
+                    # callers add no check.
+                    if runtime == "uv":
+                        from hpc_agent.infra.uv_preflight import (
+                            preflight_runtime_check as _preflight_runtime_check,
+                        )
+
+                        job_env = {
+                            "HPC_RUNTIME": "uv",
+                            "MODULES": modules or "",
+                            "CONDA_SOURCE": conda_source or "",
+                            "CONDA_ENV": conda_env or "",
+                        }
+                        try:
+                            _preflight_runtime_check(host, job_env=job_env, skip=False)
+                            checks.append(
+                                _check(
+                                    "runtime_uv_on_path",
+                                    True,
+                                    "uv on PATH after cluster env activation",
+                                )
+                            )
+                        except errors.SpecInvalid as exc:
+                            checks.append(_check("runtime_uv_on_path", False, str(exc)[:300]))
 
             # Reject un-customized placeholders: a clusters.yaml entry still
             # carrying <your_user> / <your_scratch> / <your_env> would pass

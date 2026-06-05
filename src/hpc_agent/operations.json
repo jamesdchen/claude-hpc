@@ -703,6 +703,19 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent prepare-followup-specs --experiment-dir <experiment_dir> --run-id <run_id> [--cmd-sha <cmd_sha>] [--profile <profile>]",
+    "idempotent": true,
+    "input_schema": "prepare_followup_specs.input.json",
+    "name": "prepare-followup-specs",
+    "output_schema": "prepare_followup_specs.output.json",
+    "python": "hpc_agent.ops.prepare_followup_specs.prepare_followup_specs",
+    "side_effects": [
+      "writes-followup-specs"
+    ],
+    "verb": "scaffold"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent setup [--dry-run] [--claude-dir <claude_dir>] [--cluster <cluster>] [--experiment-dir <experiment_dir>] [--install-cron]",
     "idempotent": true,
     "input_schema": null,
@@ -742,7 +755,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent preflight [--cluster <cluster>]",
+    "cli": "hpc-agent preflight [--cluster <cluster>] [--runtime <runtime>] [--modules <modules>] [--conda-source <conda_source>] [--conda-env <conda_env>]",
     "idempotent": true,
     "input_schema": null,
     "name": "check-preflight",
@@ -786,6 +799,17 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent prepare-phase2-spec --spec <path>",
+    "idempotent": true,
+    "input_schema": null,
+    "name": "prepare-phase2-spec",
+    "output_schema": "prepare_phase2_spec.output.json",
+    "python": "hpc_agent.ops.prepare_phase2_spec.prepare_phase2_spec",
+    "side_effects": [],
+    "verb": "validate"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent smoke-test-executor --module-path <module_path> [--output-file <output_file>]",
     "idempotent": true,
     "input_schema": "smoke_test_executor.input.json",
@@ -811,7 +835,7 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent submit-preflight --experiment-dir <experiment_dir> [--cluster <cluster>]",
+    "cli": "hpc-agent submit-preflight --experiment-dir <experiment_dir> [--cluster <cluster>] [--profile <profile>] [--cmd-sha <cmd_sha>] [--walltime-sec <walltime_sec>] [--gpu-type <gpu_type>] [--safety-mult <safety_mult>] [--partition <partition>] [--user-preferred-partition <user_preferred_partition>]",
     "idempotent": true,
     "input_schema": "submit_preflight.input.json",
     "name": "submit-preflight",

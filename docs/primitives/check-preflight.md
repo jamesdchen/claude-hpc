@@ -6,7 +6,8 @@ idempotent: true
 idempotency_key: none
 error_codes: []
 backed_by:
-  cli: hpc-agent preflight [--cluster <cluster>]
+  cli: hpc-agent preflight [--cluster <cluster>] [--runtime <runtime>] [--modules
+    <modules>] [--conda-source <conda_source>] [--conda-env <conda_env>]
   python: hpc_agent.ops.preflight.check.check_preflight
 exit_codes:
 - 0: all checks passed

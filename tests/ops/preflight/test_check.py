@@ -338,3 +338,89 @@ def test_preflight_skips_ssh_echo_when_tcp_fails(monkeypatch: pytest.MonkeyPatch
     assert "cluster_ssh_echo" not in checks  # skipped on tcp fail
     ssh_mock.assert_not_called()
     assert result["all_ok"] is False
+
+
+# ─── cluster-side uv probe reachable from check-preflight (issue #275 Fix 1) ──
+#
+# The uv guard (``command -v uv`` after cluster env activation) used to live
+# only inside submit-flow's ``_preflight_runtime_check``. These pin that it is
+# now reachable from ``check-preflight --cluster --runtime uv`` — calling the
+# SAME implementation, which lives in ``infra.uv_preflight`` (so both
+# ``ops/preflight`` and ``ops/submit_flow`` call it without a cross-subject
+# import). ``check_preflight`` imports it lazily, so we patch it at its
+# definition site, ``hpc_agent.infra.uv_preflight.preflight_runtime_check``.
+
+
+def test_preflight_uv_probe_passes_when_uv_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reachable cluster + runtime=uv + uv present → passing runtime_uv_on_path."""
+    monkeypatch.setattr(
+        preflight,
+        "load_clusters_config",
+        lambda: {"hoffman2": {"host": "h", "user": "jamesdc1", "conda_envs": ["hpc-pi"]}},
+    )
+    # uv present: the lazily-imported runtime check returns None (no raise).
+    monkeypatch.setattr(
+        "hpc_agent.infra.uv_preflight.preflight_runtime_check", lambda *a, **k: None
+    )
+    with (
+        mock.patch.object(preflight.shutil, "which", _which_for({"ssh", "rsync"})),
+        mock.patch.object(preflight.socket, "create_connection", return_value=_tcp_ok()),
+        mock.patch("hpc_agent.infra.remote.ssh_run", return_value=_ssh_echo_ok()),
+    ):
+        result = preflight.check_preflight(cluster="hoffman2", runtime="uv")
+    checks = {c["name"]: c for c in result["checks"]}
+    assert checks["runtime_uv_on_path"]["ok"] is True
+    assert "uv on PATH" in checks["runtime_uv_on_path"]["detail"]
+
+
+def test_preflight_uv_probe_fails_when_uv_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reachable cluster + runtime=uv + uv missing → failing check, all_ok False."""
+    monkeypatch.setattr(
+        preflight,
+        "load_clusters_config",
+        lambda: {"hoffman2": {"host": "h", "user": "jamesdc1", "conda_envs": ["hpc-pi"]}},
+    )
+
+    def _raise(*_a: Any, **_k: Any) -> None:
+        raise preflight.errors.SpecInvalid("preflight: runtime=uv but `uv` not on PATH ...")
+
+    monkeypatch.setattr("hpc_agent.infra.uv_preflight.preflight_runtime_check", _raise)
+    with (
+        mock.patch.object(preflight.shutil, "which", _which_for({"ssh", "rsync"})),
+        mock.patch.object(preflight.socket, "create_connection", return_value=_tcp_ok()),
+        mock.patch("hpc_agent.infra.remote.ssh_run", return_value=_ssh_echo_ok()),
+    ):
+        result = preflight.check_preflight(cluster="hoffman2", runtime="uv")
+    checks = {c["name"]: c for c in result["checks"]}
+    assert checks["runtime_uv_on_path"]["ok"] is False
+    assert "uv` not on PATH" in checks["runtime_uv_on_path"]["detail"]
+    assert result["all_ok"] is False
+
+
+def test_preflight_no_uv_probe_when_runtime_not_uv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reachable cluster + runtime None/python → NO runtime_uv_on_path check.
+
+    Existing ``--cluster``-only callers must be byte-for-byte unaffected: the
+    uv probe is added only for runtime=uv, and ``_preflight_runtime_check`` is
+    never imported/called otherwise.
+    """
+    monkeypatch.setattr(
+        preflight,
+        "load_clusters_config",
+        lambda: {"hoffman2": {"host": "h", "user": "jamesdc1", "conda_envs": ["hpc-pi"]}},
+    )
+    # If the probe were (wrongly) invoked, this would raise and fail the test.
+    runtime_probe = mock.MagicMock(side_effect=AssertionError("uv probe must not run"))
+    monkeypatch.setattr("hpc_agent.ops.submit_flow._preflight_runtime_check", runtime_probe)
+    for rt in (None, "python"):
+        with (
+            mock.patch.object(preflight.shutil, "which", _which_for({"ssh", "rsync"})),
+            mock.patch.object(preflight.socket, "create_connection", return_value=_tcp_ok()),
+            mock.patch("hpc_agent.infra.remote.ssh_run", return_value=_ssh_echo_ok()),
+        ):
+            result = preflight.check_preflight(cluster="hoffman2", runtime=rt)
+        checks = {c["name"]: c for c in result["checks"]}
+        assert "runtime_uv_on_path" not in checks
+        # The cluster path otherwise still ran (echo probe present, customized).
+        assert checks["cluster_ssh_echo"]["ok"] is True
+    runtime_probe.assert_not_called()

@@ -231,13 +231,13 @@ class SubmitFlowSpec(BaseModel):
         default=None,
         description="Override DEFAULT_RSYNC_EXCLUDES. Null uses defaults.",
     )
-    skip_preflight: bool = Field(
-        default=False,
-        description=(
-            "Skip the pre-flight check (caller has just run it; "
-            "saves one SSH probe). Use with caution."
-        ),
-    )
+    # #275 Fix 2: ``skip_preflight`` is intentionally NOT a spec field. The
+    # documented submit path used to set it ``true`` (taught by submit.md),
+    # which made the cluster-side ``command -v uv`` guard unreachable — a
+    # ``runtime=uv`` job with no uv sailed into qsub. Preflight is now
+    # operator-gated only, via ``HPC_AGENT_SKIP_PREFLIGHT`` (the #155 ``--inline``
+    # shape: agent-supplied bypass refused, operator env var honored), so any
+    # preflight added to submit-flow stays un-silenceable by an agent.
     skip_rsync_deploy: bool = Field(
         default=False,
         description=(

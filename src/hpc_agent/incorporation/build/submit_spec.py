@@ -117,11 +117,11 @@ def build_submit_spec(*, spec: BuildSubmitSpecInput) -> dict[str, Any]:
         Closed-loop campaign tag. Stamped on the run sidecar AND
         forwarded to the cluster as ``HPC_CAMPAIGN_ID`` so the user's
         tasks.py can read it at module-load.
-    canary, partial_ok, skip_preflight:
+    canary, partial_ok:
         Boolean knobs threaded through to the spec verbatim.
-        ``skip_preflight`` defaults to True because Step 6b in the
-        slash command runs the preflight gate immediately before this
-        spec is built; the duplicate ssh probe is wasteful.
+        (``skip_preflight`` was removed in #275 Fix 2 — preflight is
+        operator-gated via ``HPC_AGENT_SKIP_PREFLIGHT``, not a spec field
+        an agent can set to silence the cluster-side ``command -v uv`` guard.)
     pass_env_keys:
         SGE-only — which job_env keys to ``qsub -v``. None = forward
         everything in job_env. SLURM forwards everything via
@@ -159,32 +159,37 @@ def build_submit_spec(*, spec: BuildSubmitSpecInput) -> dict[str, Any]:
     is_gpu = bool(spec.is_gpu)
     job_name = spec.job_name
     script = spec.script
-    modules = spec.modules or ""
-    conda_source = spec.conda_source or ""
-    conda_env = spec.conda_env or ""
-    # At least ONE env-activation mechanism must be declared. The preamble
-    # has no defaults — when all three are empty it skips `module load`,
-    # `source $CONDA_SOURCE`, and `conda activate $CONDA_ENV` entirely, and
-    # the job runs with whatever python the SSH login shell happened to
-    # inherit. That's the empirical failure when clusters.yaml hasn't been
-    # onboarded: the cluster runs the wrong (or no) python, the canary
-    # crashes, and the bad sidecar poisons later submit dedup. Refuse at
-    # the boundary instead of letting it through to qsub.
-    if not (modules or conda_source or conda_env):
-        raise errors.SpecInvalid(
-            "submission has no env-activation declared: modules, conda_source, "
-            "and conda_env are all empty. The cluster-side preamble would skip "
-            "every env-setup step and run whatever python the SSH login shell "
-            "happens to inherit, which usually fails. Populate at least one of "
-            "these in clusters.yaml (commonly `conda_source` + `conda_envs`, "
-            "or `modules`) and re-run `hpc-agent setup --cluster <name>` to "
-            "regenerate the resolved spec."
-        )
+    # Env-activation resolved as ONE coherent unit (#281), not three
+    # independent strings the caller threads. ``resolve_activation`` back-fills
+    # ``conda_source`` from clusters.yaml when a ``conda_env`` is selected but
+    # the source was dropped — the 2026-06-05 Hoffman2 incident, where the
+    # agent lost ``conda_source`` between ``clusters describe`` and here and
+    # the preamble then crashed every task at ``conda: command not found``. The
+    # resulting ``Activation`` enforces the coherence invariant at construction:
+    # the incoherent partial state (conda_env set, no source AND no
+    # conda-loading module) is unrepresentable — it raises ``SpecInvalid`` at
+    # this boundary instead of sailing through to a doomed qsub. The old inline
+    # all-empty + per-pair guards now live inside ``Activation.__post_init__``.
+    from hpc_agent.infra.clusters import load_clusters_config, resolve_activation
+
+    _activation = resolve_activation(
+        cluster_cfg=load_clusters_config().get(cluster) or {},
+        modules=spec.modules,
+        conda_source=spec.conda_source,
+        conda_env=spec.conda_env,
+    )
+    modules = _activation.modules
+    conda_source = _activation.conda_source
+    conda_env = _activation.conda_env
     runtime = spec.runtime
     campaign_id = spec.campaign_id or ""
     canary = bool(spec.canary) if spec.canary is not None else True
     partial_ok = bool(spec.partial_ok) if spec.partial_ok is not None else False
-    skip_preflight = bool(spec.skip_preflight) if spec.skip_preflight is not None else True
+    # #275 Fix 2: skip_preflight is no longer emitted onto the spec. It used to
+    # default True here — so even an agent that merely OMITTED the field bypassed
+    # the uv guard (the wider hole #281 flagged). Preflight is operator-gated now
+    # (HPC_AGENT_SKIP_PREFLIGHT), and the #255 TTL cache absorbs the duplicate
+    # probe Step 6b's run would have cost.
     invalidate_on_code_change = (
         bool(spec.invalidate_on_code_change)
         if spec.invalidate_on_code_change is not None
@@ -293,7 +298,6 @@ def build_submit_spec(*, spec: BuildSubmitSpecInput) -> dict[str, Any]:
         "job_env": job_env,
         "canary": bool(canary),
         "partial_ok": bool(partial_ok),
-        "skip_preflight": bool(skip_preflight),
     }
     if spec.result_dir_template is not None:
         out["result_dir_template"] = spec.result_dir_template

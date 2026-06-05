@@ -38,10 +38,9 @@ class SubmitFlowBatchSpec(BaseModel):
         default=None,
         description="Optional rsync exclude patterns applied once across the bundle.",
     )
-    skip_preflight: bool | None = Field(
-        default=None,
-        description="Skip the single ssh probe; default false.",
-    )
+    # #275 Fix 2: ``skip_preflight`` is no longer a spec field — an agent can't
+    # silence preflight by authoring it. The bundle's preflight is operator-gated
+    # via the ``HPC_AGENT_SKIP_PREFLIGHT`` env var (read in ``submit_flow_batch``).
 
 
 class _SubmitFlowResultEntry(BaseModel):

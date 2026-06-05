@@ -56,7 +56,8 @@ class BuildSubmitSpecInput(BaseModel):
     cpus: int | None = Field(default=None, ge=1)
     canary: bool | None = None
     partial_ok: bool | None = None
-    skip_preflight: bool | None = None
+    # #275 Fix 2: skip_preflight removed — preflight is operator-gated via
+    # HPC_AGENT_SKIP_PREFLIGHT, never a field the agent threads onto the spec.
     # Opt-in code-iteration safety (#207). Threaded verbatim onto the
     # emitted submit_flow spec so an executor-body edit with unchanged
     # swept params forces a fresh run instead of a stale cmd_sha replay.

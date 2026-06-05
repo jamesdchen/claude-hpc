@@ -94,6 +94,7 @@ _SPEC_VERBS: frozenset[str] = frozenset(
         "decide-monitor-arm",
         "interview",
         "monitor-flow",
+        "prepare-phase2-spec",
         "recommend-partition",
         "resubmit",
         "submit",

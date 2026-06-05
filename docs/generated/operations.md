@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**81 operations total**: 74 primitive atoms + 7 workflow atoms.
+**83 operations total**: 76 primitive atoms + 7 workflow atoms.
 
 ## How to read this page
 
@@ -61,20 +61,21 @@ Read-only, no side effects. Freely composable; cacheable.
 | [`verify-aggregation-complete`](../primitives/verify-aggregation-complete.md) | ✓ | _none_ | `hpc-agent verify-aggregation-complete [--experiment-dir <dir>] --run-id <run_id> [--combiner-dir <combiner_dir_local>] [--results-dir <results_dir_local>]` | `hpc_agent.ops.aggregate.invariants.verify_aggregation_complete` | — | `hpc_agent/schemas/verify_aggregation_complete.output.json` |
 | [`verify-submitted`](../primitives/verify-submitted.md) | ✓ | ssh | `hpc-agent verify-submitted [--experiment-dir <dir>] --run-id <run_id>` | `hpc_agent.ops.verify_submitted.verify_submitted` | — | `hpc_agent/schemas/verify_submitted.output.json` |
 
-## `validate` (13)
+## `validate` (14)
 
 Read + binary health check. Same composability as `query`.
 
 | Operation | Idempotent | Side effects | CLI | Python | Input schema | Output schema |
 |---|---|---|---|---|---|---|
 | [`aggregate-preflight`](../primitives/aggregate-preflight.md) | ✓ | _none_ | `hpc-agent aggregate-preflight --experiment-dir <experiment_dir> [--reconcile-scheduler <reconcile_scheduler>]` | `hpc_agent.ops.aggregate_preflight.aggregate_preflight` | `hpc_agent/schemas/aggregate_preflight.input.json` | `hpc_agent/schemas/aggregate_preflight.output.json` |
-| [`check-preflight`](../primitives/check-preflight.md) | ✓ | _none_ | `hpc-agent preflight [--cluster <cluster>]` | `hpc_agent.ops.preflight.check.check_preflight` | — | `hpc_agent/schemas/preflight.output.json` |
+| [`check-preflight`](../primitives/check-preflight.md) | ✓ | _none_ | `hpc-agent preflight [--cluster <cluster>] [--runtime <runtime>] [--modules <modules>] [--conda-source <conda_source>] [--conda-env <conda_env>]` | `hpc_agent.ops.preflight.check.check_preflight` | — | `hpc_agent/schemas/preflight.output.json` |
 | [`check-task-generator-mismatch`](../primitives/check-task-generator-mismatch.md) | ✓ | _none_ | `hpc-agent check-task-generator-mismatch --caller-task-generator <caller_task_generator> [--cached-task-generator <cached_task_generator>]` | `hpc_agent.ops.check_task_generator_mismatch.check_task_generator_mismatch` | `hpc_agent/schemas/check_task_generator_mismatch.input.json` | `hpc_agent/schemas/check_task_generator_mismatch.output.json` |
 | [`classify-axis-preflight`](../primitives/classify-axis-preflight.md) | ✓ | _none_ | `hpc-agent classify-axis-preflight --experiment-dir <experiment_dir> [--run-name <run_name>] [--run-signature-sha <run_signature_sha>] [--root <root>] [--task-kind <task_kind>] [--data-axis-supplied]` | `hpc_agent.ops.classify_axis_preflight.classify_axis_preflight` | `hpc_agent/schemas/classify_axis_preflight.input.json` | `hpc_agent/schemas/classify_axis_preflight.output.json` |
 | [`dry-run-local`](../primitives/dry-run-local.md) | ✓ | _none_ | `_(Python-only)_` | `hpc_agent.ops.validate.dry_run_local.dry_run_local` | `hpc_agent/schemas/dry_run_local.input.json` | `hpc_agent/schemas/dry_run_local.output.json` |
+| [`prepare-phase2-spec`](../primitives/prepare-phase2-spec.md) | ✓ | _none_ | `hpc-agent prepare-phase2-spec --spec <path>` | `hpc_agent.ops.prepare_phase2_spec.prepare_phase2_spec` | — | `hpc_agent/schemas/prepare_phase2_spec.output.json` |
 | [`smoke-test-executor`](../primitives/smoke-test-executor.md) | ✓ | filesystem; runs | `hpc-agent smoke-test-executor --module-path <module_path> [--output-file <output_file>]` | `hpc_agent.ops.smoke_test_executor.smoke_test_executor` | `hpc_agent/schemas/smoke_test_executor.input.json` | `hpc_agent/schemas/smoke_test_executor.output.json` |
 | [`status-preflight`](../primitives/status-preflight.md) | ✓ | _none_ | `hpc-agent status-preflight --experiment-dir <experiment_dir>` | `hpc_agent.ops.status_preflight.status_preflight` | `hpc_agent/schemas/status_preflight.input.json` | `hpc_agent/schemas/status_preflight.output.json` |
-| [`submit-preflight`](../primitives/submit-preflight.md) | ✓ | _none_ | `hpc-agent submit-preflight --experiment-dir <experiment_dir> [--cluster <cluster>]` | `hpc_agent.ops.submit_preflight.submit_preflight` | `hpc_agent/schemas/submit_preflight.input.json` | `hpc_agent/schemas/submit_preflight.output.json` |
+| [`submit-preflight`](../primitives/submit-preflight.md) | ✓ | _none_ | `hpc-agent submit-preflight --experiment-dir <experiment_dir> [--cluster <cluster>] [--profile <profile>] [--cmd-sha <cmd_sha>] [--walltime-sec <walltime_sec>] [--gpu-type <gpu_type>] [--safety-mult <safety_mult>] [--partition <partition>] [--user-preferred-partition <user_preferred_partition>]` | `hpc_agent.ops.submit_preflight.submit_preflight` | `hpc_agent/schemas/submit_preflight.input.json` | `hpc_agent/schemas/submit_preflight.output.json` |
 | [`validate-executor-signatures`](../primitives/validate-executor-signatures.md) | ✓ | _none_ | `_(Python-only)_` | `hpc_agent.ops.validate.executor_signatures.validate_executor_signatures` | `hpc_agent/schemas/validate_executor_signatures.input.json` | `hpc_agent/schemas/validate_executor_signatures.output.json` |
 | [`validate-input-dataset`](../primitives/validate-input-dataset.md) | ✓ | _none_ | `_(Python-only)_` | `hpc_agent.ops.validate.input_dataset.validate_input_dataset` | `hpc_agent/schemas/validate_input_dataset.input.json` | `hpc_agent/schemas/validate_input_dataset.output.json` |
 | [`validate-self-qos-limit`](../primitives/validate-self-qos-limit.md) | ✓ | _none_ | `_(Python-only)_` | `hpc_agent.ops.validate.self_qos_limit.validate_self_qos_limit` | `hpc_agent/schemas/validate_self_qos_limit.input.json` | `hpc_agent/schemas/validate_self_qos_limit.output.json` |
@@ -105,7 +106,7 @@ Records a new submission (sidecar write + journal entry).
 |---|---|---|---|---|---|---|
 | [`submit-spec`](../primitives/submit-spec.md) | ✓ | scheduler-submit; writes-journal | `hpc-agent submit --spec <path> [--experiment-dir <dir>] [--dry-run]` | `hpc_agent.ops.submit.runner.submit_and_record` | `hpc_agent/schemas/submit.input.json` | `hpc_agent/schemas/submit.output.json` |
 
-## `scaffold` (11)
+## `scaffold` (12)
 
 Creates new files (e.g. starter executor templates).
 
@@ -121,6 +122,7 @@ Creates new files (e.g. starter executor templates).
 | [`export-package`](../primitives/export-package.md) | ✓ | writes-sidecar | `hpc-agent export-package [--experiment-dir <dir>] [--force]` | `hpc_agent.incorporation.export_package.export_package` | `hpc_agent/schemas/export_package.input.json` | — |
 | [`install-commands`](../primitives/install-commands.md) | ✓ | filesystem | `hpc-agent install-commands [--dry-run] [--claude-dir <claude_dir>]` | `hpc_agent.cli.setup.install_commands` | — | — |
 | [`interview`](../primitives/interview.md) | ✓ | file_write | `hpc-agent interview --spec <path> --campaign-dir <campaign_dir>` | `hpc_agent.ops.memory.interview.record_interview` | `hpc_agent/schemas/interview.input.json` | `hpc_agent/schemas/interview.output.json` |
+| [`prepare-followup-specs`](../primitives/prepare-followup-specs.md) | ✓ | writes-followup-specs | `hpc-agent prepare-followup-specs --experiment-dir <experiment_dir> --run-id <run_id> [--cmd-sha <cmd_sha>] [--profile <profile>]` | `hpc_agent.ops.prepare_followup_specs.prepare_followup_specs` | `hpc_agent/schemas/prepare_followup_specs.input.json` | `hpc_agent/schemas/prepare_followup_specs.output.json` |
 | [`setup`](../primitives/setup.md) | ✓ | filesystem; ssh | `hpc-agent setup [--dry-run] [--claude-dir <claude_dir>] [--cluster <cluster>] [--experiment-dir <experiment_dir>] [--install-cron]` | `hpc_agent.cli.setup.setup` | — | — |
 
 ## `workflow` (7)
