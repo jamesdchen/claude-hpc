@@ -98,12 +98,14 @@ _SPEC_VERBS: frozenset[str] = frozenset(
         # probe; it has no own input schema (reuses submit_flow.input.json), so
         # it appears here but not in the schema-file-parametrized remediation tests.
         "preflight",
+        "prepare-phase2-spec",
         "recommend-partition",
         "resubmit",
         "submit",
         "submit-and-verify",
         "submit-flow",
         "submit-flow-batch",
+        "submit-pipeline",
         "summarize-submit-plan",
         "validate-campaign",
         "write-run-sidecar",
@@ -197,6 +199,9 @@ XFAIL_NO_FAILURE_FEATURES: set[str] = {
     "summarize-submit-plan",
     "find-prior-run",
     "write-run-sidecar",
+    # submit-pipeline is a new spec-verb; like the other submit-* workflows it
+    # does not yet thread failure_features into its spec_invalid envelope (WS3).
+    "submit-pipeline",
 }
 
 

@@ -125,7 +125,7 @@ If `discover_executors` returns empty, scaffolding requires an interactive sub-i
 
 The caller has already parsed the user's natural-language request into a list of `(executor_id, axis_shape)` tuples; the result arrives via the invocation `fields`. Flags `--no-canary` and `campaign_id=<slug>` thread through verbatim.
 
-For multi-executor submissions sharing `(ssh_target, remote_path)`, build a **batch spec** — `{"specs": [<per-spec>...], "rsync_excludes": [...]}`; `submit-flow` auto-routes it to the batched path (one rsync + one deploy + N qsubs). Heterogeneous batches raise `spec_invalid`. Why batch rather than N parallel submits: see [submit-flow.md](../../docs/primitives/submit-flow.md).
+For multi-executor submissions sharing `(ssh_target, remote_path)`, build a **batch spec** — `{"specs": [<per-spec>...], "rsync_excludes": [...]}`; `submit-flow` auto-routes it to the batched path (one rsync + one deploy + N qsubs). Heterogeneous batches raise `spec_invalid`. Why batch rather than N parallel submits: see [submit-flow.md](../../docs/primitives/submit-flow.md). (There is no `skip_preflight` key — preflight is operator-gated via `HPC_AGENT_SKIP_PREFLIGHT`, #275.)
 
 ## Step 3: Consume the recorded parallelization verdict (never infer it)
 
@@ -260,54 +260,43 @@ Branch on `data.overall`:
 - `warn` → record warnings in `anomalies`; proceed.
 - `fail` → do NOT proceed. Record a `validate_campaign` decision with outcome `fail`, put the `error`-severity findings (`code`/`message`/`suggested_fix` verbatim) in `anomalies`, and stop. **No `--force` flag by design** — the caller edits `.hpc/playbook.yaml` if a rule is wrong, then re-invokes.
 
-## Step 7-8: Invoke `submit-flow` (two-phase canary gate)
+## Step 7-8: Invoke `submit-and-verify` (the canary gate, one envelope)
 
-`submit-flow` runs preflight + rsync + deploy + qsub + journal-record. To make canary **success** gate the main array (#160), drive it in TWO phases — the main array NEVER launches until the canary is verified. Spec shape (matches `schemas/submit_flow.input.json`):
+The canary is a GATE (#160): submit the 1-task canary, verify it lands and produces output, and launch the main array ONLY on success — so a broken dispatch never reaches the full run. **Do this with ONE call to [submit-and-verify](../../docs/primitives/submit-and-verify.md), not a hand-driven loop.** It chains `submit-flow` (Phase 1 canary) → `verify-canary` (the gate) → `submit-flow` (Phase 2 main) under a single envelope, so the agent is never in the submit→poll→submit loop. The deterministic Phase-2 spec — flip `canary`/`canary_only` off and `skip_rsync_deploy` on (#185/#279) — is applied INSIDE the primitive (the same flips `prepare-phase2-spec` encodes); you never rebuild a second spec by hand.
+
+The `submit` block matches `schemas/submit_flow.input.json`:
 
 ```json
 {
-  "profile": "<job_name>", "cluster": "<cluster>", "ssh_target": "user@host",
-  "remote_path": "<remote_path>", "job_name": "<job_name>",
-  "run_id": "<run_id from 6d>", "total_tasks": <tasks.total()>,
-  "backend": "sge", "script": ".hpc/templates/cpu_array.sh",
-  "job_env": {"EXECUTOR": "python3 .hpc/_hpc_dispatch.py", "HPC_RUN_ID": "...", ...},
-  "pass_env_keys": null,
-  "canary": true, "canary_only": true, "campaign_id": "<slug>", "runtime": "uv"
+  "submit": {
+    "profile": "<job_name>", "cluster": "<cluster>", "ssh_target": "user@host",
+    "remote_path": "<remote_path>", "job_name": "<job_name>",
+    "run_id": "<run_id from 6d>", "total_tasks": <tasks.total()>,
+    "backend": "sge", "script": ".hpc/templates/cpu_array.sh",
+    "job_env": {"EXECUTOR": "python3 .hpc/_hpc_dispatch.py", "HPC_RUN_ID": "...", ...},
+    "pass_env_keys": null,
+    "canary": true, "campaign_id": "<slug>", "runtime": "uv"
+  },
+  "expect_output": "results/seed_42/metrics.json"
 }
 ```
 
-`job_env["EXECUTOR"]` is **mandatory and non-empty** — it is the dispatcher command (`python3 .hpc/_hpc_dispatch.py`). Never ship `""` or omit it: the cluster would run `time` with no command and exit 0 in milliseconds, the canary would "succeed", and the main array would fire the same no-op qsub (#191). `build-submit-spec` defaults it; if you hand-craft the fields-file, set it explicitly.
+`submit.job_env["EXECUTOR"]` is **mandatory and non-empty** — it is the dispatcher command (`python3 .hpc/_hpc_dispatch.py`). Never ship `""` or omit it: the cluster would run `time` with no command and exit 0 in milliseconds, the canary would "succeed", and the main array would fire the same no-op qsub (#191). `build-submit-spec` defaults it; if you hand-craft the fields-file, set it explicitly.
 
-`pass_env_keys` is `null` (or omit it) to forward **every** `job_env` key via `qsub -v` — that is what you almost always want. A **non-empty** list restricts to those keys. **Never `[]`** — an empty list forwards *zero* vars (every `$EXECUTOR`/`$CONDA_ENV`/`$REPO_DIR` unset), producing the same broken job; submit-flow now refuses `[]` at intake (#192).
+`submit.pass_env_keys` is `null` (or omit it) to forward **every** `job_env` key via `qsub -v` — that is what you almost always want. A **non-empty** list restricts to those keys. **Never `[]`** — an empty list forwards *zero* vars (every `$EXECUTOR`/`$CONDA_ENV`/`$REPO_DIR` unset), producing the same broken job; submit-flow refuses `[]` at intake (#192).
 
-There is **no** `skip_preflight` field (#275): Step 6b already ran the cluster-env + runtime probes, and the skip is operator-only now — an operator who wants to avoid the re-probe sets `HPC_AGENT_SKIP_PREFLIGHT=1` in the environment; an agent cannot silence it (the field is rejected by the schema). For GPU jobs: `script: ".hpc/templates/gpu_array.sh"` (SGE) or `gpu_array.slurm` (SLURM).
-
-**Phase 1 — submit the canary only** (`canary_only: true`): preflight + rsync + deploy + the 1-task canary, but NOT the main array.
+There is **no `skip_preflight`** field (#275 Fix 2): preflight — including the cluster-side `command -v uv` check — runs inside `submit-flow` and is skippable only by the operator env var `HPC_AGENT_SKIP_PREFLIGHT`, never by a field on the spec the agent authors, so the uv guard can't be silenced into letting a uv-less run reach qsub. For GPU jobs: `submit.script: ".hpc/templates/gpu_array.sh"` (SGE) or `gpu_array.slurm` (SLURM).
 
 ```bash
-hpc-agent submit-flow --spec spec.json --experiment-dir .
+hpc-agent submit-and-verify --spec spec.json --experiment-dir .
 ```
 
-- `data.deduped: true` → the main run already ran; original jobs are live. Record this in `anomalies` (`deduped: <run_id>`); switch to the status workflow. Do NOT re-submit.
-- `data.deduped: false` → fresh. `data.main_launched` is **false** (only the canary went out). Capture `data.canary_run_id` / `data.canary_job_ids`.
-- Error envelopes: branch by `error_code` per submit-flow's contract.
+Branch on the single envelope:
 
-**Verify the canary — this is the gate** (route through `verify-canary`):
-
-```bash
-hpc-agent verify-canary --experiment-dir . --canary-run-id "$CANARY_RUN_ID" --expect-output "results/seed_42/metrics.json"
-```
-
-- `ok=False` → record a `canary` decision with outcome set to the `failure_kind` (`dispatcher_failed`/`import_error`/`oom_killed`/`missing_output`/`timeout`), put `stderr_tail` verbatim in `anomalies`, then **stop. The main array never launches.**
-- `ok=True` → proceed to Phase 2.
-
-**Phase 2 — launch the main array** (only after a verified canary): re-invoke `submit-flow` with the SAME spec but `"canary": false`, `"canary_only": false`, **and `"skip_rsync_deploy": true`** (the canary's Phase 1 just deployed the code; the local tree hasn't changed since, so the rsync+deploy would be a no-op — #185). Phase 1 already paid the preflight; Phase 2 re-runs only a cheap cluster-reachability probe (the runtime probe is TTL-cached), which is fine — there is no agent-settable skip (#275).
-
-```bash
-hpc-agent submit-flow --spec spec_main.json --experiment-dir .
-```
-
-Capture `data.run_id` / `data.job_ids` (`data.main_launched` is now true).
+- `data.deduped: true` → the main run already ran; original jobs are live. Record `deduped: <run_id>` in `anomalies`; switch to the status workflow. Do NOT re-submit.
+- `data.verified: false` with a `data.failure_kind` → the canary failed the gate. Record a `canary` decision with outcome = the `failure_kind` (`dispatcher_failed`/`import_error`/`oom_killed`/`missing_output`/`timeout`), put `data.verify_result.stderr_tail` verbatim in `anomalies`, then **stop. The main array never launched** — `data.job_ids` is empty.
+- `data.verified: true` → the canary passed and the main array is live. Capture `data.run_id` / `data.job_ids` and proceed to Step 8b.
+- Error envelopes: branch by `error_code` per the primitive's contract.
 
 ## Step 8b: Verify the array is queued/running
 
@@ -328,6 +317,12 @@ Branch:
 ## Step 9-10: Cache + report
 
 Do not cache run config in conversational memory. `submit-flow` persists the full v2 config snapshot (executor, cluster, remote_path, env, resources) to the run sidecar; any later step recovers it with `hpc-agent load-context`. Conversational memory is lost on context compaction or a session restart — the sidecar is not.
+
+**Pre-stage the follow-up specs (#278).** A submit is almost always followed by `/monitor-hpc` then `/aggregate-hpc`, whose specs are derivable from what you already hold (`run_id`, `cmd_sha`, `profile`). Before reporting, invoke [prepare-followup-specs](../../docs/primitives/prepare-followup-specs.md) to write `monitor_spec.json` + `aggregate_spec.json` next to the experiment, so those skills skip the interview round-trip — each validates the pre-staged `cmd_sha` against the journal before honoring it, so a re-submit can't make them act on a stale run:
+
+```bash
+hpc-agent prepare-followup-specs --experiment-dir . --run-id "$RUN_ID" --cmd-sha "$CMD_SHA" --profile "<run_name>"
+```
 
 Report after submission and Step 8b verification: job ID, executor(s), grid dimensions, total tasks, cluster, verified scheduler state. The caller suggests `/monitor-hpc` to track progress.
 
