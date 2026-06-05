@@ -10,6 +10,10 @@ resources / walltime, and only *then* re-run without ``--dry-run`` to submit.
 That is the human-in-the-loop gate the issue asks for — a verification file
 that exists **before** any cluster compute is spent on a bad parameter grid.
 
+A *real* submit writes the same file too (best-effort, in the flow's
+pre-rsync prelude — see ``submit_flow._dump_submit_spec``), recording the
+effective spec actually sent as a provenance artifact keyed by run_id.
+
 It complements the local *execution* gate (``dry-run-local`` / #205): that
 one proves the executor *runs*; this one shows *what* it will run.
 

@@ -530,6 +530,34 @@ def _ensure_run_sidecar(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
     )
 
 
+def _dump_submit_spec(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
+    """Best-effort: write the resolved spec to the #212 verification folder.
+
+    Mirrors what ``submit-flow --dry-run`` dumps for pre-submit review, but
+    records the *effective* spec a real submit sent — ``model_dump`` resolves
+    defaults (``canary``, ``canary_skip_threshold``, ...) the raw dry-run dict
+    may have omitted. The artifact is provenance, not a precondition: an
+    OSError (read-only journal, full disk) warns and is swallowed rather than
+    aborting a cluster submission that is otherwise good to go.
+    """
+    import warnings
+
+    from hpc_agent.ops.submit.spec_dump import write_spec_dump
+
+    try:
+        write_spec_dump(
+            experiment_dir,
+            run_id=spec.run_id,
+            spec=spec.model_dump(mode="json", exclude_none=True),
+        )
+    except OSError as exc:
+        warnings.warn(
+            f"could not write submit-spec verification dump for run {spec.run_id!r} "
+            f"({exc}); the submission proceeds without the provenance artifact.",
+            stacklevel=2,
+        )
+
+
 def _mirror_canary_sidecar(experiment_dir: Path, main_run_id: str, canary_run_id: str) -> None:
     """Ensure the canary's per-run sidecar exists by mirroring the main run's.
 
@@ -1194,6 +1222,14 @@ def _submit_flow_batch_locked(
     # (see _ensure_run_sidecar). #148 / #150.
     for i in fresh_indices:
         _ensure_run_sidecar(experiment_dir, specs[i])
+        # #212 follow-on: record the full resolved spec as a verification /
+        # provenance artifact BEFORE any cluster I/O. The dry-run gate writes
+        # the same file for pre-submit human review; this captures what a
+        # *real* submit actually sent (the effective, defaults-resolved spec),
+        # keyed by run_id, in the same designated folder. Best-effort — a
+        # local write failure must never block a cluster submission. Deduped
+        # replays (not in fresh_indices) are skipped: recorded on first submit.
+        _dump_submit_spec(experiment_dir, specs[i])
         # The canary dispatches the SAME per-task command as the main run,
         # so its sidecar (``<run_id>-canary.json``) must ALSO exist on disk
         # before the shared rsync below — otherwise it never ships to the

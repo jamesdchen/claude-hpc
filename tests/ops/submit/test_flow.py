@@ -209,6 +209,111 @@ class TestSubmitFlowBatch:
         assert [r.run_id for r in results] == ["r0", "r1", "r2", "r3", "r4"]
         assert all(not r.deduped for r in results)
 
+    def test_real_submit_dumps_resolved_spec_per_fresh_run(
+        self, tmp_path: Any, _journal_home: Any
+    ) -> None:
+        """#212 follow-on: a real submit records the resolved spec to the
+        verification folder, keyed by run_id, before any cluster I/O."""
+        import json
+
+        from hpc_agent.ops import submit_flow as sf_module
+        from hpc_agent.ops.submit.spec_dump import spec_dump_dir
+        from hpc_agent.ops.submit_flow import SubmitFlowResult, submit_flow_batch
+
+        specs = [_spec("r0"), _spec("r1")]
+        with (
+            mock.patch.object(sf_module, "_preflight_probe"),
+            mock.patch.object(sf_module, "_push_and_deploy"),
+            mock.patch.object(sf_module, "_submit_one_spec") as submit_one,
+        ):
+            submit_one.side_effect = lambda *, experiment_dir, spec: SubmitFlowResult(
+                run_id=spec.run_id,
+                job_ids=[f"job_{spec.run_id}"],
+                total_tasks=spec.total_tasks,
+                deduped=False,
+                canary_done=False,
+            )
+            submit_flow_batch(tmp_path, spec=_batch(specs))
+
+        dump_dir = spec_dump_dir(tmp_path)
+        for s in specs:
+            dumped = json.loads((dump_dir / f"{s.run_id}.json").read_text(encoding="utf-8"))
+            # The dump is the *resolved* spec: model defaults (canary) are present
+            # even though _spec() set canary=False explicitly here.
+            assert dumped["run_id"] == s.run_id
+            assert dumped["total_tasks"] == 4
+            assert "canary" in dumped
+
+    def test_real_submit_does_not_dump_for_deduped_specs(
+        self, tmp_path: Any, _journal_home: Any
+    ) -> None:
+        """A spec already on the journal is a no-op replay — no fresh dump."""
+        from hpc_agent.ops import submit_flow as sf_module
+        from hpc_agent.ops.submit.spec_dump import spec_dump_dir
+        from hpc_agent.ops.submit_flow import SubmitFlowResult, submit_flow_batch
+        from hpc_agent.state.run_record import RunRecord
+
+        # r0 is pre-journaled (deduped); r1 is fresh.
+        upsert_run(
+            tmp_path,
+            RunRecord(
+                run_id="r0",
+                profile="p",
+                cluster="c",
+                ssh_target="user@host",
+                remote_path="/r",
+                job_name="r0",
+                job_ids=["prior_r0"],
+                total_tasks=4,
+                submitted_at="2026-01-01T00:00:00+00:00",
+                experiment_dir=str(tmp_path.resolve()),
+            ),
+        )
+        with (
+            mock.patch.object(sf_module, "_preflight_probe"),
+            mock.patch.object(sf_module, "_push_and_deploy"),
+            mock.patch.object(sf_module, "_submit_one_spec") as submit_one,
+        ):
+            submit_one.side_effect = lambda *, experiment_dir, spec: SubmitFlowResult(
+                run_id=spec.run_id,
+                job_ids=[f"job_{spec.run_id}"],
+                total_tasks=spec.total_tasks,
+                deduped=False,
+                canary_done=False,
+            )
+            submit_flow_batch(tmp_path, spec=_batch([_spec("r0"), _spec("r1")]))
+
+        dump_dir = spec_dump_dir(tmp_path)
+        assert not (dump_dir / "r0.json").exists()
+        assert (dump_dir / "r1.json").exists()
+
+    def test_real_submit_survives_dump_write_failure(
+        self, tmp_path: Any, _journal_home: Any
+    ) -> None:
+        """A failed verification-dump write warns but never aborts the submit."""
+        from hpc_agent.ops import submit_flow as sf_module
+        from hpc_agent.ops.submit_flow import SubmitFlowResult, submit_flow_batch
+
+        with (
+            mock.patch.object(sf_module, "_preflight_probe"),
+            mock.patch.object(sf_module, "_push_and_deploy"),
+            mock.patch.object(sf_module, "_submit_one_spec") as submit_one,
+            mock.patch(
+                "hpc_agent.ops.submit.spec_dump.write_spec_dump",
+                side_effect=OSError("disk full"),
+            ),
+        ):
+            submit_one.side_effect = lambda *, experiment_dir, spec: SubmitFlowResult(
+                run_id=spec.run_id,
+                job_ids=[f"job_{spec.run_id}"],
+                total_tasks=spec.total_tasks,
+                deduped=False,
+                canary_done=False,
+            )
+            with pytest.warns(UserWarning, match="verification dump"):
+                results = submit_flow_batch(tmp_path, spec=_batch([_spec("r0")]))
+        assert [r.run_id for r in results] == ["r0"]
+
     def test_skips_prelude_when_every_spec_already_journaled(
         self, tmp_path: Any, _journal_home: Any
     ) -> None:
