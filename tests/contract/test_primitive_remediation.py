@@ -101,6 +101,7 @@ _SPEC_VERBS: frozenset[str] = frozenset(
         "prepare-phase2-spec",
         "recommend-partition",
         "resubmit",
+        "status-pipeline",
         "submit",
         "submit-and-verify",
         "submit-flow",
@@ -199,8 +200,10 @@ XFAIL_NO_FAILURE_FEATURES: set[str] = {
     "summarize-submit-plan",
     "find-prior-run",
     "write-run-sidecar",
-    # submit-pipeline is a new spec-verb; like the other submit-* workflows it
-    # does not yet thread failure_features into its spec_invalid envelope (WS3).
+    # status-pipeline / submit-pipeline are new spec-verbs; like the other
+    # workflow composites they do not yet thread failure_features into their
+    # spec_invalid envelope (WS3).
+    "status-pipeline",
     "submit-pipeline",
 }
 

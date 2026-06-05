@@ -941,6 +941,20 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent status-pipeline --spec <path> [--experiment-dir <dir>]",
+    "idempotent": true,
+    "input_schema": "status_pipeline.input.json",
+    "name": "status-pipeline",
+    "output_schema": "status_pipeline.output.json",
+    "python": "hpc_agent.ops.status_pipeline.status_pipeline",
+    "side_effects": [
+      "ssh",
+      "writes-tick-log"
+    ],
+    "verb": "workflow"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent submit-and-verify --spec <path> [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": "submit_and_verify.input.json",
