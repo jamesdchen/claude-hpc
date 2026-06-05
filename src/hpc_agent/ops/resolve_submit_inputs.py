@@ -185,7 +185,7 @@ def resolve_submit_inputs(
     #    output is fully submit-ready. Same run_id/cmd_sha injection (after the
     #    find-prior-run resume check cleared, so no sidecar is written for a
     #    resume-or-escalate path).
-    sidecar = write_run_sidecar(
+    written = write_run_sidecar(
         experiment_dir=experiment_dir,
         spec=spec.sidecar.model_copy(update={"run_id": run_id, "cmd_sha": cmd_sha}),
     )
@@ -201,5 +201,5 @@ def resolve_submit_inputs(
         run_id=run_id,
         cmd_sha=cmd_sha,
         submit_spec=submit_spec,
-        sidecar_path=sidecar.get("path"),
+        sidecar_path=written.get("path"),
     )
