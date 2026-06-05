@@ -186,6 +186,7 @@ The verb partitions primitives into bands the reader can scan independently:
 |---|---|---|---|
 | [aggregate-flow](aggregate-flow.md) | yes | ssh: `<cluster>`; sync-pull: `<ssh_target>:<remote_path>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent aggregate-flow [--spec <path>] [--experiment-dir <dir>] [--dry-run] [--run-id <run_id>]` |
 | [monitor-flow](monitor-flow.md) | yes | ssh: `<cluster>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent monitor-flow --spec <path> [--experiment-dir <dir>] [--dry-run]` |
+| [resolve-submit-inputs](resolve-submit-inputs.md) | yes | writes-sidecar: `<experiment>/.hpc/tasks.py`; writes-sidecar: `<experiment>/.hpc/cli.py` | `hpc-agent resolve-submit-inputs --spec <path> [--experiment-dir <dir>]` |
 | [submit-and-verify](submit-and-verify.md) | yes | scheduler-submit: `<cluster>`; ssh: `<cluster>` | `hpc-agent submit-and-verify --spec <path> [--experiment-dir <dir>]` |
 | [submit-flow](submit-flow.md) | yes | sync-push: `<ssh_target>:<remote_path>`; scheduler-submit: `<cluster>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent submit-flow --spec <path> [--experiment-dir <dir>] [--dry-run] [--partial-ok] [--invalidate-on-code-change]` |
 | [submit-flow-batch](submit-flow-batch.md) | yes | sync-push: `<ssh_target>:<remote_path>`; scheduler-submit: `<cluster>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent submit-flow-batch --spec <path> [--experiment-dir <dir>] [--dry-run]` |

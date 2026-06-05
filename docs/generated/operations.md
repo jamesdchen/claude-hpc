@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**81 operations total**: 74 primitive atoms + 7 workflow atoms.
+**82 operations total**: 74 primitive atoms + 8 workflow atoms.
 
 ## How to read this page
 
@@ -123,7 +123,7 @@ Creates new files (e.g. starter executor templates).
 | [`interview`](../primitives/interview.md) | ✓ | file_write | `hpc-agent interview --spec <path> --campaign-dir <campaign_dir>` | `hpc_agent.ops.memory.interview.record_interview` | `hpc_agent/schemas/interview.input.json` | `hpc_agent/schemas/interview.output.json` |
 | [`setup`](../primitives/setup.md) | ✓ | filesystem; ssh | `hpc-agent setup [--dry-run] [--claude-dir <claude_dir>] [--cluster <cluster>] [--experiment-dir <experiment_dir>] [--install-cron]` | `hpc_agent.cli.setup.setup` | — | — |
 
-## `workflow` (7)
+## `workflow` (8)
 
 End-to-end pipelines composing other primitives. Same envelope shape as primitives — indistinguishable to higher-level callers (the Composite property).
 
@@ -131,6 +131,7 @@ End-to-end pipelines composing other primitives. Same envelope shape as primitiv
 |---|---|---|---|---|---|---|
 | [`aggregate-flow`](../primitives/aggregate-flow.md) | ✓ | ssh; sync-pull; writes-journal | `hpc-agent aggregate-flow [--spec <path>] [--experiment-dir <dir>] [--dry-run] [--run-id <run_id>]` | `hpc_agent.ops.aggregate_flow.aggregate_flow` | `hpc_agent/schemas/aggregate_flow.input.json` | `hpc_agent/schemas/aggregate_flow.output.json` |
 | [`monitor-flow`](../primitives/monitor-flow.md) | ✓ | ssh; writes-journal | `hpc-agent monitor-flow --spec <path> [--experiment-dir <dir>] [--dry-run]` | `hpc_agent.ops.monitor_flow.monitor_flow` | `hpc_agent/schemas/monitor_flow.input.json` | `hpc_agent/schemas/monitor_flow.output.json` |
+| [`resolve-submit-inputs`](../primitives/resolve-submit-inputs.md) | ✓ | writes-sidecar | `hpc-agent resolve-submit-inputs --spec <path> [--experiment-dir <dir>]` | `hpc_agent.ops.resolve_submit_inputs.resolve_submit_inputs` | `hpc_agent/schemas/resolve_submit_inputs.input.json` | `hpc_agent/schemas/resolve_submit_inputs.output.json` |
 | [`submit-and-verify`](../primitives/submit-and-verify.md) | ✓ | scheduler-submit; ssh | `hpc-agent submit-and-verify --spec <path> [--experiment-dir <dir>]` | `hpc_agent.ops.submit_and_verify.submit_and_verify` | `hpc_agent/schemas/submit_and_verify.input.json` | `hpc_agent/schemas/submit_and_verify.output.json` |
 | [`submit-flow`](../primitives/submit-flow.md) | ✓ | scheduler-submit; sync-push; writes-journal | `hpc-agent submit-flow --spec <path> [--experiment-dir <dir>] [--dry-run] [--partial-ok] [--invalidate-on-code-change]` | `hpc_agent.ops.submit_flow.submit_flow` | `hpc_agent/schemas/submit_flow.input.json` | `hpc_agent/schemas/submit_flow.output.json` |
 | [`submit-flow-batch`](../primitives/submit-flow-batch.md) | ✓ | scheduler-submit; sync-push; writes-journal | `hpc-agent submit-flow-batch --spec <path> [--experiment-dir <dir>] [--dry-run]` | `hpc_agent.ops.submit_flow.submit_flow_batch` | `hpc_agent/schemas/submit_flow_batch.input.json` | `hpc_agent/schemas/submit_flow_batch.output.json` |

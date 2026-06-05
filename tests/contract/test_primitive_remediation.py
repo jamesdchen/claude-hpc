@@ -99,6 +99,7 @@ _SPEC_VERBS: frozenset[str] = frozenset(
         # it appears here but not in the schema-file-parametrized remediation tests.
         "preflight",
         "recommend-partition",
+        "resolve-submit-inputs",
         "resubmit",
         "submit",
         "submit-and-verify",
@@ -197,6 +198,10 @@ XFAIL_NO_FAILURE_FEATURES: set[str] = {
     "summarize-submit-plan",
     "find-prior-run",
     "write-run-sidecar",
+    # resolve-submit-inputs is a new spec-verb composite; like the other
+    # workflow composites it does not yet thread failure_features into its
+    # spec_invalid envelope (WS3).
+    "resolve-submit-inputs",
 }
 
 
