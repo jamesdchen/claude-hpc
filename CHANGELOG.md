@@ -21,6 +21,12 @@ New read-only `scaffold-spec` query verb. When an agent must invoke a verb that 
 - Emits only the **coherent** conda-activation pair: a `conda_env` without a `conda_source` (#281) crashes the cluster preamble, so the half-state is never produced.
 - Read-only (`verb: query`, no side effects): the skeleton rides the envelope `data`, never written to disk. New `scaffold_spec.output.json`; docs at `docs/primitives/scaffold-spec.md`.
 
+### Added — regression guard: heavy deps stay out of module-level imports (#288)
+
+Audit of the per-verb Python startup tax. Every `hpc-agent <verb>` builds the CLI parser, which `pkgutil.walk_packages`-imports every module under the primitive-discovery roots — so a top-level `import pandas` / `numpy` in any CLI-reachable module would tax *every* verb's startup, not just the aggregate-side one that needs it. The audit found the hot path **already clean**: pandas / numpy / scipy / sklearn / matplotlib are imported nowhere in `src/`, and the lone `pyarrow.parquet` (`ops/validate/input_dataset.py`) is already function-local. The residual startup cost is pydantic + `importlib.metadata` (version + plugin entry-point scans) + transitive `asyncio` — the hot path the issue itself flags as not movable without a model-loading refactor.
+
+Locked in with `tests/contract/test_no_heavy_toplevel_imports.py`: it AST-scans every framework module (excluding the user-facing `models/mapreduce/templates/` scaffolds) and fails if any imports a heavy data/ML dep (`pandas`, `numpy`, `scipy`, `sklearn`, `pyarrow`, `torch`, `matplotlib`, …) at module level — so a future top-level import re-growing the tax trips in CI, with the function-local fix named in the failure message.
+
 ## 0.10.11 — 2026-06-05
 
 One upstream fix off the same demo session: tighten the 0.10.3 bare-script-against-register_run guard so the with-trailing-args shape is also refused.
