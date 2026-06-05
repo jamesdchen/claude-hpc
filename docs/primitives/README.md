@@ -101,6 +101,7 @@ The verb partitions primitives into bands the reader can scan independently:
 | [decide-concurrency](decide-concurrency.md) | yes | _none_ | `hpc-agent decide-concurrency [--supports-async] [--remaining-jobs <remaining_jobs>] [--in-flight <in_flight>] [--k-cap <k_cap>]` |
 | [decide-monitor-arm](decide-monitor-arm.md) | yes | _none_ | `hpc-agent decide-monitor-arm --spec <path>` |
 | [decide-partial-handling](decide-partial-handling.md) | yes | _none_ | `hpc-agent decide-partial-handling --failed-count <failed_count> --combined-count <combined_count> [--retries-exhausted]` |
+| [decide-resubmit](decide-resubmit.md) | yes | _none_ | `hpc-agent decide-resubmit --failed-count <failed_count> --total-tasks <total_tasks> [--resubmit-failed-threshold <resubmit_failed_threshold>]` |
 | [describe](describe.md) | yes | _none_ | `hpc-agent describe <name>` |
 | [detect-entry-point](detect-entry-point.md) | yes | _none_ | `hpc-agent detect-entry-point --experiment-dir <experiment_dir>` |
 | [discover-executors](discover-executors.md) | yes | _none_ | `hpc-agent discover [--experiment-dir <dir>] [--search-dirs <search_dirs>]` |
@@ -191,6 +192,7 @@ The verb partitions primitives into bands the reader can scan independently:
 | [submit-and-verify](submit-and-verify.md) | yes | scheduler-submit: `<cluster>`; ssh: `<cluster>` | `hpc-agent submit-and-verify --spec <path> [--experiment-dir <dir>]` |
 | [submit-flow](submit-flow.md) | yes | sync-push: `<ssh_target>:<remote_path>`; scheduler-submit: `<cluster>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent submit-flow --spec <path> [--experiment-dir <dir>] [--dry-run] [--partial-ok] [--invalidate-on-code-change]` |
 | [submit-flow-batch](submit-flow-batch.md) | yes | sync-push: `<ssh_target>:<remote_path>`; scheduler-submit: `<cluster>`; writes-journal: `~/.claude/hpc/<repo_hash>/runs/<run_id>.json` | `hpc-agent submit-flow-batch --spec <path> [--experiment-dir <dir>] [--dry-run]` |
+| [submit-pipeline](submit-pipeline.md) | yes | scheduler-submit: `<cluster>`; ssh: `<cluster>`; writes-followup-specs: `<experiment_dir>/{monitor,aggregate}_spec.json` | `hpc-agent submit-pipeline --spec <path> [--experiment-dir <dir>]` |
 | [validate-campaign](validate-campaign.md) | yes | _none_ | `hpc-agent validate-campaign --spec <path> [--experiment-dir <dir>]` |
 | [verify-canary](verify-canary.md) | yes | ssh: `<cluster>` | `hpc-agent verify-canary [--experiment-dir <dir>] --canary-run-id <canary_run_id> [--expect-output <expect_output>] [--fingerprint <fingerprint>] [--poll-interval-sec <poll_interval_sec>] [--wait-budget-sec <wait_budget_sec>]` |
 <!-- END PRIMITIVE CATALOG -->

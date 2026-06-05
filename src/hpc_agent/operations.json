@@ -300,6 +300,17 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent decide-resubmit --failed-count <failed_count> --total-tasks <total_tasks> [--resubmit-failed-threshold <resubmit_failed_threshold>]",
+    "idempotent": true,
+    "input_schema": "decide_resubmit.input.json",
+    "name": "decide-resubmit",
+    "output_schema": "decide_resubmit.output.json",
+    "python": "hpc_agent.ops.decide_resubmit.decide_resubmit",
+    "side_effects": [],
+    "verb": "query"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent describe <name>",
     "idempotent": true,
     "input_schema": null,
@@ -969,6 +980,21 @@
       "scheduler-submit",
       "sync-push",
       "writes-journal"
+    ],
+    "verb": "workflow"
+  },
+  {
+    "agent_facing": true,
+    "cli": "hpc-agent submit-pipeline --spec <path> [--experiment-dir <dir>]",
+    "idempotent": true,
+    "input_schema": "submit_pipeline.input.json",
+    "name": "submit-pipeline",
+    "output_schema": "submit_pipeline.output.json",
+    "python": "hpc_agent.ops.submit_pipeline.submit_pipeline",
+    "side_effects": [
+      "scheduler-submit",
+      "ssh",
+      "writes-followup-specs"
     ],
     "verb": "workflow"
   },

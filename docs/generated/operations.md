@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**83 operations total**: 76 primitive atoms + 7 workflow atoms.
+**85 operations total**: 77 primitive atoms + 8 workflow atoms.
 
 ## How to read this page
 
@@ -14,7 +14,7 @@ Every operation in `hpc-agent` is a CLI atom or a Python-only primitive that emi
 
 **Discoverability**: `hpc-agent capabilities` returns this same catalog at runtime in `data.operations`. Agents that don't have access to this page can introspect the framework via that subprocess call.
 
-## `query` (40)
+## `query` (41)
 
 Read-only, no side effects. Freely composable; cacheable.
 
@@ -36,6 +36,7 @@ Read-only, no side effects. Freely composable; cacheable.
 | [`decide-concurrency`](../primitives/decide-concurrency.md) | ✓ | _none_ | `hpc-agent decide-concurrency [--supports-async] [--remaining-jobs <remaining_jobs>] [--in-flight <in_flight>] [--k-cap <k_cap>]` | `hpc_agent.meta.campaign.atoms.decide_concurrency.decide_concurrency` | — | — |
 | [`decide-monitor-arm`](../primitives/decide-monitor-arm.md) | ✓ | _none_ | `hpc-agent decide-monitor-arm --spec <path>` | `hpc_agent.ops.monitor.arm.decide_monitor_arm` | `hpc_agent/schemas/decide_monitor_arm.input.json` | `hpc_agent/schemas/decide_monitor_arm.output.json` |
 | [`decide-partial-handling`](../primitives/decide-partial-handling.md) | ✓ | _none_ | `hpc-agent decide-partial-handling --failed-count <failed_count> --combined-count <combined_count> [--retries-exhausted]` | `hpc_agent.ops.aggregate.decide_partial_handling.decide_partial_handling` | — | — |
+| [`decide-resubmit`](../primitives/decide-resubmit.md) | ✓ | _none_ | `hpc-agent decide-resubmit --failed-count <failed_count> --total-tasks <total_tasks> [--resubmit-failed-threshold <resubmit_failed_threshold>]` | `hpc_agent.ops.decide_resubmit.decide_resubmit` | `hpc_agent/schemas/decide_resubmit.input.json` | `hpc_agent/schemas/decide_resubmit.output.json` |
 | [`describe`](../primitives/describe.md) | ✓ | _none_ | `hpc-agent describe <name>` | `hpc_agent.cli.setup.describe` | — | — |
 | [`detect-entry-point`](../primitives/detect-entry-point.md) | ✓ | _none_ | `hpc-agent detect-entry-point --experiment-dir <experiment_dir>` | `hpc_agent.ops.detect_entry_point.detect_entry_point` | `hpc_agent/schemas/detect_entry_point.input.json` | `hpc_agent/schemas/detect_entry_point.output.json` |
 | [`discover-executors`](../primitives/discover-executors.md) | ✓ | _none_ | `hpc-agent discover [--experiment-dir <dir>] [--search-dirs <search_dirs>]` | `hpc_agent.state.discover.discover_executors` | — | `hpc_agent/schemas/discover.output.json` |
@@ -125,7 +126,7 @@ Creates new files (e.g. starter executor templates).
 | [`prepare-followup-specs`](../primitives/prepare-followup-specs.md) | ✓ | writes-followup-specs | `hpc-agent prepare-followup-specs --experiment-dir <experiment_dir> --run-id <run_id> [--cmd-sha <cmd_sha>] [--profile <profile>]` | `hpc_agent.ops.prepare_followup_specs.prepare_followup_specs` | `hpc_agent/schemas/prepare_followup_specs.input.json` | `hpc_agent/schemas/prepare_followup_specs.output.json` |
 | [`setup`](../primitives/setup.md) | ✓ | filesystem; ssh | `hpc-agent setup [--dry-run] [--claude-dir <claude_dir>] [--cluster <cluster>] [--experiment-dir <experiment_dir>] [--install-cron]` | `hpc_agent.cli.setup.setup` | — | — |
 
-## `workflow` (7)
+## `workflow` (8)
 
 End-to-end pipelines composing other primitives. Same envelope shape as primitives — indistinguishable to higher-level callers (the Composite property).
 
@@ -136,6 +137,7 @@ End-to-end pipelines composing other primitives. Same envelope shape as primitiv
 | [`submit-and-verify`](../primitives/submit-and-verify.md) | ✓ | scheduler-submit; ssh | `hpc-agent submit-and-verify --spec <path> [--experiment-dir <dir>]` | `hpc_agent.ops.submit_and_verify.submit_and_verify` | `hpc_agent/schemas/submit_and_verify.input.json` | `hpc_agent/schemas/submit_and_verify.output.json` |
 | [`submit-flow`](../primitives/submit-flow.md) | ✓ | scheduler-submit; sync-push; writes-journal | `hpc-agent submit-flow --spec <path> [--experiment-dir <dir>] [--dry-run] [--partial-ok] [--invalidate-on-code-change]` | `hpc_agent.ops.submit_flow.submit_flow` | `hpc_agent/schemas/submit_flow.input.json` | `hpc_agent/schemas/submit_flow.output.json` |
 | [`submit-flow-batch`](../primitives/submit-flow-batch.md) | ✓ | scheduler-submit; sync-push; writes-journal | `hpc-agent submit-flow-batch --spec <path> [--experiment-dir <dir>] [--dry-run]` | `hpc_agent.ops.submit_flow.submit_flow_batch` | `hpc_agent/schemas/submit_flow_batch.input.json` | `hpc_agent/schemas/submit_flow_batch.output.json` |
+| [`submit-pipeline`](../primitives/submit-pipeline.md) | ✓ | scheduler-submit; ssh; writes-followup-specs | `hpc-agent submit-pipeline --spec <path> [--experiment-dir <dir>]` | `hpc_agent.ops.submit_pipeline.submit_pipeline` | `hpc_agent/schemas/submit_pipeline.input.json` | `hpc_agent/schemas/submit_pipeline.output.json` |
 | [`validate-campaign`](../primitives/validate-campaign.md) | ✓ | _none_ | `hpc-agent validate-campaign --spec <path> [--experiment-dir <dir>]` | `hpc_agent.meta.validate_campaign.validate_campaign` | `hpc_agent/schemas/validate_campaign.input.json` | `hpc_agent/schemas/validate_campaign.output.json` |
 | [`verify-canary`](../primitives/verify-canary.md) | ✓ | ssh | `hpc-agent verify-canary [--experiment-dir <dir>] --canary-run-id <canary_run_id> [--expect-output <expect_output>] [--fingerprint <fingerprint>] [--poll-interval-sec <poll_interval_sec>] [--wait-budget-sec <wait_budget_sec>]` | `hpc_agent.ops.verify_canary.verify_canary` | — | `hpc_agent/schemas/verify_canary.output.json` |
 
