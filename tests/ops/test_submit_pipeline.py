@@ -152,3 +152,34 @@ def test_verify_submitted_failure_escalates(tmp_path: Path) -> None:
     assert res.verify_submitted_ok is False
     assert res.verify_submitted_result["states"]["123"] == "Eqw"
     m_prep.assert_not_called()  # don't pre-stage follow-ups when jobs didn't land
+
+
+def test_no_canary_submit_is_not_a_canary_failure(tmp_path: Path) -> None:
+    """canary=false → submit-and-verify returns verified=False with
+    failure_kind=None and the main job_ids populated. That is a SUCCESSFUL
+    direct submit, NOT a canary failure — submit-pipeline must fall through to
+    the health check and report ``complete`` (verified honestly False), never
+    ``canary_failed`` (which would claim 'the main array never launched')."""
+    from hpc_agent.ops.submit_pipeline import submit_pipeline
+
+    with (
+        mock.patch(
+            "hpc_agent.ops.submit_pipeline.submit_and_verify",
+            return_value=_sv_result(verified=False, failure_kind=None, job_ids=["123"]),
+        ),
+        mock.patch(
+            "hpc_agent.ops.submit_pipeline.verify_submitted",
+            return_value={"ok": True, "states": {"123": "running"}},
+        ),
+        mock.patch(
+            "hpc_agent.ops.submit_pipeline.prepare_followup_specs",
+            return_value=_followup(),
+        ) as m_prep,
+    ):
+        res = submit_pipeline(tmp_path, spec=_pipeline_spec())
+
+    assert res.stage_reached == "complete"  # NOT canary_failed
+    assert res.needs_decision is False
+    assert res.verified is False  # honest — no canary ran
+    assert res.job_ids == ["123"]  # the main array DID launch
+    m_prep.assert_called_once()  # follow-ups staged on the success path

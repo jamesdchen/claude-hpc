@@ -112,7 +112,11 @@ def submit_pipeline(experiment_dir: Path, *, spec: SubmitPipelineSpec) -> Submit
             deduped=True,
         )
 
-    if not sv.verified:
+    # A canary that RAN and failed the gate (failure_kind set) stops here — the
+    # main array never launched (#160). A no-canary submit (spec canary=false)
+    # returns verified=False with failure_kind=None and the main job_ids already
+    # populated — that is NOT a failure, so it falls through to the health check.
+    if not sv.verified and sv.failure_kind is not None:
         return SubmitPipelineResult(
             stage_reached="canary_failed",
             needs_decision=True,
@@ -121,7 +125,7 @@ def submit_pipeline(experiment_dir: Path, *, spec: SubmitPipelineSpec) -> Submit
                 "main array never launched. Fix the dispatch and re-invoke."
             ),
             run_id=sv.run_id,
-            failure_kind=(str(sv.failure_kind) if sv.failure_kind else None),
+            failure_kind=str(sv.failure_kind),
             verified=False,
         )
 
@@ -137,7 +141,7 @@ def submit_pipeline(experiment_dir: Path, *, spec: SubmitPipelineSpec) -> Submit
             ),
             run_id=sv.run_id,
             job_ids=list(sv.job_ids),
-            verified=True,
+            verified=sv.verified,
             verify_submitted_ok=False,
             verify_submitted_result=vs,
         )
@@ -154,10 +158,13 @@ def submit_pipeline(experiment_dir: Path, *, spec: SubmitPipelineSpec) -> Submit
     return SubmitPipelineResult(
         stage_reached="complete",
         needs_decision=False,
-        reason="submitted, canary-verified, jobs healthy, follow-up specs staged.",
+        reason=(
+            "submitted, jobs healthy, follow-up specs staged"
+            + (" (canary verified)." if sv.verified else " (no canary requested).")
+        ),
         run_id=sv.run_id,
         job_ids=list(sv.job_ids),
-        verified=True,
+        verified=sv.verified,
         verify_submitted_ok=True,
         monitor_spec_path=followup.get("monitor_spec_path"),
         aggregate_spec_path=followup.get("aggregate_spec_path"),
