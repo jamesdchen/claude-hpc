@@ -264,3 +264,45 @@ def test_pbs_inspect_falls_back_to_minimal_on_unparseable_output():
     snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
     assert snap.nodes == []
     assert any(e["code"] == "pbs_inspect_minimal" for e in snap.errors)
+
+
+def test_pbs_inspect_pbspro_output_conforms_to_schema():
+    # The populated node dict must satisfy inspect-cluster.output.json — in
+    # particular the alloc_mem_pct [0, 1] bound that validate_output enforces
+    # at CLI emit. (errors=[] on the happy path, so the snapshot's dict-shaped
+    # errors — lifted to partial_errors by the CLI wrapper — don't apply here.)
+    from hpc_agent._kernel.contract.schema import _output_schema_for, validate
+
+    runner = _runner({"pbsnodes -av": (0, _PBSPRO_AV, "")})
+    snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
+    assert snap.errors == []
+    schema = _output_schema_for("inspect-cluster")
+    validate(snap.to_dict(), schema)  # raises on any field/constraint mismatch
+
+
+def test_parse_pbsnodes_pbspro_clamps_overcommitted_alloc_mem():
+    # assigned.mem (256 GiB) > available.mem (192 GiB): independently-reported
+    # PBS values can over-commit; alloc_mem_pct must clamp to 1.0 rather than
+    # exceed the schema's [0, 1] bound.
+    text = (
+        "n1\n"
+        "     state = job-busy\n"
+        "     resources_available.ncpus = 8\n"
+        "     resources_available.mem = 201326592kb\n"
+        "     resources_assigned.mem = 268435456kb\n"
+    )
+    (node,) = parse_pbsnodes(text, family="pbspro")
+    assert node.alloc_mem_pct == 1.0
+
+
+def test_parse_pbsnodes_pbspro_no_gpu_node_has_empty_gres():
+    # PBS Pro reports resources_available.ngpus = 0 on CPU nodes; that must
+    # not advertise a phantom "gpu:0" GRES (matches SLURM's empty-gres shape).
+    text = (
+        "n1\n"
+        "     state = free\n"
+        "     resources_available.ncpus = 8\n"
+        "     resources_available.ngpus = 0\n"
+    )
+    (node,) = parse_pbsnodes(text, family="pbspro")
+    assert node.gres == "" and node.gres_used == ""

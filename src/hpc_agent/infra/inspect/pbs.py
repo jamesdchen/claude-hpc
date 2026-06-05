@@ -243,12 +243,18 @@ def _parse_pbsnodes_pbspro(text: str) -> list[NodeSnapshot]:
         snap.real_mem_mb = _parse_mem_to_mb(f.get("resources_available.mem"))
         snap.alloc_mem_mb = _parse_mem_to_mb(f.get("resources_assigned.mem"))
         if snap.real_mem_mb and snap.alloc_mem_mb is not None and snap.real_mem_mb > 0:
-            snap.alloc_mem_pct = round(snap.alloc_mem_mb / snap.real_mem_mb, 4)
+            # ``resources_available.mem`` and ``resources_assigned.mem`` are
+            # independently-reported values (unlike SLURM's AllocMem ≤
+            # RealMemory invariant), so an over-committed node can report
+            # assigned > available. Clamp to 1.0: the snapshot schema bounds
+            # ``alloc_mem_pct`` to [0, 1] and validate_output would reject a
+            # higher value, breaking the whole inspect emit.
+            snap.alloc_mem_pct = round(min(snap.alloc_mem_mb / snap.real_mem_mb, 1.0), 4)
         ngpus = _to_int_or_none(f.get("resources_available.ngpus"))
-        if ngpus is not None:
+        if ngpus:
             snap.gres = f"gpu:{ngpus}"
         ngpus_used = _to_int_or_none(f.get("resources_assigned.ngpus"))
-        if ngpus_used is not None:
+        if ngpus_used:
             snap.gres_used = f"gpu:{ngpus_used}"
         snap.is_drained = _state_is_unavailable(snap.state)
         nodes.append(snap)
@@ -290,7 +296,10 @@ def _parse_pbsnodes_torque(text: str) -> list[NodeSnapshot]:
         avail_mem = _parse_mem_to_mb(status.get("availmem"))
         snap.real_mem_mb = total_mem
         if total_mem and avail_mem is not None:
-            used = max(total_mem - avail_mem, 0)
+            # used is clamped into [0, total_mem] (availmem can momentarily
+            # read above physmem), so the ratio stays in [0, 1] as the
+            # snapshot schema requires.
+            used = min(max(total_mem - avail_mem, 0), total_mem)
             snap.alloc_mem_mb = used
             snap.alloc_mem_pct = round(used / total_mem, 4)
         load = _to_float_or_none(status.get("loadave"))
@@ -298,7 +307,7 @@ def _parse_pbsnodes_torque(text: str) -> list[NodeSnapshot]:
         if load is not None and snap.cpu_tot:
             snap.cpu_load_frac = round(load / max(snap.cpu_tot, 1), 4)
         ngpus = _to_int_or_none(f.get("gpus"))
-        if ngpus is not None:
+        if ngpus:
             snap.gres = f"gpu:{ngpus}"
         snap.is_drained = _state_is_unavailable(snap.state)
         nodes.append(snap)
