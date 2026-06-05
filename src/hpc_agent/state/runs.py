@@ -61,6 +61,21 @@ SIDECAR_SCHEMA_VERSION: int = 2
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9._\-]+$")
 
 
+def validate_run_id(run_id: str) -> str:
+    """Return *run_id* if it is filesystem-safe, else raise ``SpecInvalid``.
+
+    The single source of truth for the run_id format guard
+    (``^[A-Za-z0-9._\\-]+$``): any caller that turns a run_id into a path
+    component routes through here so a malformed id (path separator, ``..``)
+    can't escape its intended directory. Used by :func:`run_sidecar_path`
+    and by the pre-submit spec dump (#212), both of which name a file after
+    the run_id.
+    """
+    if not _RUN_ID_RE.fullmatch(run_id):
+        raise errors.SpecInvalid(f"invalid run_id: {run_id!r}")
+    return run_id
+
+
 def _runs_dir(experiment_dir: Path) -> Path:
     """Deprecated alias for ``RepoLayout(experiment_dir).runs``.
 
@@ -84,8 +99,7 @@ def run_sidecar_path(experiment_dir: Path, run_id: str) -> Path:
     """
     from hpc_agent._kernel.contract.layout import RepoLayout
 
-    if not _RUN_ID_RE.fullmatch(run_id):
-        raise errors.SpecInvalid(f"invalid run_id: {run_id!r}")
+    validate_run_id(run_id)
     return RepoLayout(experiment_dir).run_sidecar(run_id)
 
 

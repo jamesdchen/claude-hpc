@@ -137,6 +137,13 @@ def cmd_submit_flow(args: argparse.Namespace) -> int:
             raise errors.SpecInvalid(
                 f"submit-flow --dry-run spec missing required field(s): {', '.join(missing)}"
             )
+        # #212: write the full resolved spec to a designated folder so a
+        # researcher can read + verify the parameters BEFORE any rsync/qsub.
+        # The dry-run gate is the human-in-the-loop step: review the dumped
+        # file, then re-run without --dry-run to submit.
+        from hpc_agent.ops.submit.spec_dump import write_spec_dump
+
+        dump_path = write_spec_dump(args.experiment_dir, run_id=spec["run_id"], spec=spec)
         # Skip ``name=...`` so the dry-run-specific shape isn't validated
         # against ``SubmitFlowResult`` (which requires job_ids /
         # canary_done and forbids the dry-run-only fields).
@@ -148,6 +155,7 @@ def cmd_submit_flow(args: argparse.Namespace) -> int:
                 "run_id": spec["run_id"],
                 "canary": bool(spec.get("canary", True)),
                 "dry_run": True,
+                "spec_dump_path": str(dump_path),
             },
             idempotent=True,
         )
@@ -198,6 +206,15 @@ def cmd_submit_flow_batch(args: argparse.Namespace) -> int:
 
     if args.dry_run:
         targets = sorted({(s.ssh_target, s.remote_path) for s in batch_spec.specs})
+        # #212: dump each entry's resolved spec for pre-submit human review.
+        # One file per run_id (the verbatim entry dict), so a researcher can
+        # verify every grid in the bundle before any cluster compute is spent.
+        from hpc_agent.ops.submit.spec_dump import write_spec_dump
+
+        dump_paths = [
+            str(write_spec_dump(args.experiment_dir, run_id=model.run_id, spec=entry))
+            for model, entry in zip(batch_spec.specs, raw["specs"], strict=True)
+        ]
         # Skip ``name=...`` so the dry-run-specific shape isn't validated
         # against ``SubmitFlowBatchResult`` (which requires results /
         # n_results and forbids the dry-run-only fields).
@@ -209,6 +226,7 @@ def cmd_submit_flow_batch(args: argparse.Namespace) -> int:
                 "shared_targets": [{"ssh_target": t[0], "remote_path": t[1]} for t in targets],
                 "n_specs": len(batch_spec.specs),
                 "dry_run": True,
+                "spec_dump_paths": dump_paths,
             },
             idempotent=True,
         )

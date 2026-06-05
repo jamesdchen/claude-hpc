@@ -7,6 +7,10 @@ on the wire surface enumerated in
 
 ## Unreleased
 
+### Added — pre-submit spec verification dump (#212)
+
+`submit-flow --dry-run` (and the auto-dispatched batch path) now writes the full resolved spec to a JSON verification file in a designated folder so a researcher can read + verify the parameters (grid, cluster, resources, walltime) before any rsync/qsub spends compute — the human-in-the-loop gate the issue asks for. New `hpc_agent/ops/submit/spec_dump.py` (`spec_dump_dir` / `write_spec_dump`); the folder is `HPC_SPEC_DUMP_DIR` or, by default, `<journal>/<repo_hash>/submit_specs/` (kept out of the experiment tree so the dump never ships via rsync). The absolute path is returned on the dry-run envelope as `spec_dump_path` (single) / `spec_dump_paths` (batch). The dumped file is the spec verbatim — a valid, re-submittable `submit-flow` spec. Complements the local *execution* gate (`dry-run-local` / #205): that proves the executor runs, this shows what it will run. `state/runs.py` grows a public `validate_run_id` (the single source for the filesystem-safe run_id guard `run_sidecar_path` already used) so the dump filename can't traverse out of its folder.
+
 ## 0.10.7 — 2026-06-04
 
 Post-0.10.6 carry-forward: SSH/qsub determinism fixes, the WS2–WS5 escalation-funnel batch, and one #240 punch-list cleanup.

@@ -731,7 +731,12 @@ def _make_single_array_submission(
             CliArg(
                 "--dry-run",
                 action="store_true",
-                help=("Validate the spec and report what would be launched; no SSH/rsync/qsub."),
+                help=(
+                    "Validate the spec, write the resolved spec to a JSON "
+                    "verification file (HPC_SPEC_DUMP_DIR; path returned as "
+                    "spec_dump_path) for human review, and report what would "
+                    "be launched; no SSH/rsync/qsub. (#212)"
+                ),
             ),
             CliArg(
                 "--partial-ok",
@@ -1040,7 +1045,12 @@ def _submit_one_spec(
             CliArg(
                 "--dry-run",
                 action="store_true",
-                help="Validate the batch + report shared targets; no SSH/rsync/qsub.",
+                help=(
+                    "Validate the batch, write one resolved-spec JSON "
+                    "verification file per run_id (HPC_SPEC_DUMP_DIR; paths "
+                    "returned as spec_dump_paths) for human review, and report "
+                    "shared targets; no SSH/rsync/qsub. (#212)"
+                ),
             ),
         ),
         handler=_submit_flow_batch_handler,
