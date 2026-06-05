@@ -39,7 +39,7 @@ from hpc_agent.infra.runtime_preflight import runtime_uv_preflight as _preflight
 from hpc_agent.infra.ssh_validation import validate_ssh_target
 from hpc_agent.infra.transport import deploy_runtime, rsync_push
 from hpc_agent.ops.submit.runner import submit_and_record
-from hpc_agent.state.journal import is_abandoned, load_run
+from hpc_agent.state.journal import is_resubmittable_terminal, load_run
 
 
 def _submit_flow_handler(ns):  # type: ignore[no-untyped-def]
@@ -800,13 +800,13 @@ def _dedup_existing(experiment_dir: Path, spec: SubmitFlowSpec) -> SubmitFlowRes
     existing = load_run(experiment_dir, spec.run_id)
     if existing is None:
         return None
-    # #276: an ``abandoned`` record is a corpse the monitor gave up tracking,
-    # not a live run — its ``job_ids`` are forensic, not an in-flight marker.
-    # Deduping against it blocked every future submit for this run_id until the
-    # user manually nuked ``~/.claude/hpc/<hash>/`` (a single transient
-    # status-probe flake was enough to mint it). Fall through to a fresh
-    # submission instead. ``complete`` still dedups (idempotency).
-    if is_abandoned(existing):
+    # #276: a terminal-but-not-``complete`` record (``failed`` / ``abandoned``)
+    # is not a live run — its ``job_ids`` are forensic, not an in-flight marker.
+    # Deduping against it blocked every future submit for this run_id (a single
+    # transient status-probe flake was enough to mint an ``abandoned`` corpse).
+    # Fall through to a fresh submission. ``complete`` still dedups (idempotency);
+    # ``in_flight`` (including a timed-out run) still blocks — don't double-submit.
+    if is_resubmittable_terminal(existing):
         return None
     return SubmitFlowResult(
         run_id=existing.run_id,
@@ -858,17 +858,17 @@ def _submit_one_spec(
     if _should_run_canary(spec):
         canary_run_id = f"{spec.run_id}-canary"
         existing_canary = load_run(experiment_dir, canary_run_id)
-        if existing_canary is not None and not is_abandoned(existing_canary):
+        if existing_canary is not None and not is_resubmittable_terminal(existing_canary):
             # Replay: a prior call landed the canary but failed before
             # recording the main run, so the main-run dedup check (keyed
             # on spec.run_id) misses it. Reuse the recorded canary
             # job_ids instead of firing a duplicate canary qsub —
             # submit_flow is documented idempotent on run_id.
             #
-            # #276: an ``abandoned`` canary is excluded — the monitor gave up
-            # tracking it (e.g. a transient status-probe flake), so it is NOT a
-            # live canary to reuse. Fall through and fire a fresh one rather
-            # than gating the main array on a corpse.
+            # #276: a terminal-but-not-``complete`` canary (``failed`` /
+            # ``abandoned``) is excluded — it is NOT a live canary to reuse (the
+            # monitor gave up, e.g. on a transient status-probe flake). Fall
+            # through and fire a fresh one rather than gating main on a corpse.
             canary_job_ids = list(existing_canary.job_ids)
             canary_done = True
         else:

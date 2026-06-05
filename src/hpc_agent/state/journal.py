@@ -17,6 +17,7 @@ from __future__ import annotations
 import warnings
 from typing import TYPE_CHECKING, Any
 
+from hpc_agent._kernel.lifecycle.lifecycle import TERMINAL_STATUSES, JournalStatus
 from hpc_agent.state.run_record import (
     _UPDATABLE_FIELDS,
     RunRecord,
@@ -40,8 +41,18 @@ __all__ = [
     "mark_pending_verdict",
     "clear_pending_verdict",
     "is_held",
-    "is_abandoned",
+    "is_resubmittable_terminal",
 ]
+
+# Terminal journal statuses from which a fresh submit should PROCEED rather than
+# dedup against the prior record (#276) — every terminal status EXCEPT
+# ``complete``. ``complete`` still dedups: re-submitting a finished experiment is
+# a replay, not a new run (idempotency). ``timeout`` is deliberately absent — it
+# is a LifecycleState (the monitor-flow envelope field), NOT a JournalStatus, so
+# a record's status is never ``timeout``: a timed-out run stays ``in_flight`` in
+# the journal (its cluster jobs may still be live), which correctly keeps it
+# blocking a double-submit.
+_RESUBMITTABLE_TERMINAL_STATUSES = TERMINAL_STATUSES - {JournalStatus.COMPLETE}
 
 
 def load_run(experiment_dir: Path, run_id: str) -> RunRecord | None:
@@ -230,27 +241,37 @@ def is_held(record: RunRecord) -> bool:
     return bool(record.pending_verdict)
 
 
-def is_abandoned(record: RunRecord) -> bool:
-    """True when *record*'s status is the terminal ``abandoned`` verdict (#276).
+def is_resubmittable_terminal(record: RunRecord) -> bool:
+    """True when *record* is terminal but NOT ``complete`` — i.e. ``failed`` or
+    ``abandoned`` (#276).
 
-    ``abandoned`` means the monitor *stopped tracking* the run — typically after
-    a transient cluster-status probe failure it could not get past (e.g. the
-    Windows named-pipe ``getsockname`` flake that minted the 2026-06-05 corpse).
-    It is a terminal verdict, NOT a live run: the ``job_ids`` still on the record
-    are forensic data, not an in-flight signal. The submit path keys "is this a
-    live run I must dedup / reuse / reconcile?" off this so an abandoned corpse
-    can't block every future submit against the same ``(experiment_dir, cluster)``
-    namespace until the user manually deletes the journal directory.
+    Such a record is neither a live run nor a successful one: the monitor reached
+    a verdict that the run did not finish cleanly (``abandoned`` = it stopped
+    tracking, often after a transient status-probe flake like the Windows
+    named-pipe ``getsockname`` failure; ``failed`` = at least one failure with
+    nothing left running). Its ``job_ids`` are forensic data, not an in-flight
+    marker — so the submit path keys "is this a live run I must dedup / reuse /
+    block on?" off this and lets a fresh submit PROCEED, instead of a single
+    transient flake (or any prior failure) wedging every future submit for that
+    run_id until the user deletes the journal directory.
 
-    Deliberately narrow — only the give-up verdict. ``complete`` is a successful
-    terminal run that SHOULD still dedup (re-submitting a finished experiment is
-    a replay, not a new run); ``failed`` is owned by the dedicated resubmit
-    flows. Treating those as non-blocking here would re-run finished work or
-    bypass the recover path, so they are left alone.
+    Excluded, by design:
+
+    * ``complete`` — a finished experiment still dedups (idempotency: a
+      same-``run_id`` resubmit is a replay, not a new run).
+    * ``in_flight`` — a live run still blocks (don't double-submit). This is also
+      where a *timed-out* run lands: ``timeout`` is a LifecycleState (envelope),
+      never a JournalStatus, so a wall-clock-exceeded run whose cluster jobs may
+      still be running stays ``in_flight`` and correctly keeps blocking.
+    * a *held* run (``pending_verdict``, #231/#234) — parked awaiting a decision,
+      even though it is ``failed``. The escalation flow owns its resubmission
+      (clear the verdict, then ``resubmit_flow``); a plain submit must not silently
+      clobber the hold, so a held run still blocks. (The dedup path protected held
+      runs before #276 widened this predicate to ``failed``; preserve that.)
     """
-    from hpc_agent._kernel.lifecycle.lifecycle import JournalStatus
-
-    return record.status == JournalStatus.ABANDONED
+    if is_held(record):
+        return False
+    return record.status in _RESUBMITTABLE_TERMINAL_STATUSES
 
 
 def _refresh_index_entry(

@@ -232,8 +232,8 @@ hpc-agent find-prior-run --experiment-dir . --cmd-sha "$CMD_SHA"
 
 Branch on envelope's `{found, is_orphan, status}`:
 - `found=False` → fresh; continue to 6d.
-- `found=True` AND `status == "abandoned"` → a corpse the monitor gave up tracking, NOT a live prior (#276). Its `job_ids` are forensic, not in-flight. Proceed to 6d as if fresh — `submit-flow` re-submits over it (it no longer dedups against an abandoned record), and the canary refires rather than reusing the dead one. Do not surface a resume prompt.
-- `found=True, is_orphan=False` (and `status` not `abandoned`) → real prior. Record a `prior_run` decision with outcome `found` (put the `run_id` in `why`) and surface to the caller — only the user can choose resume-vs-fresh.
+- `found=True` AND `status` is `abandoned` or `failed` → a terminal-but-not-`complete` record (the monitor gave up tracking it, or it failed), NOT a live prior (#276). Its `job_ids` are forensic, not in-flight. Proceed to 6d as if fresh — `submit-flow` re-submits over it (it no longer dedups against an abandoned/failed record), and the canary refires rather than reusing the dead one. Do not surface a resume prompt. (A `complete` prior still dedups; an `in_flight` one — including a timed-out run, which stays `in_flight` — still blocks.)
+- `found=True, is_orphan=False` (and `status` is `complete` or `in_flight`) → real prior. Record a `prior_run` decision with outcome `found` (put the `run_id` in `why`) and surface to the caller — only the user can choose resume-vs-fresh.
 - `found=True, is_orphan=True` → half-baked sidecar. Suggest `prune-orphan-sidecars` or proceed and let `submit_flow_batch`'s auto-prune handle it.
 
 ### 6d: Write sidecar + build submit-flow spec

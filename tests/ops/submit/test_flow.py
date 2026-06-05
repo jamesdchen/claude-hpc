@@ -893,15 +893,16 @@ def _seed_record(tmp_path: Any, run_id: str, status: str, job_ids=("13554560",))
         mark_run(tmp_path, run_id, status=status)
 
 
-class TestAbandonedNotBlocking:
-    """#276: a journal entry with `status="abandoned"` + populated `job_ids`
-    must NOT block a fresh submit — the monitor gave up tracking it, so its
-    `job_ids` are forensic, not an in-flight marker. A single transient
-    status-probe failure used to mint such a corpse and wedge every future
-    submit until the user nuked `~/.claude/hpc/<hash>/`."""
+class TestTerminalNotBlocking:
+    """#276: a terminal-but-not-`complete` journal entry (`failed` / `abandoned`)
+    with populated `job_ids` must NOT block a fresh submit — it is not a live run,
+    so its `job_ids` are forensic, not an in-flight marker. A single transient
+    status-probe failure used to mint an `abandoned` corpse and wedge every future
+    submit until the user nuked `~/.claude/hpc/<hash>/`. `complete` still dedups
+    (idempotency); `in_flight` (incl. a timed-out run) still blocks."""
 
-    def test_is_abandoned_helper(self) -> None:
-        from hpc_agent.state.journal import is_abandoned
+    def test_is_resubmittable_terminal_helper(self) -> None:
+        from hpc_agent.state.journal import is_resubmittable_terminal
         from hpc_agent.state.run_record import RunRecord
 
         def _r(status: str) -> RunRecord:
@@ -919,20 +920,47 @@ class TestAbandonedNotBlocking:
                 status=status,
             )
 
-        assert is_abandoned(_r("abandoned")) is True
-        # Only the give-up verdict — complete/failed/in_flight are NOT abandoned.
-        assert is_abandoned(_r("complete")) is False
-        assert is_abandoned(_r("failed")) is False
-        assert is_abandoned(_r("in_flight")) is False
+        # Terminal-but-not-complete → resubmittable (fall through to a fresh submit).
+        assert is_resubmittable_terminal(_r("abandoned")) is True
+        assert is_resubmittable_terminal(_r("failed")) is True
+        # complete still dedups (idempotency); in_flight is still live — incl. a
+        # timed-out run, which stays in_flight in the journal (never `timeout`).
+        assert is_resubmittable_terminal(_r("complete")) is False
+        assert is_resubmittable_terminal(_r("in_flight")) is False
 
-    def test_abandoned_record_does_not_dedup_submit_proceeds(
-        self, tmp_path: Any, _journal_home: Any
+    def test_held_run_still_blocks(self) -> None:
+        """A held run (pending_verdict, #231/#234) is parked awaiting a decision —
+        even though it is `failed` it is NOT resubmittable, so a plain submit can't
+        clobber the hold. The escalation flow owns its resubmission."""
+        from hpc_agent.state.journal import is_resubmittable_terminal
+        from hpc_agent.state.run_record import RunRecord
+
+        held_failed = RunRecord(
+            run_id="r",
+            profile="p",
+            cluster="c",
+            ssh_target="u@h",
+            remote_path="/r",
+            job_name="r",
+            job_ids=["1"],
+            total_tasks=1,
+            submitted_at="t",
+            experiment_dir="/e",
+            status="failed",
+            pending_verdict={"reason": "ambiguous failure"},
+        )
+        assert is_resubmittable_terminal(held_failed) is False
+
+    @pytest.mark.parametrize("status", ["abandoned", "failed"])
+    def test_terminal_record_does_not_dedup_submit_proceeds(
+        self, tmp_path: Any, _journal_home: Any, status: str
     ) -> None:
-        """Acceptance (#276): seed abandoned + job_ids, run submit-flow → proceeds."""
+        """Acceptance (#276): seed a terminal-not-complete record + job_ids, run
+        submit-flow → it PROCEEDS (doesn't short-circuit as deduped)."""
         from hpc_agent.ops import submit_flow as sf_module
         from hpc_agent.ops.submit_flow import SubmitFlowResult, submit_flow_batch
 
-        _seed_record(tmp_path, "r0", "abandoned")
+        _seed_record(tmp_path, "r0", status)
         with (
             mock.patch.object(sf_module, "_preflight_probe"),
             mock.patch.object(sf_module, "_push_and_deploy"),
@@ -967,14 +995,17 @@ class TestAbandonedNotBlocking:
         assert results[0].deduped is True
         assert preflight.call_count == 0  # fully short-circuited — no cluster traffic
 
-    def test_submit_and_record_skips_abandoned(self, tmp_path: Any, _journal_home: Any) -> None:
-        """runner.submit_and_record: an abandoned existing record is not a dedup target."""
+    @pytest.mark.parametrize("status", ["abandoned", "failed"])
+    def test_submit_and_record_skips_terminal(
+        self, tmp_path: Any, _journal_home: Any, status: str
+    ) -> None:
+        """runner.submit_and_record: a terminal-not-complete record is not a dedup target."""
         import warnings
 
         from hpc_agent._wire.actions.submit import SubmitSpec
         from hpc_agent.ops.submit.runner import submit_and_record
 
-        _seed_record(tmp_path, "r0", "abandoned", job_ids=["old"])
+        _seed_record(tmp_path, "r0", status, job_ids=["old"])
         spec = SubmitSpec(
             profile="p",
             cluster="c",
@@ -989,5 +1020,5 @@ class TestAbandonedNotBlocking:
             # No sidecar on disk → the post-qsub finalize warns; not under test.
             warnings.simplefilter("ignore")
             record, deduped = submit_and_record(tmp_path, spec=spec)
-        assert deduped is False  # abandoned → fresh record, not a replay
+        assert deduped is False  # terminal-not-complete → fresh record, not a replay
         assert record.job_ids == ["new"]
