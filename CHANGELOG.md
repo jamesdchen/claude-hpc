@@ -21,6 +21,39 @@ New read-only `scaffold-spec` query verb. When an agent must invoke a verb that 
 - Emits only the **coherent** conda-activation pair: a `conda_env` without a `conda_source` (#281) crashes the cluster preamble, so the half-state is never produced.
 - Read-only (`verb: query`, no side effects): the skeleton rides the envelope `data`, never written to disk. New `scaffold_spec.output.json`; docs at `docs/primitives/scaffold-spec.md`.
 
+## 0.10.11 — 2026-06-05
+
+One upstream fix off the same demo session: tighten the 0.10.3 bare-script-against-register_run guard so the with-trailing-args shape is also refused.
+
+### Fixed — bare-script EXECUTOR guard catches the with-args form too
+
+`incorporation/build/submit_spec.py::_check_register_run_executor` was the 0.10.3 defensive guard (`bf0a4de7`) that refuses an `EXECUTOR` of the shape `python[3] <file>.py` when `<file>.py` is `@register_run`-decorated — that combination silently exits 2 in the cluster-side dispatcher because task kwargs flow through `HPC_KW_<NAME>` env vars, not argv. The guard's `if len(parts) != 2: return` gate was the gap: it only caught the no-args form (`python3 executors/foo.py`). The with-args shape (`python executors/monte_carlo_pi.py --samples 100000 --seed $SEED` — empirical from the 2026-06-05 demo where the orchestrator hand-built the spec, the divined cmd downgraded a `register_run` executor to the bare-script shape, the canary task crashed with `--output-file required`) slipped through.
+
+Tightened to fire on any `python[3] <file>.py [...]` shape against a `register_run`-decorated file, regardless of trailing args. A flag *before* the script (`python -c "..."`, `python -m pkg`, `python -O file.py`) still short-circuits at the `script.endswith(".py")` check — those forms are presumed correct.
+
+Closes the long tail of #275 / #281 / #287's "agent hand-builds the spec and the framework accepts it" pattern at this specific boundary.
+
+### Changed — orchestrator SKILL.md prose: chain sequential `hpc-agent` calls with `&&`
+
+Added a one-line execution-discipline bullet to all seven orchestrator-side SKILL.md (`hpc-submit`, `hpc-status`, `hpc-aggregate`, `hpc-campaign`, `hpc-classify-axis`, `hpc-wrap-entry-point`, `hpc-build-executor`): chain dependent `hpc-agent` calls with `&&` in one Bash block when the next call doesn't branch on prior structured output (e.g. `hpc-agent install-commands && hpc-agent load-context …`). Saves a round-trip + permission prompt per chained pair. Worker-side `hpc-worker.md` keeps its `PreToolUse` chaining block — the worker's one-verb-per-envelope discipline is a separate decision-boundary contract.
+
+## 0.10.10 — 2026-06-05
+
+Two upstream fixes off a live demo session: a broken `PostToolUse` skill-return hook on Windows, and an `interview`-CLI prose mismatch in the classify-axis skill that the agent kept hallucinating into an `--add-turn` flag.
+
+### Fixed — skill-return autofetch hook command is bash-safe on Windows
+
+`agent_assets._HOOK_COMMAND` baked the raw `sys.executable` into the `PostToolUse` hook command string. Claude Code runs hooks via `bash -c '<command>'`. Two failure modes on Windows:
+
+- **Backslashes eaten.** `sys.executable` is a native backslash path (e.g. `C:\Users\james\.venv\Scripts\python.exe`). Bash interprets `\U`, `\j`, `\d` etc. as escape sequences and collapses them, producing `C:Usersjames.venvScriptspython.exe` → "command not found", which silently failed every `Skill` invocation's return-fetch.
+- **Spaces split.** An interpreter under `C:/Program Files/...` (or any repo dir with a space) was split into two argv tokens.
+
+Both fixed: the executable path is normalised to forward slashes and `shlex.quote`d. As a partner fix, `_merge_skill_return_hook` now **replaces** a stale entry whose command differs from the canonical install-time form (the pre-0.10.10 broken Windows entry) instead of treating it as "already-present" by module-path alone — so `hpc-agent install-commands` heals an existing broken settings.json on first re-run. New `"updated"` / `"dry-run-would-update"` actions complement `"added"` / `"already-present"`.
+
+### Fixed — `hpc-classify-axis` Step 6 no longer implies a non-existent CLI surface
+
+Step 6 of `hpc-classify-axis/SKILL.md` told the agent to "add a single turn (`role: agent`)" via the `interview` primitive. The `interview` CLI is one-shot (`--spec` / `--campaign-dir`) with no incremental add-turn surface, so the agent invented `--add-turn` + `--experiment-dir` and failed argparse every run (then printed "Step 6 skipped (transcript verb unavailable)" as its own fallback narration). Rewrote the step to be honest: the rationale is carried forward in the return envelope's `reasoning` field (Step 8); there is no separate transcript CLI call here. Slash-driven runs continue to write their own transcript turns.
+
 ## 0.10.9 — 2026-06-05
 
 A control-flow-out-of-the-LLM batch: pipeline parallelism + guard tightening (PR #282 + the first half of PR #285) followed by four workflow composites that fold the deterministic worker-prompt spines into single typed calls (PR #285 stage 3).

@@ -13,6 +13,7 @@ Agent-facing composition over the **[classify-axis](../../../../docs/primitives/
 ## Execution style
 
 - **Batch independent tool calls into one assistant message.** "Parallel" here means **multiple Bash / Read / Grep / Glob tool-call blocks in a single message** — the harness runs them concurrently. It does NOT mean shell-level concurrency inside one Bash call (`cmd1 & cmd2 & wait`, `parallel`, `xargs -P`), which trips the permission classifier as a compound command and complicates output parsing. Multiple reads, greps, or `hpc-agent describe`/`--help` lookups with no data dependency should each be their own tool-call block in the same message, not chained inside a single shell invocation.
+- **Chain sequential `hpc-agent` calls with `&&` in one Bash block when the next call does NOT branch on prior structured output** (e.g. `hpc-agent install-commands && hpc-agent load-context --experiment-dir .`). Each separate Bash tool call costs a round-trip + permission prompt; chaining unconditionally-sequential dependent invocations into one block saves both at no cost. Do NOT chain past a call whose envelope the next call's args depend on — read the envelope first, then issue the dependent call as its own block. (The framework's dispatched `hpc-worker` subagent blocks `&&` by a `PreToolUse` hook — one verb per envelope is its decision-boundary contract — but that block applies only to the spawned worker, NOT to this orchestrator skill.)
 - **Be terse.** Lead with the action or result; skip filler ("Let me…", "I'll go ahead and…") and trailing restatements of what tool output already shows.
 - **Return via the emit-skill-return file primitive — never via chat.** The Skill tool result is no longer the return mechanism; the parent (`hpc-submit`, `hpc-campaign`, …) reads your return envelope from `<experiment_dir>/.hpc/_returns/hpc-classify-axis.json`. The final step of this skill (Step 7 below) writes that envelope and invokes `hpc-agent emit-skill-return` as the LAST tool call — no closing chat message of any kind. A non-tool-call closing message fires the harness's end-of-turn signal, the parent never resumes, and the user has to type "keep going". The schema for the envelope lives at `hpc_agent/schemas/skill_returns/hpc-classify-axis.json` and is enforced by the emit verb.
 
@@ -148,9 +149,9 @@ hpc-agent classify-axis --experiment-dir <dir> --spec <spec.json>
 
 On a `spec_invalid` envelope the most common cause is a `bounded_halo` whose `halo.expr` is not safe arithmetic over the run's parameters — fall back to `Sequential` and re-invoke. (A human-driven caller surfaces the message and re-elicits; an autonomous caller takes the fail-safe.)
 
-### 6. Persist the *why* (transcript)
+### 6. Carry the *why* into the return envelope
 
-Persist the reasoning via the existing [interview](../../../../docs/primitives/interview.md) primitive — add a single turn (`role: agent`) summarising which tree branch resolved and which parameters were referenced. `classify-axis` records the *answer*; `interview` records the *one-line rationale*. When `classified_by: "interview"`, the slash command writes its own operator/agent turns to the transcript directly — this skill does not duplicate them.
+The one-line rationale (which tree branch resolved, which parameters were referenced) is carried forward in the return envelope's `reasoning` field — written in Step 8, read by the parent skill. There is **no separate transcript CLI call** here: the `interview` primitive is one-shot (`--spec` / `--campaign-dir`), with no incremental add-turn surface. The interview transcript is owned by the slash command (`/classify-axis-hpc` etc.) for human-driven runs; agent-classified runs surface their reasoning through the return envelope, not through `interview.json`.
 
 ### 7. The elision gate is the backstop
 
