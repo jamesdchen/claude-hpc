@@ -21,10 +21,23 @@ from hpc_agent.ops.preflight import check as preflight
 
 
 def _which_for(present: set[str]) -> Callable[[str], str | None]:
-    """Return a ``shutil.which`` stub that resolves only *present* binaries."""
+    """``shutil.which`` stub that resolves a binary when its *capability* is present.
+
+    *present* names capabilities (``"ssh"``, ``"scp"``, ``"rsync"``, ``"tar"``),
+    not literal argv. Production probes the *resolved* ssh/scp binary
+    (``_ssh_binary()`` / ``_scp_binary()`` — a native ``...\\ssh.exe`` path on
+    Windows), so map those resolved names back to their capability key. Without
+    this the stub keys on a bare ``"ssh"`` that production no longer asks for,
+    and every ssh/scp check silently fails on the Windows runner.
+    """
+    resolved = {
+        ssh_options._ssh_binary(): "ssh",
+        ssh_options._scp_binary(): "scp",
+    }
 
     def _which(binary: str) -> str | None:
-        return f"/usr/bin/{binary}" if binary in present else None
+        capability = resolved.get(binary, binary)
+        return f"/usr/bin/{capability}" if capability in present else None
 
     return _which
 
@@ -101,7 +114,7 @@ def test_ssh_check_fails_when_pinned_binary_absent_despite_bare_ssh(
     probe reported green here while production ssh would die — now the probe
     follows ``_ssh_binary()``, so the check fails and names the real binary.
     """
-    pinned = r"C:\Windows\System32\OpenSSH\ssh.exe"
+    pinned = r"C:\Windows\System32\OpenSSH\does-not-exist-ssh.exe"
     monkeypatch.setenv("HPC_SSH_BINARY", pinned)
     # Git Bash's bare ``ssh``/``scp``/``tar`` are present; the pinned path is not.
     with mock.patch.object(preflight.shutil, "which", _which_exact({"ssh", "scp", "tar"})):
