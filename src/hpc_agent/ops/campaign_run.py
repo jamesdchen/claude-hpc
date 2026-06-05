@@ -118,6 +118,18 @@ def campaign_run(experiment_dir: Path, *, spec: CampaignRunSpec) -> CampaignRunR
             job_ids=list(sp.job_ids),
         )
 
+    # Thread the run we ACTUALLY submitted (sp.run_id) into the monitor + aggregate
+    # specs. The per-step loop passes "the returned run_id" to monitor-flow /
+    # aggregate-flow; doing the same here makes the composite robust instead of
+    # trusting the caller to have pre-aligned all three sub-specs' run_id — a
+    # mismatch would otherwise monitor / aggregate the WRONG run silently. On a
+    # `deduped` submit, sp.run_id is the already-live run, which is what we want.
+    run_id = sp.run_id
+    status_spec = spec.status.model_copy(
+        update={"monitor": spec.status.monitor.model_copy(update={"run_id": run_id})}
+    )
+    aggregate_spec = spec.aggregate.model_copy(update={"run_id": run_id})
+
     # 2. Monitor spine. Only a `complete` lifecycle proceeds to aggregate;
     #    failed / abandoned / timeout each stop with needs_decision=True (we
     #    cannot aggregate a run that did not complete). timeout is the budget
@@ -125,7 +137,7 @@ def campaign_run(experiment_dir: Path, *, spec: CampaignRunSpec) -> CampaignRunR
     #    watching — surfaced as run_failed would be wrong, so it gets its own
     #    clean non-aggregated outcome under the abandoned/failed family with a
     #    re-invoke reason.
-    st = status_pipeline(experiment_dir, spec=spec.status)
+    st = status_pipeline(experiment_dir, spec=status_spec)
     if st.stage_reached == "failed":
         return CampaignRunResult(
             stage_reached="run_failed",
@@ -180,7 +192,7 @@ def campaign_run(experiment_dir: Path, *, spec: CampaignRunSpec) -> CampaignRunR
     #    decides whether the partial is acceptable. A clean result is the
     #    iteration's terminal `complete`.
     try:
-        agg = aggregate_flow(experiment_dir, spec=spec.aggregate)
+        agg = aggregate_flow(experiment_dir, spec=aggregate_spec)
     except errors.HpcError as exc:
         return CampaignRunResult(
             stage_reached="aggregate_failed",

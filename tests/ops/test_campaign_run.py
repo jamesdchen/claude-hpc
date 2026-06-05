@@ -159,6 +159,28 @@ def test_deduped_submit_still_monitors_and_aggregates(tmp_path: Path) -> None:
     m_agg.assert_called_once()
 
 
+def test_run_id_threaded_from_submit_into_monitor_and_aggregate(tmp_path: Path) -> None:
+    """campaign-run must monitor + aggregate the run it ACTUALLY submitted
+    (``sp.run_id``), not whatever run_id the caller pre-filled in the status /
+    aggregate sub-specs — otherwise a misaligned spec silently watches/reduces
+    the WRONG run."""
+    from hpc_agent.ops.campaign_run import campaign_run
+
+    spec = _campaign_spec()  # status + aggregate sub-specs carry "ml-abcd1234"
+    submitted = _sp_result("complete", run_id="ml-deadbeef")  # but THIS is the real run
+
+    with (
+        mock.patch(f"{_SEAM}.submit_pipeline", return_value=submitted),
+        mock.patch(f"{_SEAM}.status_pipeline", return_value=_st_result("complete")) as m_status,
+        mock.patch(f"{_SEAM}.aggregate_flow", return_value=_agg_result()) as m_agg,
+    ):
+        campaign_run(tmp_path, spec=spec)
+
+    # monitor + aggregate were re-pointed at the submitted run, not the stale spec.
+    assert m_status.call_args.kwargs["spec"].monitor.run_id == "ml-deadbeef"
+    assert m_agg.call_args.kwargs["spec"].run_id == "ml-deadbeef"
+
+
 # ── run_failed / run_abandoned / timeout ─────────────────────────────────────
 
 
