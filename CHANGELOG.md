@@ -27,6 +27,17 @@ Audit of the per-verb Python startup tax. Every `hpc-agent <verb>` builds the CL
 
 Locked in with `tests/contract/test_no_heavy_toplevel_imports.py`: it AST-scans every framework module (excluding the user-facing `models/mapreduce/templates/` scaffolds) and fails if any imports a heavy data/ML dep (`pandas`, `numpy`, `scipy`, `sklearn`, `pyarrow`, `torch`, `matplotlib`, …) at module level — so a future top-level import re-growing the tax trips in CI, with the function-local fix named in the failure message.
 
+### Changed — parallel-by-default audit: fan check-preflight's two cluster-side ssh probes (#289)
+
+Audit of independent stages running sequentially across the composites. The concrete win: `check-preflight --cluster X --spec <uv-spec>` (the documented submit Step 7, `submit.md:227`) fired TWO independent cluster ssh round-trips back-to-back — the #275 `runtime_uv` probe and the `cluster_ssh_echo` functional probe. They now run **concurrently** on a `ThreadPoolExecutor` (the established `reconcile` pattern — concurrent ssh to one host via the multiplexed ControlMaster), so that pair's wall-clock is one RTT, not two, on every uv-cluster submit. The probes are extracted into `_runtime_uv_check` / `_cluster_ssh_echo_check`; the standalone paths (no `--cluster`, or tcp:22 unreachable) are preserved, and a `threading.Barrier` test pins the concurrency.
+
+The rest of the audit found the high-value fans already in place and the remaining candidates genuinely sequential:
+
+- **`reconcile`** already fans its three ssh calls (status + combined-waves + alive-check) on a thread pool; its `load_run` is a *prerequisite* (it provides `ssh_target`/`job_ids`), not an overlappable stage — the issue's "scheduler probe ∥ local read" win isn't available.
+- **`submit-preflight`** already fans `check-preflight ∥ resolve-resources` (#277); **`monitor-flow`** already batches the per-tick query into one ssh (#251).
+- **`aggregate-flow`** (combine → pull → reduce) and **`status`/`aggregate-preflight`** (install → load → reconcile, where reconcile is built *from* load-context's envelope) are strict data-dependent chains — not parallelisable without changing semantics.
+- Local-read fans (`discover`, `inspect-cluster`) are sub-millisecond and GIL-bound; a thread pool buys nothing.
+
 ## 0.10.11 — 2026-06-05
 
 One upstream fix off the same demo session: tighten the 0.10.3 bare-script-against-register_run guard so the with-trailing-args shape is also refused.
