@@ -12,11 +12,13 @@ are a deliberate follow-up.
 
 Convention
 ----------
-Checkpoints live under ``<result_dir>/_checkpoints/`` as
-``checkpoint-<iteration>.pkl``. ``<result_dir>`` is the per-task output
-directory the dispatcher exports as ``HPC_RESULT_DIR`` (the WIP dir, atomically
-promoted to the final result dir on success) — so a checkpoint written mid-run
-is co-located with the task's outputs and survives a clean resume.
+Checkpoints live as ``checkpoint-<iteration>.pkl`` under the directory the
+dispatcher exports as ``HPC_CHECKPOINT_DIR`` — the STABLE per-task dir (the
+final result dir's ``_checkpoints/``), NOT the WIP dir that is renamed to
+``_wip_*_failed_*`` / recreated on retry. That stability is what lets a killed
+run's checkpoints survive to a ``resubmit --from-checkpoint`` (#294). Outside a
+dispatched task (a bare local run) it falls back to
+``$HPC_RESULT_DIR/_checkpoints`` then ``./_checkpoints``.
 
 An executor loop:
 
@@ -93,8 +95,21 @@ def _resolve_result_dir(result_dir: str | os.PathLike[str] | None) -> Path:
 
 
 def checkpoint_dir(result_dir: str | os.PathLike[str] | None = None) -> Path:
-    """The ``<result_dir>/_checkpoints`` directory (not created)."""
-    return _resolve_result_dir(result_dir) / _CHECKPOINT_SUBDIR
+    """The directory checkpoints live in (not created).
+
+    With an explicit *result_dir*, it's ``<result_dir>/_checkpoints``. Otherwise
+    the dispatcher-provided ``HPC_CHECKPOINT_DIR`` wins — that's the STABLE
+    per-task dir (the final result dir, not the WIP dir that's renamed/cleaned on
+    retry), so a killed run's checkpoints survive to a ``resubmit
+    --from-checkpoint`` (#294). Falls back to ``HPC_RESULT_DIR/_checkpoints``
+    then CWD when no stable dir was provided.
+    """
+    if result_dir is not None:
+        return Path(result_dir) / _CHECKPOINT_SUBDIR
+    env_ckpt = os.environ.get("HPC_CHECKPOINT_DIR")
+    if env_ckpt:
+        return Path(env_ckpt)
+    return _resolve_result_dir(None) / _CHECKPOINT_SUBDIR
 
 
 def checkpoint_iteration(path: str | os.PathLike[str]) -> int | None:

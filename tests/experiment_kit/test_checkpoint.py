@@ -120,6 +120,21 @@ def test_should_checkpoint_unknown_strategy_raises() -> None:
         ck.should_checkpoint(strategy="every-full-moon")
 
 
+def test_checkpoint_dir_prefers_stable_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # #294 PR3: the dispatcher exports HPC_CHECKPOINT_DIR (the STABLE final dir),
+    # which must win over HPC_RESULT_DIR (the WIP dir) so checkpoints survive a
+    # kill/resubmit. An explicit result_dir still overrides both.
+    stable = tmp_path / "final" / "_checkpoints"
+    monkeypatch.setenv("HPC_CHECKPOINT_DIR", str(stable))
+    monkeypatch.setenv("HPC_RESULT_DIR", str(tmp_path / "wip"))  # must be ignored
+    assert ck.checkpoint_dir() == stable
+    ck.write_checkpoint({"x": 1}, iteration=0)  # no explicit result_dir
+    assert (stable / "checkpoint-0.pkl").is_file()
+    assert not (tmp_path / "wip" / "_checkpoints").exists()
+    # explicit result_dir wins over the env.
+    assert ck.checkpoint_dir(tmp_path / "z") == tmp_path / "z" / "_checkpoints"
+
+
 def test_public_reexport_from_experiment_kit() -> None:
     from hpc_agent import experiment_kit as ek
 
