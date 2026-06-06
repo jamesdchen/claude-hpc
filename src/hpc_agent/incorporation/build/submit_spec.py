@@ -309,11 +309,18 @@ def build_submit_spec(
     # never reaches the canary. No-ops unless the kwarg set can be positively
     # established from ``experiment_dir/.hpc/tasks.py``, so an unknowable set
     # can never trigger a false refusal.
-    _check_executor_var_references(
-        job_env.get("EXECUTOR", ""),
-        job_env_keys=set(job_env),
-        kwargs_keys=_resolve_kwargs_keys(experiment_dir),
-    )
+    # Only resolve the kwarg set — which imports ``.hpc/tasks.py`` — when the
+    # effective EXECUTOR actually references a ``$VAR`` worth checking. The
+    # default dispatcher command has none, so the common path (and the
+    # resolve-submit-inputs composite, which already imported tasks.py for
+    # cmd_sha) pays no second user-code import.
+    _effective_executor = job_env.get("EXECUTOR", "")
+    if "$" in _effective_executor:
+        _check_executor_var_references(
+            _effective_executor,
+            job_env_keys=set(job_env),
+            kwargs_keys=_resolve_kwargs_keys(experiment_dir),
+        )
 
     out: dict[str, Any] = {
         "profile": profile,

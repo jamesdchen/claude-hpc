@@ -557,6 +557,27 @@ def test_var_reference_check_noops_when_kwargs_unknowable(
     assert "$SAMPLES" in spec["job_env"]["EXECUTOR"]
 
 
+def test_default_executor_does_not_import_tasks_py(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The $VAR cross-check must NOT import .hpc/tasks.py when the EXECUTOR has no
+    $VAR refs (the default dispatcher command) — otherwise resolve-submit-inputs
+    would re-import user tasks.py a second time on every submit."""
+    import hpc_agent
+
+    calls: list = []
+    real = hpc_agent.load_tasks_module
+    monkeypatch.setattr(
+        hpc_agent, "load_tasks_module", lambda p: (calls.append(p), real(p))[1]
+    )
+    exp = tmp_path / "exp"
+    exp.mkdir()
+    _write_tasks_py(exp, "{'seed': i}")
+    # Default executor (no extra_env) → job_env["EXECUTOR"] has no '$'.
+    build_submit_spec(exp, spec=BuildSubmitSpecInput(**_required()))
+    assert calls == [], "default executor must not trigger a tasks.py import"
+
+
 def test_check_executor_var_references_unit() -> None:
     """Direct coverage of the #292 Bug B predicate."""
     from hpc_agent.incorporation.build.submit_spec import _check_executor_var_references
