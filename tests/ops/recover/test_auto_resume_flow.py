@@ -123,6 +123,51 @@ def test_opt_in_off_skips_the_cluster_fetch(journal_home: Path, experiment: Path
     assert outcome.action == "escalate"
 
 
+# ── lean path: monitor supplies the fresh scheduler-side preempted ids ────
+
+
+def test_supplied_ids_skip_the_cluster_fetch(journal_home: Path, experiment: Path) -> None:
+    """When the monitor passes preempted_task_ids (folded from last_status by
+    the status reporter), the composite resumes from them and does NOT fetch."""
+    _seed_record(experiment)
+    rec = _Recorder(new_job_ids=["9100"])
+
+    def _boom(**kw: Any) -> dict[str, Any]:  # pragma: no cover - must not run
+        raise AssertionError("failures_fetcher called despite supplied ids")
+
+    outcome = maybe_auto_resume(
+        experiment,
+        _RUN_ID,
+        preempted_task_ids=[0, 2],
+        resubmit=rec,
+        failures_fetcher=_boom,
+    )
+
+    assert outcome.action == "resume"
+    assert outcome.task_ids == (0, 2)
+    assert rec.calls[0]["failed_task_ids"] == [0, 2]
+    assert load_run(experiment, _RUN_ID).auto_resume_count == 1
+
+
+def test_empty_supplied_ids_falls_back_to_fetch(journal_home: Path, experiment: Path) -> None:
+    """An empty/None supplied set means 'reporter found none' — fall back to the
+    log-based fetch (cross-scheduler, e.g. SGE without exit codes)."""
+    _seed_record(experiment)
+    rec = _Recorder()
+    fetch = _fetcher([1])
+
+    outcome = maybe_auto_resume(
+        experiment,
+        _RUN_ID,
+        preempted_task_ids=[],  # falsy → fall back
+        resubmit=rec,
+        failures_fetcher=fetch,
+    )
+
+    assert outcome.action == "resume"
+    assert outcome.task_ids == (1,)
+
+
 # ── opt-in ON + preempted + under cap → resume ────────────────────────────
 
 

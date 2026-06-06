@@ -108,21 +108,30 @@ def maybe_auto_resume(
     run_id: str,
     *,
     record: RunRecord | None = None,
+    preempted_task_ids: list[int] | None = None,
     resubmit: Callable[..., Any] = _resubmit_flow,
     failures_fetcher: Callable[..., dict[str, Any]] = _fetch_failures,
 ) -> AutoResumeOutcome:
     """Consult the auto-resume gate for *run_id* and fire a resubmit if it says so.
 
-    Pulls the cluster-authoritative preempted set (via *failures_fetcher*,
-    defaulting to :func:`fetch_failures`), calls
-    :func:`decide_auto_resume_from_ids` against the run's opt-in policy +
-    cap, and on a ``"resume"`` verdict re-submits exactly the preempted task
-    ids ``from_checkpoint`` via *resubmit* (defaults to
-    :func:`resubmit_flow`), then increments the run's ``auto_resume_count``.
-    Every other verdict is a no-op that returns the gate's escalation reason.
+    Sources the preempted set, calls :func:`decide_auto_resume_from_ids`
+    against the run's opt-in policy + cap, and on a ``"resume"`` verdict
+    re-submits exactly the preempted task ids ``from_checkpoint`` via
+    *resubmit* (defaults to :func:`resubmit_flow`), then increments the run's
+    ``auto_resume_count``. Every other verdict is a no-op returning the gate's
+    escalation reason.
 
-    *record* may be supplied to avoid a redundant journal read (the monitor
-    already holds a fresh record); otherwise it is loaded here. *resubmit*
+    Preempted-set sourcing — both fresh (current-attempt), never the
+    never-cleared sidecar mark:
+
+    * *preempted_task_ids* — when the monitor already has the scheduler-side
+      signal off ``last_status`` (the status reporter folds in exit-130/143
+      / state-PREEMPTED ids), it passes them here and we skip the round-trip.
+    * Otherwise we fall back to :func:`fetch_failures` (log-fingerprint
+      classification) — cross-scheduler robust (e.g. SGE, where the live
+      query carries no exit code), at the cost of one terminal-time fetch.
+
+    *record* may be supplied to avoid a redundant journal read. *resubmit*
     and *failures_fetcher* are injection seams for tests.
     """
     if record is None:
@@ -135,14 +144,21 @@ def maybe_auto_resume(
     if not record.auto_resume_on_kill:
         return AutoResumeOutcome("escalate", "auto_resume_on_kill not enabled")
 
-    preempted_ids, fetch_reason = _authoritative_preempted_ids(
-        experiment_dir, run_id, failures_fetcher
-    )
-    if preempted_ids is None:
-        return AutoResumeOutcome("escalate", fetch_reason)
+    if preempted_task_ids:
+        # Lean path: the monitor already carries the fresh scheduler signal.
+        resumable: list[int] = [int(i) for i in preempted_task_ids]
+    else:
+        # No pre-supplied signal (older reporter, or a scheduler whose live
+        # query has no exit code) → log-based fetch, cross-scheduler robust.
+        fetched, fetch_reason = _authoritative_preempted_ids(
+            experiment_dir, run_id, failures_fetcher
+        )
+        if fetched is None:
+            return AutoResumeOutcome("escalate", fetch_reason)
+        resumable = fetched
 
     decision = decide_auto_resume_from_ids(
-        preempted_ids,
+        resumable,
         policy_on=bool(record.auto_resume_on_kill),
         count=int(record.auto_resume_count),
         cap=int(record.max_auto_resumes),

@@ -399,7 +399,18 @@ def monitor_flow(
             if record.auto_resume_on_kill:
                 from hpc_agent.ops.auto_resume_flow import maybe_auto_resume
 
-                outcome = maybe_auto_resume(experiment_dir, run_id, record=record)
+                # The status reporter folds the fresh scheduler-side preempt
+                # signal (exit 130/143 / state PREEMPTED) into last_status, so
+                # pass it straight through — the composite then needs no second
+                # round-trip. Absent (older reporter / SGE without exit codes)
+                # → the composite falls back to a log-based fetch.
+                _preempted = last_status.get("preempted_task_ids")
+                outcome = maybe_auto_resume(
+                    experiment_dir,
+                    run_id,
+                    record=record,
+                    preempted_task_ids=_preempted if isinstance(_preempted, list) else None,
+                )
                 if outcome.action == "resume":
                     actions.append(
                         {
