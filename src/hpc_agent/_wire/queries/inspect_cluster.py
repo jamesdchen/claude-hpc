@@ -33,3 +33,16 @@ class InspectClusterResult(BaseModel):
     errors: list[str] = Field(
         description="Non-fatal per-node errors (e.g. one node failed to report). Fatal cases raise ssh_unreachable instead.",
     )
+    parallel_environments: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Scheduler 'parallel environments' — the named pools you target for "
+            "(multi-rank) work: SGE PEs (qconf -spl/-sp), SLURM partitions "
+            "(scontrol show partition), or PBS execution queues (qstat -Qf). Each "
+            "carries at least {name, kind, slots}; kind is smp (single-node only), "
+            "mpi (multi-node capable), or other, derived from the scheduler's "
+            "node-span rule (SGE allocation_rule; SLURM/PBS MaxNodes/nodect=1 => "
+            "smp). SGE entries add allocation_rule; SLURM/PBS add max_nodes. "
+            "Optional for back-compat with snapshots written before #293."
+        ),
+    )
