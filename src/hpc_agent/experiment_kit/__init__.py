@@ -67,6 +67,7 @@ from hpc_agent.experiment_kit.checkpoint import (
     latest_checkpoint,
     read_checkpoint,
     read_latest_checkpoint,
+    run_iterations,
     should_checkpoint,
     write_checkpoint,
 )
@@ -118,6 +119,7 @@ __all__ = [
     "latest_checkpoint",
     "checkpoint_dir",
     "should_checkpoint",
+    "run_iterations",
     # Layer 2 — parallelization planner
     "DataAxis",
     "Independent",

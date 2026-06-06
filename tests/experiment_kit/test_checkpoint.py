@@ -135,6 +135,62 @@ def test_checkpoint_dir_prefers_stable_env(tmp_path: Path, monkeypatch: pytest.M
     assert ck.checkpoint_dir(tmp_path / "z") == tmp_path / "z" / "_checkpoints"
 
 
+def test_run_iterations_fresh_run_completes_and_checkpoints(tmp_path: Path) -> None:
+    final = ck.run_iterations(
+        lambda s, i: s + 1, init=0, n=5, result_dir=tmp_path, checkpoint_every=1
+    )
+    assert final == 5
+    assert ck.latest_checkpoint(result_dir=tmp_path).name == "checkpoint-4.pkl"
+    assert ck.read_checkpoint(ck.latest_checkpoint(result_dir=tmp_path)) == 5
+
+
+def test_run_iterations_resumes_and_skips_done_work(tmp_path: Path) -> None:
+    # Pre-seed a checkpoint at iteration 4 (state=5): a resume must continue from
+    # iteration 5 and never re-run 0..4 — the executor side of --from-checkpoint.
+    ck.write_checkpoint(5, iteration=4, result_dir=tmp_path)
+    calls: list[int] = []
+
+    def step(state: int, i: int) -> int:
+        calls.append(i)
+        return state + 1
+
+    final = ck.run_iterations(step, init=0, n=10, result_dir=tmp_path, checkpoint_every=1)
+    assert final == 10
+    assert calls == [5, 6, 7, 8, 9]  # 0..4 skipped
+
+
+def test_run_iterations_init_callable_lazy_on_resume(tmp_path: Path) -> None:
+    ck.write_checkpoint(3, iteration=0, result_dir=tmp_path)  # resume → state 3, iter 1
+    called: list[int] = []
+
+    def init() -> int:
+        called.append(1)
+        return 0
+
+    final = ck.run_iterations(
+        lambda s, i: s + 1, init=init, n=2, result_dir=tmp_path, checkpoint_every=1
+    )
+    assert called == []  # init NOT called on resume
+    assert final == 4
+
+
+def test_run_iterations_checkpoints_final_state_without_cadence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Default strategy=interval (30 min) never fires in a fast loop, but the
+    # final state must still be checkpointed so a resume redoes nothing.
+    monkeypatch.delenv("HPC_WALLTIME_END_EPOCH", raising=False)
+    final = ck.run_iterations(lambda s, i: s + 1, init=0, n=5, result_dir=tmp_path)
+    assert final == 5
+    assert ck.latest_checkpoint(result_dir=tmp_path).name == "checkpoint-4.pkl"
+    assert ck.read_checkpoint(ck.latest_checkpoint(result_dir=tmp_path)) == 5
+
+
+def test_run_iterations_zero_iterations_is_noop(tmp_path: Path) -> None:
+    assert ck.run_iterations(lambda s, i: s + 1, init=42, n=0, result_dir=tmp_path) == 42
+    assert ck.latest_checkpoint(result_dir=tmp_path) is None
+
+
 def test_public_reexport_from_experiment_kit() -> None:
     from hpc_agent import experiment_kit as ek
 
@@ -145,5 +201,6 @@ def test_public_reexport_from_experiment_kit() -> None:
         "latest_checkpoint",
         "checkpoint_dir",
         "should_checkpoint",
+        "run_iterations",
     ):
         assert hasattr(ek, name), f"{name} not re-exported from experiment_kit"

@@ -56,6 +56,7 @@ import pickle
 import re
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,7 @@ __all__ = [
     "read_latest_checkpoint",
     "checkpoint_iteration",
     "should_checkpoint",
+    "run_iterations",
 ]
 
 # Per-task checkpoint subdir + filename shape. Kept deliberately simple so the
@@ -266,3 +268,77 @@ def should_checkpoint(
     raise ValueError(
         f"unknown checkpoint strategy: {strategy!r} (expected 'walltime_margin' or 'interval')"
     )
+
+
+def run_iterations(
+    step: Callable[[Any, int], Any],
+    *,
+    init: Any,
+    n: int,
+    result_dir: str | os.PathLike[str] | None = None,
+    checkpoint_every: int | None = None,
+    strategy: str = "interval",
+    interval_min: float = 30.0,
+    margin_min: float = 10.0,
+) -> Any:
+    """Drive an iterative computation with framework-owned checkpoint + resume.
+
+    The ``register_run`` principle extended to durability: you write the
+    per-step transition and the starting state; the framework owns the loop, the
+    checkpoint *writes*, AND the *resume* — so an executor becomes
+    preemption-safe with NO hand-rolled checkpoint plumbing. This is the
+    convention an agent can target (or generate from a plain loop), so that
+    eventually nothing checkpoint-specific is hand-written at all.
+
+    Parameters
+    ----------
+    step:
+        ``step(state, iteration) -> new_state`` — one iteration's transition.
+        Should be deterministic in *state* so a resumed run reproduces the
+        un-checkpointed tail exactly.
+    init:
+        Starting state for a FRESH run (used only when no checkpoint exists).
+        A value, or a zero-arg callable (called lazily, so an expensive init is
+        skipped entirely on resume).
+    n:
+        Total iterations; the loop runs ``range(resume_point, n)``.
+    result_dir:
+        Passed through to the checkpoint helpers (defaults to the dispatcher's
+        ``HPC_CHECKPOINT_DIR`` / ``HPC_RESULT_DIR``).
+    checkpoint_every:
+        When truthy, checkpoint every N completed iterations (deterministic
+        cadence). When None/0 (default), cadence is driven by
+        :func:`should_checkpoint` with *strategy* — so a long solve checkpoints
+        on the time interval / walltime margin rather than every step.
+
+    Returns the final state. On resume (a checkpoint exists) it loads the latest
+    and continues from the next iteration, skipping already-done work — the
+    executor side of ``resubmit --from-checkpoint``.
+    """
+    state, resume_point = read_latest_checkpoint(result_dir=result_dir)
+    if state is None:
+        state = init() if callable(init) else init
+        resume_point = 0
+
+    total = int(n)
+    start = int(resume_point)
+    last_checkpointed = -1
+    for i in range(start, total):
+        state = step(state, i)
+        if checkpoint_every:
+            due = (i + 1) % int(checkpoint_every) == 0
+        else:
+            due = should_checkpoint(
+                strategy=strategy, interval_min=interval_min, margin_min=margin_min
+            )
+        if due:
+            write_checkpoint(state, iteration=i, result_dir=result_dir)
+            last_checkpointed = i
+
+    # Always persist the FINAL state when the loop ran — so a resume landing
+    # after the last iteration (e.g. killed during output promotion) has nothing
+    # to redo, and the last iteration's work is never lost to a cadence that
+    # happened not to fire on it.
+    if total > start and last_checkpointed != total - 1:
+        write_checkpoint(state, iteration=total - 1, result_dir=result_dir)
+    return state
