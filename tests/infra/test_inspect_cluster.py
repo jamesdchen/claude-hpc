@@ -182,11 +182,17 @@ class _FakeRunner:
         return 0, "", ""
 
 
-def _sge_combined(qhost_out: str, qhost_rc: int, qstat_out: str, qstat_rc: int) -> str:
-    """Build the marker-framed stdout the #295 Fix 3 merged qhost+qstat ssh emits."""
+def _sge_combined(
+    qhost_out: str, qhost_rc: int, qstat_out: str, qstat_rc: int, qconf_out: str = ""
+) -> str:
+    """Build the marker-framed stdout the merged qhost+qstat(+qconf) ssh emits.
+
+    qhost+qstat are #295 Fix 3; the qconf section is #293 PR1's PE enumeration.
+    """
     return (
         f"__HPC_QHOST__\n{qhost_out}\n__HPC_QHOST_RC__={qhost_rc}\n"
         f"__HPC_QSTAT__\n{qstat_out}\n__HPC_QSTAT_RC__={qstat_rc}\n"
+        f"__HPC_QCONF__\n{qconf_out}\n__HPC_QCONF_RC__=0\n"
     )
 
 
@@ -346,3 +352,50 @@ class TestInspectClusterEntry:
         assert _split_section(out, "__HPC_QSTAT__", "__HPC_QSTAT_RC__") == (2, "JOB-LINE")
         # Absent markers (round-trip died before the shell ran) → (None, "").
         assert _split_section("", "__HPC_QHOST__", "__HPC_QHOST_RC__") == (None, "")
+
+    def test_sge_enumerates_parallel_environments(self, tmp_path, monkeypatch) -> None:
+        # #293 PR1: inspect-cluster surfaces SGE parallel environments, classified
+        # by allocation_rule into single-node (smp) vs multi-node (mpi) capability.
+        cfg = _write_clusters(tmp_path, scheduler="sge")
+        monkeypatch.setenv("HPC_CLUSTERS_CONFIG", str(cfg))
+        ins._CACHE.clear()
+        qconf = (
+            "@@PE@@ make\n"
+            "pe_name            make\n"
+            "slots              999\n"
+            "allocation_rule    $round_robin\n"
+            "@@PE@@ smp\n"
+            "pe_name            smp\n"
+            "slots              512\n"
+            "allocation_rule    $pe_slots\n"
+            "@@PE@@ mpi\n"
+            "pe_name            mpi\n"
+            "slots              9999\n"
+            "allocation_rule    $fill_up\n"
+        )
+        runner = _FakeRunner({"echo __HPC_QHOST__": (0, _sge_combined("", 0, "", 0, qconf), "")})
+        snap = ins.inspect_cluster("discovery", runner=runner, use_cache=False)
+        pes = {pe["name"]: pe for pe in snap.parallel_environments}
+        assert set(pes) == {"make", "smp", "mpi"}
+        assert pes["smp"]["kind"] == "smp" and pes["smp"]["slots"] == 512
+        assert pes["mpi"]["kind"] == "mpi"
+        assert pes["make"]["kind"] == "mpi"  # $round_robin → multi-node capable
+        assert pes["make"]["allocation_rule"] == "$round_robin"
+        # surfaced on the serialized envelope too
+        assert "parallel_environments" in snap.to_dict()
+
+    def test_parse_parallel_environments_unit(self) -> None:
+        from hpc_agent.infra.inspect.sge import _classify_pe, _parse_parallel_environments
+
+        assert _classify_pe("$pe_slots") == "smp"
+        assert _classify_pe("$round_robin") == "mpi"
+        assert _classify_pe("$fill_up") == "mpi"
+        assert _classify_pe("4") == "mpi"
+        assert _classify_pe("$something_weird") == "other"
+        assert _parse_parallel_environments("") == []
+        pes = _parse_parallel_environments(
+            "@@PE@@ orte\nallocation_rule    $round_robin\nslots              16\n"
+        )
+        assert pes == [
+            {"name": "orte", "allocation_rule": "$round_robin", "kind": "mpi", "slots": 16}
+        ]

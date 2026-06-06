@@ -30,7 +30,76 @@ from ._common import (
     _is_stressed,
 )
 
-__all__ = ["_sge_inspect", "_parse_qhost", "_parse_qstat_full", "_split_section"]
+__all__ = [
+    "_sge_inspect",
+    "_parse_qhost",
+    "_parse_qstat_full",
+    "_split_section",
+    "_parse_parallel_environments",
+]
+
+
+def _classify_pe(allocation_rule: str) -> str:
+    """Classify an SGE parallel environment by its ``allocation_rule``.
+
+    The allocation_rule — not the PE's *name* — is the contract that decides
+    whether a job's slots can span hosts, so it's the rigorous signal for "can
+    this PE run a multi-node MPI job?":
+
+    * ``$pe_slots`` → ``"smp"``: every slot is placed on ONE host (single-node
+      shared-memory parallelism only).
+    * ``$round_robin`` / ``$fill_up`` / a fixed integer → ``"mpi"``: slots may
+      span hosts (multi-node capable).
+    * anything else → ``"other"`` (carry the raw rule for the caller to judge).
+    """
+    rule = (allocation_rule or "").strip()
+    if rule == "$pe_slots":
+        return "smp"
+    if rule in ("$round_robin", "$fill_up") or rule.isdigit():
+        return "mpi"
+    return "other"
+
+
+def _pe_entry(name: str, fields: dict[str, str]) -> dict[str, Any]:
+    allocation_rule = fields.get("allocation_rule", "")
+    return {
+        "name": name,
+        "allocation_rule": allocation_rule,
+        "kind": _classify_pe(allocation_rule),
+        "slots": _to_int_or_none(fields.get("slots", "")),
+    }
+
+
+def _parse_parallel_environments(text: str) -> list[dict[str, Any]]:
+    """Parse the merged ``qconf -spl`` / ``qconf -sp <pe>`` section (#293 PR1).
+
+    The probe frames each PE as ``@@PE@@ <name>`` followed by that PE's
+    ``qconf -sp`` ``key   value`` lines. Returns one ``{name, allocation_rule,
+    kind, slots}`` dict per PE. Permissive — an unrecognized line is skipped,
+    never raised — matching the rest of the inspect package's "partial over
+    nothing" stance.
+    """
+    pes: list[dict[str, Any]] = []
+    name: str | None = None
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("@@PE@@"):
+            if name is not None:
+                pes.append(_pe_entry(name, fields))
+            name = stripped[len("@@PE@@") :].strip()
+            fields = {}
+            continue
+        if name is None:
+            continue
+        parts = stripped.split(None, 1)
+        if len(parts) == 2:
+            fields[parts[0]] = parts[1].strip()
+    if name is not None:
+        pes.append(_pe_entry(name, fields))
+    return pes
 
 
 def _split_section(stdout: str, begin: str, rc_marker: str) -> tuple[int | None, str]:
@@ -85,18 +154,32 @@ def _sge_inspect(
     # host with broken ControlMaster multiplexing pays one cold handshake, not
     # two. The combined exit code is the last command's, so per-section codes are
     # captured inline and parsed back out.
+    # Third section (#293 PR1): enumerate parallel environments. ``qconf -spl``
+    # lists PE names; ``qconf -sp <pe>`` details each (allocation_rule + slots).
+    # The ``for`` loop lists AND details in the SAME round-trip, so PE discovery
+    # costs no extra handshake. ``2>/dev/null`` keeps a qconf-less cluster (or a
+    # PE that vanished mid-loop) from polluting the captured stream — the section
+    # simply comes back empty and parallel_environments is [].
     combined = (
         "echo __HPC_QHOST__; qhost -F gpu -q; echo __HPC_QHOST_RC__=$?; "
-        "echo __HPC_QSTAT__; qstat -u '*' -F gpu; echo __HPC_QSTAT_RC__=$?"
+        "echo __HPC_QSTAT__; qstat -u '*' -F gpu; echo __HPC_QSTAT_RC__=$?; "
+        "echo __HPC_QCONF__; "
+        'for pe in $(qconf -spl 2>/dev/null); do echo "@@PE@@ $pe"; '
+        'qconf -sp "$pe" 2>/dev/null; done; echo __HPC_QCONF_RC__=$?'
     )
     rc_all, out_all, err = runner.run(combined)
     rc, out = _split_section(out_all, "__HPC_QHOST__", "__HPC_QHOST_RC__")
     rc2, out2 = _split_section(out_all, "__HPC_QSTAT__", "__HPC_QSTAT_RC__")
+    _rc3, out3 = _split_section(out_all, "__HPC_QCONF__", "__HPC_QCONF_RC__")
     err2 = err
     # Markers absent → the round-trip died before the shell ran (ssh error);
     # fall back to the combined result so the qhost-failure branch still fires.
     if rc is None:
         rc, out = rc_all, out_all
+
+    # Parallel environments are surfaced regardless of qhost state — a qhost
+    # hiccup shouldn't hide the PE list, which came back on the same connection.
+    snap.parallel_environments = _parse_parallel_environments(out3)
 
     if rc != 0:
         errors.append({"code": "qhost_failed", "detail": err.strip()[:500]})

@@ -78,6 +78,11 @@ class ClusterSnapshot:
     now_iso: str
     nodes: list[NodeSnapshot]
     errors: list[dict[str, str]] = dataclasses.field(default_factory=list)
+    # Scheduler parallel environments (#293 PR1) — SGE ``qconf -spl`` enumerated
+    # + classified by allocation_rule into single-node (smp) vs multi-node (mpi)
+    # capability. Empty on schedulers that don't yet enumerate them (SLURM/PBS).
+    # Each entry: {name, allocation_rule, kind, slots}.
+    parallel_environments: list[dict[str, Any]] = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,6 +91,7 @@ class ClusterSnapshot:
             "now_iso": self.now_iso,
             "nodes": [n.to_dict() for n in self.nodes],
             "errors": list(self.errors),
+            "parallel_environments": [dict(pe) for pe in self.parallel_environments],
         }
 
 
@@ -179,4 +185,5 @@ def _snapshot_from_dict(d: dict[str, Any]) -> ClusterSnapshot:
         now_iso=d["now_iso"],
         nodes=nodes,
         errors=list(d.get("errors", [])),
+        parallel_environments=list(d.get("parallel_environments", [])),
     )
