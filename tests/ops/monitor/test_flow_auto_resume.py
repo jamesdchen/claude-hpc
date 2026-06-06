@@ -144,8 +144,12 @@ def test_resume_verdict_keeps_polling_to_complete(
             auto_resume_count=record.auto_resume_count + 1,
         )
         return AutoResumeOutcome(
-            "resume", "preempted tasks present and under resume cap",
-            task_ids=(0, 1), resubmitted=True, new_job_ids=["9100"], auto_resume_count=1,
+            "resume",
+            "preempted tasks present and under resume cap",
+            task_ids=(0, 1),
+            resubmitted=True,
+            new_job_ids=["9100"],
+            auto_resume_count=1,
         )
 
     monkeypatch.setattr(auto_resume_module, "maybe_auto_resume", _fake_resume)
