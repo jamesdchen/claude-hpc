@@ -397,10 +397,12 @@ class TestInspectClusterEntry:
         snap = ins.inspect_cluster("discovery", runner=runner, use_cache=False)
         pes = {pe["name"]: pe for pe in snap.parallel_environments}
         assert set(pes) == {"make", "smp", "mpi"}
-        assert pes["smp"]["kind"] == "smp" and pes["smp"]["slots"] == 512
-        assert pes["mpi"]["kind"] == "mpi"
+        assert all(pe["source"] == "pe" for pe in pes.values())
+        assert pes["smp"]["kind"] == "smp" and pes["smp"]["max_nodes"] == 1
+        assert pes["smp"]["raw"]["slots"] == 512
+        assert pes["mpi"]["kind"] == "mpi" and pes["mpi"]["max_nodes"] is None
         assert pes["make"]["kind"] == "mpi"  # $round_robin → multi-node capable
-        assert pes["make"]["allocation_rule"] == "$round_robin"
+        assert pes["make"]["raw"]["allocation_rule"] == "$round_robin"
         # surfaced on the serialized envelope too
         assert "parallel_environments" in snap.to_dict()
 
@@ -417,7 +419,13 @@ class TestInspectClusterEntry:
             "@@PE@@ orte\nallocation_rule    $round_robin\nslots              16\n"
         )
         assert pes == [
-            {"name": "orte", "allocation_rule": "$round_robin", "kind": "mpi", "slots": 16}
+            {
+                "name": "orte",
+                "source": "pe",
+                "kind": "mpi",
+                "max_nodes": None,
+                "raw": {"allocation_rule": "$round_robin", "slots": 16},
+            }
         ]
 
     def test_slurm_enumerates_partitions_as_parallel_environments(
@@ -448,8 +456,10 @@ class TestInspectClusterEntry:
         snap = ins.inspect_cluster("discovery", runner=runner, use_cache=False)
         pes = {pe["name"]: pe for pe in snap.parallel_environments}
         assert set(pes) == {"batch", "single"}
-        assert pes["batch"]["kind"] == "mpi" and pes["batch"]["slots"] == 512
-        assert pes["single"]["kind"] == "smp" and pes["single"]["max_nodes"] == "1"
+        assert all(pe["source"] == "partition" for pe in pes.values())
+        assert pes["batch"]["kind"] == "mpi" and pes["batch"]["max_nodes"] is None  # UNLIMITED
+        assert pes["batch"]["raw"]["slots"] == 512
+        assert pes["single"]["kind"] == "smp" and pes["single"]["max_nodes"] == 1
 
     def test_parse_scontrol_show_partition_unit(self) -> None:
         from hpc_agent.infra.inspect.slurm import parse_scontrol_show_partition
@@ -459,6 +469,7 @@ class TestInspectClusterEntry:
             "PartitionName=debug\n   MaxNodes=1 TotalCPUs=16\n"
         )
         pes = {p["name"]: p for p in parse_scontrol_show_partition(text)}
-        assert pes["gpu"]["kind"] == "mpi" and pes["gpu"]["slots"] == 256
-        assert pes["debug"]["kind"] == "smp"
+        assert pes["gpu"]["kind"] == "mpi" and pes["gpu"]["max_nodes"] == 8
+        assert pes["gpu"]["raw"]["slots"] == 256 and pes["gpu"]["source"] == "partition"
+        assert pes["debug"]["kind"] == "smp" and pes["debug"]["max_nodes"] == 1
         assert parse_scontrol_show_partition("") == []

@@ -35,6 +35,7 @@ from ._common import (
     _hours_since,
     _is_stressed,
     _parse_gpu_count_from_tres,
+    _parse_max_nodes,
     _split_section,
 )
 
@@ -190,8 +191,9 @@ def parse_scontrol_show_partition(text: str) -> list[dict[str, Any]]:
     parallelism directly via ``--nodes`` — so a *partition* is the closest
     analog: the named pool you target, carrying its node-span limit. Blocks are
     blank-line separated whitespace ``Key=Value`` pairs (same shape as
-    ``scontrol show node``, so it reuses the KV parser). Returns ``{name, kind,
-    slots, max_nodes}`` per partition, where ``kind`` is ``smp`` only when
+    ``scontrol show node``, so it reuses the KV parser). Returns the normalized
+    ``_ParallelEnvironment`` shape ``{name, source="partition", kind, max_nodes,
+    raw={slots}}`` per partition, where ``kind`` is ``smp`` only when
     ``MaxNodes=1`` (capped to one node) else ``mpi`` (SLURM is multi-node-capable
     by default). Permissive — partial input yields partial entries, never raises.
     """
@@ -205,13 +207,15 @@ def parse_scontrol_show_partition(text: str) -> list[dict[str, Any]]:
         name = fields.get("PartitionName", "").strip()
         if not name:
             continue
-        max_nodes = fields.get("MaxNodes", "").strip()
+        max_nodes = _parse_max_nodes(fields.get("MaxNodes", ""))
         out.append(
             {
                 "name": name,
-                "kind": "smp" if max_nodes == "1" else "mpi",
-                "slots": _to_int_or_none(fields.get("TotalCPUs")),
+                "source": "partition",
+                # SLURM is multi-node-capable unless MaxNodes pins to 1.
+                "kind": "smp" if max_nodes == 1 else "mpi",
                 "max_nodes": max_nodes,
+                "raw": {"slots": _to_int_or_none(fields.get("TotalCPUs"))},
             }
         )
     return out

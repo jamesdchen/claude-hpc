@@ -29,6 +29,22 @@ __all__ = [
 ]
 
 
+def _parse_max_nodes(raw: str) -> int | None:
+    """Normalize a scheduler's max-nodes-per-job field to ``int | None`` (#293).
+
+    ``None`` means unbounded or unknown — SLURM ``UNLIMITED``, an unset PBS
+    ``resources_max.nodect``, or an unparseable value all map to it, so a
+    consumer can treat None uniformly as "no node-span ceiling".
+    """
+    raw = (raw or "").strip()
+    if not raw or raw.upper() == "UNLIMITED":
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 def _split_section(stdout: str, begin: str, rc_marker: str) -> tuple[int | None, str]:
     """Extract one ``echo``-delimited section from a merged multi-command stdout.
 

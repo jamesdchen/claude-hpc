@@ -63,11 +63,20 @@ def _classify_pe(allocation_rule: str) -> str:
 
 def _pe_entry(name: str, fields: dict[str, str]) -> dict[str, Any]:
     allocation_rule = fields.get("allocation_rule", "")
+    kind = _classify_pe(allocation_rule)
     return {
         "name": name,
-        "allocation_rule": allocation_rule,
-        "kind": _classify_pe(allocation_rule),
-        "slots": _to_int_or_none(fields.get("slots", "")),
+        "source": "pe",
+        "kind": kind,
+        # $pe_slots places every slot on one host → single-node (max_nodes=1); a
+        # multi-node rule ($round_robin/$fill_up/int) has no ceiling from the
+        # rule itself → None (unbounded). allocation_rule + slots are SGE-specific
+        # → raw.
+        "max_nodes": 1 if kind == "smp" else None,
+        "raw": {
+            "allocation_rule": allocation_rule,
+            "slots": _to_int_or_none(fields.get("slots", "")),
+        },
     }
 
 
@@ -75,10 +84,11 @@ def _parse_parallel_environments(text: str) -> list[dict[str, Any]]:
     """Parse the merged ``qconf -spl`` / ``qconf -sp <pe>`` section (#293 PR1).
 
     The probe frames each PE as ``@@PE@@ <name>`` followed by that PE's
-    ``qconf -sp`` ``key   value`` lines. Returns one ``{name, allocation_rule,
-    kind, slots}`` dict per PE. Permissive — an unrecognized line is skipped,
-    never raised — matching the rest of the inspect package's "partial over
-    nothing" stance.
+    ``qconf -sp`` ``key   value`` lines. Returns the normalized
+    ``_ParallelEnvironment`` shape ``{name, source="pe", kind, max_nodes,
+    raw={allocation_rule, slots}}`` per PE. Permissive — an unrecognized line is
+    skipped, never raised — matching the rest of the inspect package's "partial
+    over nothing" stance.
     """
     pes: list[dict[str, Any]] = []
     name: str | None = None

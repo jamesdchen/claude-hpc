@@ -45,6 +45,7 @@ from ._common import (
     NodeSnapshot,
     _CommandRunner,
     _is_stressed,
+    _parse_max_nodes,
     _split_section,
 )
 
@@ -152,7 +153,7 @@ def _pbs_inspect(
         now_iso=utcnow_iso(),
         nodes=nodes,
         errors=[],
-        parallel_environments=parse_qstat_queues(queues_out),
+        parallel_environments=parse_qstat_queues(queues_out, family=family),
     )
 
 
@@ -177,8 +178,14 @@ def _exec_host_cpus(exec_host: str) -> dict[str, int]:
         host = seg.split("/", 1)[0].split(".")[0]
         if not host:
             continue
-        m = re.search(r"\*(\d+)", seg)
-        cpus = int(m.group(1)) if m else 1
+        # cores on this host: PBS Pro ``/0*4`` → 4; a TORQUE-style range
+        # ``/0-3`` → 4; otherwise a single core (``/0``) → 1.
+        star = re.search(r"\*(\d+)", seg)
+        if star:
+            cpus = int(star.group(1))
+        else:
+            rng = re.search(r"/(\d+)-(\d+)", seg)
+            cpus = (int(rng.group(2)) - int(rng.group(1)) + 1) if rng else 1
         counts[host] = counts.get(host, 0) + cpus
     return counts
 
@@ -228,32 +235,52 @@ def parse_qstat_co_tenants(text: str) -> dict[str, list[dict[str, Any]]]:
     return out
 
 
-def _queue_entry(name: str, fields: dict[str, str]) -> dict[str, Any] | None:
-    """Build a parallel_environment entry for one PBS queue, or None to skip it.
+def _queue_max_nodes(fields: dict[str, str], *, family: str) -> int | None:
+    """Per-job node ceiling for a PBS queue, family-aware (#293).
+
+    PBS Pro states it as ``resources_max.nodect`` (a plain int). TORQUE uses
+    ``resources_max.nodes``, which can be a *nodespec* (``4`` or ``4:ppn=8``) —
+    take the leading node count. TORQUE builds that emit ``nodect`` too are
+    honored as a fallback.
+    """
+    if family == "torque":
+        raw = (
+            fields.get("resources_max.nodes") or fields.get("resources_max.nodect") or ""
+        ).strip()
+        m = re.match(r"(\d+)", raw)
+        return int(m.group(1)) if m else None
+    return _parse_max_nodes(fields.get("resources_max.nodect", ""))
+
+
+def _queue_entry(name: str, fields: dict[str, str], *, family: str) -> dict[str, Any] | None:
+    """Build the normalized parallel_environment entry for one PBS queue, or None.
 
     Route queues forward jobs to execution queues rather than running them, so
     they aren't a place you'd target a multi-rank job — skipped. ``kind`` is
-    ``smp`` only when ``resources_max.nodect=1`` (capped to one node), else
-    ``mpi`` (PBS allows multi-node by default).
+    ``smp`` only when the per-job node ceiling is 1, else ``mpi`` (PBS allows
+    multi-node by default). The per-job ``slots`` ceiling is PBS-specific → raw.
     """
     if not name or fields.get("queue_type", "").lower() == "route":
         return None
-    nodect = fields.get("resources_max.nodect", "").strip()
+    max_nodes = _queue_max_nodes(fields, family=family)
     return {
         "name": name,
-        "kind": "smp" if nodect == "1" else "mpi",
-        "slots": _to_int_or_none(fields.get("resources_max.ncpus")),
-        "max_nodes": nodect,
+        "source": "queue",
+        "kind": "smp" if max_nodes == 1 else "mpi",
+        "max_nodes": max_nodes,
+        "raw": {"slots": _to_int_or_none(fields.get("resources_max.ncpus"))},
     }
 
 
-def parse_qstat_queues(text: str) -> list[dict[str, Any]]:
-    """Parse ``qstat -Qf`` execution queues into parallel_environment entries (#293).
+def parse_qstat_queues(text: str, *, family: str = "pbspro") -> list[dict[str, Any]]:
+    """Parse ``qstat -Qf`` execution queues into normalized PE entries (#293).
 
     PBS's analog to an SGE PE / SLURM partition is the *queue* you submit to.
     ``qstat -Qf`` prints per-queue ``Queue: <name>`` blocks of ``key = value``
-    lines. Returns ``{name, kind, slots, max_nodes}`` for each non-Route queue.
-    Permissive — unparseable lines skipped, never raises.
+    lines. *family* (``pbspro`` | ``torque``) gates how the per-job node ceiling
+    is read (see :func:`_queue_max_nodes`). Returns the normalized
+    ``{name, source="queue", kind, max_nodes, raw={slots}}`` for each non-Route
+    queue. Permissive — unparseable lines skipped, never raises.
     """
     out: list[dict[str, Any]] = []
     name: str | None = None
@@ -264,7 +291,7 @@ def parse_qstat_queues(text: str) -> list[dict[str, Any]]:
             continue
         if line.startswith("Queue:"):
             if name is not None:
-                entry = _queue_entry(name, fields)
+                entry = _queue_entry(name, fields, family=family)
                 if entry is not None:
                     out.append(entry)
             name = line.split(":", 1)[1].strip()
@@ -276,7 +303,7 @@ def parse_qstat_queues(text: str) -> list[dict[str, Any]]:
             key, _, val = line.partition("=")
             fields[key.strip()] = val.strip()
     if name is not None:
-        entry = _queue_entry(name, fields)
+        entry = _queue_entry(name, fields, family=family)
         if entry is not None:
             out.append(entry)
     return out

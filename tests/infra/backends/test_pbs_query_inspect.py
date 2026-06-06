@@ -292,9 +292,14 @@ def test_pbs_inspect_pbspro_output_conforms_to_schema():
     # errors — lifted to partial_errors by the CLI wrapper — don't apply here.)
     from hpc_agent._kernel.contract.schema import _output_schema_for, validate
 
-    runner = _runner({"echo __HPC_PBSNODES__": (0, _pbs_combined(_PBSPRO_AV, 0), "")})
+    # Include a populated queue so the normalized parallel_environments entries
+    # are validated against the pinned _ParallelEnvironment def (additionalProperties
+    # = False) — catches a parser emitting an unexpected key.
+    queues = "Queue: workq\n    queue_type = Execution\n    resources_max.nodect = 8\n"
+    runner = _runner({"echo __HPC_PBSNODES__": (0, _pbs_combined(_PBSPRO_AV, 0, "", queues), "")})
     snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
     assert snap.errors == []
+    assert snap.parallel_environments and snap.parallel_environments[0]["name"] == "workq"
     schema = _output_schema_for("inspect-cluster")
     validate(snap.to_dict(), schema)  # raises on any field/constraint mismatch
 
@@ -353,8 +358,10 @@ def test_pbs_inspect_enumerates_queues_as_parallel_environments():
     snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
     pes = {pe["name"]: pe for pe in snap.parallel_environments}
     assert set(pes) == {"workq", "serial"}  # Route queue skipped
-    assert pes["workq"]["kind"] == "mpi" and pes["workq"]["slots"] == 512
-    assert pes["serial"]["kind"] == "smp" and pes["serial"]["max_nodes"] == "1"
+    assert all(pe["source"] == "queue" for pe in pes.values())
+    assert pes["workq"]["kind"] == "mpi" and pes["workq"]["max_nodes"] == 16
+    assert pes["workq"]["raw"]["slots"] == 512
+    assert pes["serial"]["kind"] == "smp" and pes["serial"]["max_nodes"] == 1
 
 
 def test_parse_qstat_queues_unit():
@@ -367,10 +374,43 @@ def test_parse_qstat_queues_unit():
         "    resources_max.ncpus = 128\n"
     )
     assert parse_qstat_queues(text) == [
-        {"name": "big", "kind": "mpi", "slots": 128, "max_nodes": "4"}
+        {
+            "name": "big",
+            "source": "queue",
+            "kind": "mpi",
+            "max_nodes": 4,
+            "raw": {"slots": 128},
+        }
     ]
     assert parse_qstat_queues("Queue: r\n    queue_type = Route\n") == []
     assert parse_qstat_queues("") == []
+
+
+def test_parse_qstat_queues_torque_reads_nodes_nodespec():
+    # #293 family-gate: TORQUE states the cap as resources_max.nodes (a nodespec
+    # like 4:ppn=8), not pbspro's resources_max.nodect — take the leading count.
+    from hpc_agent.infra.inspect.pbs import parse_qstat_queues
+
+    text = "Queue: batch\n    queue_type = Execution\n    resources_max.nodes = 4:ppn=8\n"
+    (q,) = parse_qstat_queues(text, family="torque")
+    assert q == {
+        "name": "batch",
+        "source": "queue",
+        "kind": "mpi",
+        "max_nodes": 4,
+        "raw": {"slots": None},
+    }
+    # single-node nodespec → smp
+    serial = "Queue: serial\n    queue_type = Execution\n    resources_max.nodes = 1\n"
+    assert parse_qstat_queues(serial, family="torque")[0]["kind"] == "smp"
+
+
+def test_parse_qstat_co_tenants_torque_range_exec_host():
+    # #293 family robustness: TORQUE exec_host range form node/0-3 → 4 cores.
+    from hpc_agent.infra.inspect.pbs import parse_qstat_co_tenants
+
+    out = parse_qstat_co_tenants("1.srv alice batch j 0 1 4 8gb 1:00 R 0:30 node01/0-3\n")
+    assert out["node01"][0]["cpus"] == 4
 
 
 def test_parse_pbsnodes_pbspro_clamps_overcommitted_alloc_mem():
