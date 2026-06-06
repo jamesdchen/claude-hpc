@@ -182,6 +182,14 @@ class _FakeRunner:
         return 0, "", ""
 
 
+def _sge_combined(qhost_out: str, qhost_rc: int, qstat_out: str, qstat_rc: int) -> str:
+    """Build the marker-framed stdout the #295 Fix 3 merged qhost+qstat ssh emits."""
+    return (
+        f"__HPC_QHOST__\n{qhost_out}\n__HPC_QHOST_RC__={qhost_rc}\n"
+        f"__HPC_QSTAT__\n{qstat_out}\n__HPC_QSTAT_RC__={qstat_rc}\n"
+    )
+
+
 def _write_clusters(tmp_path, scheduler="slurm"):
     """Write a minimal clusters.yaml and point the env var at it."""
     p = tmp_path / "clusters.yaml"
@@ -274,17 +282,17 @@ class TestInspectClusterEntry:
             "    hl:gpu=4\n"
             "    gl:gpu_used=1\n"
         )
-        runner = _FakeRunner(
-            {
-                "qhost": (0, qhost_out, ""),
-                "qstat": (0, "", ""),
-            }
-        )
+        # #295 Fix 3: qhost + qstat now arrive over ONE merged ssh round-trip,
+        # so the fake returns the marker-framed combined stdout.
+        runner = _FakeRunner({"echo __HPC_QHOST__": (0, _sge_combined(qhost_out, 0, "", 0), "")})
         snap = ins.inspect_cluster("discovery", runner=runner, use_cache=False)
         assert snap.scheduler_kind == "sge"
         assert {n.name for n in snap.nodes} == {"compute-001"}
         assert snap.nodes[0].gres == "gpu:4"
         assert snap.nodes[0].gres_used == "gpu:1"
+        # exactly one ssh call carried both probes
+        assert len(runner.calls) == 1
+        assert "qhost" in runner.calls[0] and "qstat" in runner.calls[0]
 
     def test_runner_invocation_shape_recorded(self, tmp_path, monkeypatch):
         # Defense-in-depth: confirm the SUT actually issues the expected
@@ -301,24 +309,40 @@ class TestInspectClusterEntry:
         assert any(c.startswith("scontrol show node") for c in runner.calls)
         assert any(c.startswith("sacct -N") for c in runner.calls)
 
-    def test_sge_qhost_qstat_run_concurrently(self) -> None:
-        # The two SGE probes (qhost + qstat) are independent and fan on a
-        # thread pool (#289). A Barrier(2) only releases if both run at once;
-        # serial execution blocks the first wait() to timeout and raises.
-        import threading
-
-        barrier = threading.Barrier(2, timeout=5)
-
-        class _BarrierRunner:
-            def run(self, cmd: str) -> tuple[int, str, str]:
-                barrier.wait()
-                return (0, "", "")
-
+    def test_sge_qhost_qstat_share_one_ssh_call(self) -> None:
+        # #295 Fix 3: qhost + qstat now ride ONE ssh round-trip (was #289's
+        # concurrent two-call fan). Assert exactly one runner.run, carrying both
+        # commands, and that both sections parse cleanly (no spurious errors).
+        runner = _FakeRunner({"echo __HPC_QHOST__": (0, _sge_combined("", 0, "", 0), "")})
         snap = ins._sge_inspect(
             "c",
             {},
             stress_alloc_mem_pct=0.8,
             stress_cpu_load_frac=0.8,
-            runner=_BarrierRunner(),
+            runner=runner,
         )
         assert snap.scheduler_kind == "sge"
+        assert len(runner.calls) == 1
+        assert "qhost" in runner.calls[0] and "qstat" in runner.calls[0]
+        assert snap.errors == []
+
+    def test_sge_qhost_failure_parsed_from_merged_rc(self) -> None:
+        # The combined ssh exit code is qstat's; qhost's real exit code is
+        # captured inline (echo $?) and must still drive the qhost_failed branch.
+        runner = _FakeRunner(
+            {"echo __HPC_QHOST__": (0, _sge_combined("error: cannot reach qmaster", 1, "", 0), "")}
+        )
+        snap = ins._sge_inspect(
+            "c", {}, stress_alloc_mem_pct=0.8, stress_cpu_load_frac=0.8, runner=runner
+        )
+        assert snap.nodes == []
+        assert snap.errors and snap.errors[0]["code"] == "qhost_failed"
+
+    def test_split_section_extracts_rc_and_body(self) -> None:
+        from hpc_agent.infra.inspect.sge import _split_section
+
+        out = _sge_combined("NODE-LINE", 0, "JOB-LINE", 2)
+        assert _split_section(out, "__HPC_QHOST__", "__HPC_QHOST_RC__") == (0, "NODE-LINE")
+        assert _split_section(out, "__HPC_QSTAT__", "__HPC_QSTAT_RC__") == (2, "JOB-LINE")
+        # Absent markers (round-trip died before the shell ran) → (None, "").
+        assert _split_section("", "__HPC_QHOST__", "__HPC_QHOST_RC__") == (None, "")

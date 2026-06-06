@@ -7,7 +7,6 @@ Parses ``qhost -F gpu -q`` (resource state) and ``qstat -u '*' -F gpu``
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from hpc_agent.infra.parsing import (
@@ -31,7 +30,31 @@ from ._common import (
     _is_stressed,
 )
 
-__all__ = ["_sge_inspect", "_parse_qhost", "_parse_qstat_full"]
+__all__ = ["_sge_inspect", "_parse_qhost", "_parse_qstat_full", "_split_section"]
+
+
+def _split_section(stdout: str, begin: str, rc_marker: str) -> tuple[int | None, str]:
+    """Extract one ``echo``-delimited section from the combined qhost/qstat stdout.
+
+    The merged probe (#295 Fix 3) frames each command as
+    ``echo <begin>; <cmd>; echo <rc_marker>=$?`` so a single ssh round-trip
+    carries both. This pulls back ``(exit_code, body)`` for one section: *body*
+    is the text between *begin* and *rc_marker*, *exit_code* the integer after
+    ``<rc_marker>=``. Returns ``(None, "")`` when the markers are absent (the
+    round-trip failed before that command ran), letting the caller fall back to
+    the combined result. Presence-based, so qhost/qstat output interleaved
+    around the markers never corrupts the split.
+    """
+    if begin not in stdout or rc_marker not in stdout:
+        return None, ""
+    after = stdout.split(begin, 1)[1]
+    body, _, tail = after.partition(rc_marker)
+    rc_field = tail.lstrip("=").splitlines()[0].strip() if tail else ""
+    try:
+        rc = int(rc_field)
+    except ValueError:
+        rc = None
+    return rc, body.strip("\n")
 
 
 def _sge_inspect(
@@ -56,15 +79,24 @@ def _sge_inspect(
         nodes=[],
     )
     # qhost (node resource state) and qstat (live co-tenants) are two
-    # independent ssh round-trips — neither reads the other's output — so fan
-    # them concurrently (the reconcile precedent) instead of stacking two RTTs
-    # (#289). On the qhost-failure early-return below the qstat result is just
-    # discarded; it ran concurrently, so it cost no extra wall-clock.
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        fut_qhost = pool.submit(runner.run, "qhost -F gpu -q")
-        fut_qstat = pool.submit(runner.run, "qstat -u '*' -F gpu")
-        rc, out, err = fut_qhost.result()
-        rc2, out2, err2 = fut_qstat.result()
+    # independent reads — neither consumes the other's output. #289 fanned them
+    # concurrently (one RTT wall-clock); #295 Fix 3 collapses both into ONE ssh
+    # round-trip (echo-delimited sections + per-section ``$?`` exit codes) so a
+    # host with broken ControlMaster multiplexing pays one cold handshake, not
+    # two. The combined exit code is the last command's, so per-section codes are
+    # captured inline and parsed back out.
+    combined = (
+        "echo __HPC_QHOST__; qhost -F gpu -q; echo __HPC_QHOST_RC__=$?; "
+        "echo __HPC_QSTAT__; qstat -u '*' -F gpu; echo __HPC_QSTAT_RC__=$?"
+    )
+    rc_all, out_all, err = runner.run(combined)
+    rc, out = _split_section(out_all, "__HPC_QHOST__", "__HPC_QHOST_RC__")
+    rc2, out2 = _split_section(out_all, "__HPC_QSTAT__", "__HPC_QSTAT_RC__")
+    err2 = err
+    # Markers absent → the round-trip died before the shell ran (ssh error);
+    # fall back to the combined result so the qhost-failure branch still fires.
+    if rc is None:
+        rc, out = rc_all, out_all
 
     if rc != 0:
         errors.append({"code": "qhost_failed", "detail": err.strip()[:500]})
