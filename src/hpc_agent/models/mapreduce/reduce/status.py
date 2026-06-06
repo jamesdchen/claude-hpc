@@ -619,7 +619,12 @@ def _is_preempted_task(info: dict) -> bool:
 
 
 def _preempted_ids_from_tasks(tasks: dict) -> list[int]:
-    """Sorted 1-based task ids whose current scheduler record reads preempted."""
+    """Sorted *report-space* task ids whose scheduler record reads preempted.
+
+    Ids are in the report's own 1-based scheduler-array space (``report_status*``
+    key tasks ``range(1, N+1)``). Consumers that need 0-based ``HPC_TASK_ID``
+    (e.g. the auto-resume composite, before ``resubmit_flow``) must shift by -1.
+    """
     out: list[int] = []
     for tid_str, info in (tasks or {}).items():
         if _is_preempted_task(info):

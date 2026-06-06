@@ -131,6 +131,10 @@ def maybe_auto_resume(
       classification) — cross-scheduler robust (e.g. SGE, where the live
       query carries no exit code), at the cost of one terminal-time fetch.
 
+    Both sources speak the *report* id space (1-based scheduler array
+    indices); this function converts to 0-based ``HPC_TASK_ID`` before the
+    resubmit, the space ``resubmit_flow`` and the dispatcher use.
+
     *record* may be supplied to avoid a redundant journal read. *resubmit*
     and *failures_fetcher* are injection seams for tests.
     """
@@ -146,7 +150,7 @@ def maybe_auto_resume(
 
     if preempted_task_ids:
         # Lean path: the monitor already carries the fresh scheduler signal.
-        resumable: list[int] = [int(i) for i in preempted_task_ids]
+        report_space: list[int] = [int(i) for i in preempted_task_ids]
     else:
         # No pre-supplied signal (older reporter, or a scheduler whose live
         # query has no exit code) → log-based fetch, cross-scheduler robust.
@@ -155,7 +159,17 @@ def maybe_auto_resume(
         )
         if fetched is None:
             return AutoResumeOutcome("escalate", fetch_reason)
-        resumable = fetched
+        report_space = fetched
+
+    # CRITICAL base conversion. Both sources (the status reporter's
+    # preempted_task_ids and fetch_failures') speak the *report* id space —
+    # 1-based scheduler array indices (``report_status*`` keys tasks
+    # ``range(1, N+1)``; SLURM ``--array=1-N``). ``resubmit_flow`` and the
+    # dispatcher's per-task ``preempt`` marks speak 0-based ``HPC_TASK_ID``
+    # (``HPC_TASK_ID = SLURM_ARRAY_TASK_ID - 1``). Array index ``1`` ↔
+    # ``HPC_TASK_ID 0``, so shift down by one — WITHOUT this, auto-resume
+    # would re-submit the task one slot past the one that was preempted.
+    resumable: list[int] = [i - 1 for i in report_space if i >= 1]
 
     decision = decide_auto_resume_from_ids(
         resumable,

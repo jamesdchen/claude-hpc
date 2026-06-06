@@ -128,7 +128,8 @@ def test_opt_in_off_skips_the_cluster_fetch(journal_home: Path, experiment: Path
 
 def test_supplied_ids_skip_the_cluster_fetch(journal_home: Path, experiment: Path) -> None:
     """When the monitor passes preempted_task_ids (folded from last_status by
-    the status reporter), the composite resumes from them and does NOT fetch."""
+    the status reporter, report-space/1-based), the composite resumes from them,
+    does NOT fetch, and converts to 0-based HPC_TASK_ID for resubmit."""
     _seed_record(experiment)
     rec = _Recorder(new_job_ids=["9100"])
 
@@ -138,12 +139,13 @@ def test_supplied_ids_skip_the_cluster_fetch(journal_home: Path, experiment: Pat
     outcome = maybe_auto_resume(
         experiment,
         _RUN_ID,
-        preempted_task_ids=[0, 2],
+        preempted_task_ids=[1, 3],  # report-space (1-based array indices)
         resubmit=rec,
         failures_fetcher=_boom,
     )
 
     assert outcome.action == "resume"
+    # Converted to 0-based HPC_TASK_ID (1->0, 3->2).
     assert outcome.task_ids == (0, 2)
     assert rec.calls[0]["failed_task_ids"] == [0, 2]
     assert load_run(experiment, _RUN_ID).auto_resume_count == 1
@@ -154,7 +156,7 @@ def test_empty_supplied_ids_falls_back_to_fetch(journal_home: Path, experiment: 
     log-based fetch (cross-scheduler, e.g. SGE without exit codes)."""
     _seed_record(experiment)
     rec = _Recorder()
-    fetch = _fetcher([1])
+    fetch = _fetcher([1])  # report-space → 0-based [0]
 
     outcome = maybe_auto_resume(
         experiment,
@@ -165,7 +167,7 @@ def test_empty_supplied_ids_falls_back_to_fetch(journal_home: Path, experiment: 
     )
 
     assert outcome.action == "resume"
-    assert outcome.task_ids == (1,)
+    assert outcome.task_ids == (0,)
 
 
 # ── opt-in ON + preempted + under cap → resume ────────────────────────────
@@ -174,9 +176,10 @@ def test_empty_supplied_ids_falls_back_to_fetch(journal_home: Path, experiment: 
 def test_resume_fires_with_exactly_preempted_ids(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment)
     rec = _Recorder(new_job_ids=["9100", "9101"])
-    # Cluster-authoritative report says tasks 0,2 were preempted (task 1 OOMed
-    # and is therefore absent from preempted_task_ids).
-    fetch = _fetcher([0, 2])
+    # Cluster-authoritative report (report-space, 1-based) says array indices
+    # 1,3 were preempted → 0-based HPC_TASK_IDs 0,2 (the in-between task OOMed
+    # and is absent from preempted_task_ids).
+    fetch = _fetcher([1, 3])
 
     outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
@@ -239,7 +242,7 @@ def test_preempt_then_oom_cycle_escalates_not_spins(journal_home: Path, experime
 def test_cap_reached_escalates(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment, max_auto_resumes=2, auto_resume_count=2)
     rec = _Recorder()
-    fetch = _fetcher([0])
+    fetch = _fetcher([1])  # report-space → 0-based [0]; non-empty so cap gate fires
 
     outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
@@ -274,7 +277,7 @@ def test_request_id_distinct_per_attempt(journal_home: Path, experiment: Path) -
     genuine preemptions of the same set are NOT deduped against each other."""
     _seed_record(experiment, max_auto_resumes=5)
     rec = _Recorder()
-    fetch = _fetcher([0, 1])
+    fetch = _fetcher([1, 2])
 
     maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
     maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
@@ -289,7 +292,7 @@ def test_request_id_distinct_per_attempt(journal_home: Path, experiment: Path) -
 def test_deduped_replay_does_not_increment_count(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment)
     rec = _Recorder(deduped=True)
-    fetch = _fetcher([0, 1])
+    fetch = _fetcher([1, 2])
 
     outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
