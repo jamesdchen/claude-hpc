@@ -4,12 +4,21 @@ This is the #294 *Layer-2 auto-fire* remainder (#299): the one place a
 read-only monitor path is allowed to put work back on the cluster
 *automatically*, with no human and no agent judgement in the loop.
 
-It composes two already-landed pieces:
+It composes three already-landed pieces:
 
-* :func:`hpc_agent.recovery.auto_resume.decide_auto_resume` — the pure,
-  exhaustively-tested safety gate. It returns a ``"resume"`` verdict only
-  when all three hard gates pass (opt-in ON, at least one *preempted*
-  task, and under the resume cap); otherwise ``"escalate"`` with a reason.
+* :func:`hpc_agent.ops.recover.failures_atom.fetch_failures` — the
+  *cluster-authoritative* preemption signal. Its ``preempted_task_ids`` is
+  derived from the **current** attempt's exit code / stderr fingerprint
+  (``runner_failures.cluster_failures_by_fingerprint`` → exit 130/143 →
+  ``preempted``), so it (a) is available even when the monitor's local
+  sidecar was never refreshed with the dispatcher's cluster-side
+  ``preempt`` marks, and (b) reflects the latest attempt — a task that was
+  preempted, resumed, then OOM-killed reclassifies as ``system_oom`` and is
+  absent here, so it escalates instead of re-resuming a stale mark.
+* :func:`hpc_agent.recovery.auto_resume.decide_auto_resume_from_ids` — the
+  pure, exhaustively-tested safety gate. It returns a ``"resume"`` verdict
+  only when all three hard gates pass (opt-in ON, at least one preempted
+  task, under the resume cap); otherwise ``"escalate"`` with a reason.
 * :func:`hpc_agent.ops.recover_flow.resubmit_flow` — the action. On a
   ``"resume"`` verdict we re-submit exactly the preempted task ids
   ``from_checkpoint`` and bump the run's ``auto_resume_count``.
@@ -18,9 +27,9 @@ Safety, restated (the gate enforces it; this composite never relaxes it):
 
 * **Opt-in, default OFF** — a run whose record did not set
   ``auto_resume_on_kill`` escalates immediately.
-* **Only on an explicit preemption signal** — "resumable" == the
-  dispatcher's per-task ``preempt`` mark. OOM / executor errors carry no
-  mark and escalate (resuming an OOM just re-OOMs).
+* **Only on an explicit preemption signal** — the cluster-authoritative
+  ``preempted`` classification. OOM / executor errors are absent from it
+  and escalate (resuming an OOM just re-OOMs).
 * **Hard cap** — ``auto_resume_count < max_auto_resumes`` is the ultimate
   backstop.
 
@@ -30,15 +39,14 @@ caller routes it through the existing escalation-as-data path (#234).
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from hpc_agent import errors
+from hpc_agent.ops.recover.failures_atom import fetch_failures as _fetch_failures
 from hpc_agent.ops.recover_flow import resubmit_flow as _resubmit_flow
-from hpc_agent.recovery.auto_resume import decide_auto_resume
+from hpc_agent.recovery.auto_resume import decide_auto_resume_from_ids
 from hpc_agent.state.journal import load_run, update_run_status
-from hpc_agent.state.runs import read_run_sidecar
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -68,49 +76,31 @@ class AutoResumeOutcome:
     auto_resume_count: int = 0
 
 
-def _safe_read_sidecar(experiment_dir: Path, run_id: str) -> dict[str, Any]:
-    """Read the run sidecar, returning ``{}`` when it is missing/unreadable.
+def _authoritative_preempted_ids(
+    experiment_dir: Path,
+    run_id: str,
+    failures_fetcher: Callable[..., dict[str, Any]],
+) -> tuple[list[int] | None, str]:
+    """Return (preempted_task_ids, reason) from the cluster failure report.
 
-    A missing sidecar carries no ``preempt`` marks, so the gate correctly
-    escalates ("not a resumable kill") rather than the composite raising.
+    Returns ``(None, reason)`` when the report could not be fetched (SSH /
+    cluster error) so the composite escalates rather than crashing the
+    monitor loop. ``([], "")`` means "fetched cleanly, nothing preempted".
     """
     try:
-        sc = read_run_sidecar(experiment_dir, run_id)
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return {}
-    return sc if isinstance(sc, dict) else {}
-
-
-def _resume_request_id(run_id: str, sidecar: dict[str, Any], task_ids: list[int]) -> str:
-    """Derive a resubmit request_id keyed on the preempt-mark *generation*.
-
-    The dispatcher overwrites a task's ``preempt`` mark (with a fresh ``at``
-    timestamp) each time the scheduler bumps it, so hashing the marks gives an
-    id that is:
-
-    * **stable** across an immediate monitor re-entry (the new array jobs are
-      not yet visible, the sidecar marks are unchanged) → ``resubmit_flow``
-      dedups and does NOT double-submit; and
-    * **distinct** for a genuinely NEW preemption (the resumed jobs ran and got
-      bumped again, so the marks carry new timestamps) → the next resume fires
-      and the cap loop advances.
-
-    Without this — e.g. an id folding in only the monotonically-rising count —
-    an immediate re-entry would mint a fresh id and re-submit the same work,
-    burning the cap on duplicates.
-    """
-    tasks = sidecar.get("tasks") if isinstance(sidecar.get("tasks"), dict) else {}
-    marks: list[tuple[int, str]] = []
-    for tid in task_ids:
-        entry = tasks.get(str(tid)) if isinstance(tasks, dict) else None
-        preempt = entry.get("preempt") if isinstance(entry, dict) else None
-        at = preempt.get("at", "") if isinstance(preempt, dict) else ""
-        marks.append((int(tid), str(at)))
-    payload = json.dumps(
-        {"run_id": run_id, "marks": sorted(marks)},
-        sort_keys=True,
-    )
-    return "auto_resume_" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+        report = failures_fetcher(experiment_dir=experiment_dir, run_id=run_id)
+    except (errors.HpcError, OSError, TimeoutError) as exc:
+        return None, f"could not fetch cluster failures for auto-resume: {exc}"
+    ids = report.get("preempted_task_ids") if isinstance(report, dict) else None
+    if not isinstance(ids, list):
+        return [], ""
+    out: list[int] = []
+    for i in ids:
+        try:
+            out.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    return out, ""
 
 
 def maybe_auto_resume(
@@ -119,27 +109,40 @@ def maybe_auto_resume(
     *,
     record: RunRecord | None = None,
     resubmit: Callable[..., Any] = _resubmit_flow,
+    failures_fetcher: Callable[..., dict[str, Any]] = _fetch_failures,
 ) -> AutoResumeOutcome:
     """Consult the auto-resume gate for *run_id* and fire a resubmit if it says so.
 
-    Reads the run's sidecar (preempt marks) and record (opt-in policy +
-    count), calls :func:`decide_auto_resume`, and on a ``"resume"`` verdict
-    re-submits exactly the preempted task ids ``from_checkpoint`` via
-    *resubmit* (defaults to :func:`resubmit_flow`; injectable for tests),
-    then increments the run's ``auto_resume_count``. Every other verdict is
-    a no-op that returns the gate's escalation reason.
+    Pulls the cluster-authoritative preempted set (via *failures_fetcher*,
+    defaulting to :func:`fetch_failures`), calls
+    :func:`decide_auto_resume_from_ids` against the run's opt-in policy +
+    cap, and on a ``"resume"`` verdict re-submits exactly the preempted task
+    ids ``from_checkpoint`` via *resubmit* (defaults to
+    :func:`resubmit_flow`), then increments the run's ``auto_resume_count``.
+    Every other verdict is a no-op that returns the gate's escalation reason.
 
     *record* may be supplied to avoid a redundant journal read (the monitor
-    already holds a fresh record); otherwise it is loaded here.
+    already holds a fresh record); otherwise it is loaded here. *resubmit*
+    and *failures_fetcher* are injection seams for tests.
     """
     if record is None:
         record = load_run(experiment_dir, run_id)
     if record is None:
         return AutoResumeOutcome("escalate", f"no journal record for {run_id!r}")
 
-    sidecar = _safe_read_sidecar(experiment_dir, run_id)
-    decision = decide_auto_resume(
-        sidecar,
+    # Cheap gate first: a run that did not opt in is never auto-resubmitted,
+    # and we avoid an SSH round-trip for the common (opt-out) case.
+    if not record.auto_resume_on_kill:
+        return AutoResumeOutcome("escalate", "auto_resume_on_kill not enabled")
+
+    preempted_ids, fetch_reason = _authoritative_preempted_ids(
+        experiment_dir, run_id, failures_fetcher
+    )
+    if preempted_ids is None:
+        return AutoResumeOutcome("escalate", fetch_reason)
+
+    decision = decide_auto_resume_from_ids(
+        preempted_ids,
         policy_on=bool(record.auto_resume_on_kill),
         count=int(record.auto_resume_count),
         cap=int(record.max_auto_resumes),
@@ -160,10 +163,13 @@ def maybe_auto_resume(
     # ids from their latest checkpoint. ``category="preempted"`` is the honest
     # label; ``bypass_preempt_throttle=True`` opts out of the manual
     # "all-preempted → back off" guard (the cap is the backstop here, #299).
-    # The request_id is keyed on the preempt-mark generation so an immediate
-    # re-entry dedups (no double submit) while a fresh preemption fires again.
+    # The request_id folds in the current count so each cap-loop attempt is a
+    # distinct request (two genuine preemptions of the same task set must not
+    # dedup against each other). No race window to guard: the monitor only
+    # invokes this when polling already classified the run terminal-FAILED, so
+    # the just-resumed (pending) jobs cannot trigger a same-generation re-entry.
     failed_task_ids = list(decision.task_ids)
-    request_id = _resume_request_id(run_id, sidecar, failed_task_ids)
+    request_id = f"auto_resume_{run_id}_{int(record.auto_resume_count)}"
     result = resubmit(
         experiment_dir,
         run_id,
@@ -183,11 +189,10 @@ def maybe_auto_resume(
     count = int(record.auto_resume_count)
     if not deduped:
         # A real resubmit fired — bump the counter so the gate's "count < cap"
-        # backstop tightens with every attempt. A deduped replay (immediate
-        # re-entry on the same preempt generation) put nothing new on the
-        # cluster, so it must NOT consume a cap slot. Best-effort: a failed
-        # counter write leaves the cap stale-by-one, which is safe (it can only
-        # escalate sooner, never later).
+        # backstop tightens with every attempt. A deduped replay put nothing
+        # new on the cluster, so it must NOT consume a cap slot. Best-effort: a
+        # failed counter write leaves the cap stale-by-one, which is safe (it
+        # can only escalate sooner, never later).
         count += 1
         updated = update_run_status(experiment_dir, run_id, auto_resume_count=count)
         count = int(updated.auto_resume_count)

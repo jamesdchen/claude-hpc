@@ -1,25 +1,25 @@
 """Composite tests for the #299 auto-resume auto-fire (``maybe_auto_resume``).
 
-The pure gate (:func:`decide_auto_resume`) is exhaustively covered in
-``test_auto_resume.py``. This file pins the *composite* that turns a
-``"resume"`` verdict into an actual resubmit: the ``resubmit_flow`` call is
-mocked, so these tests assert the wiring (which ids, which flags, the cap
-counter, dedup) without touching a cluster.
+The pure gate (:func:`decide_auto_resume_from_ids`) is exhaustively covered
+in ``test_auto_resume.py``. This file pins the *composite* that turns a
+``"resume"`` verdict into an actual resubmit: both the cluster failure fetch
+(authoritative ``preempted_task_ids``) and ``resubmit_flow`` are injected, so
+these tests assert the wiring (which ids, which flags, the cap counter,
+dedup) without touching a cluster.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from hpc_agent import errors
 from hpc_agent.ops.auto_resume_flow import maybe_auto_resume
 from hpc_agent.state import run_record
 from hpc_agent.state.journal import load_run, upsert_run
 from hpc_agent.state.run_record import RunRecord
-from hpc_agent.state.runs import run_sidecar_path
 
 _RUN_ID = "20260606-120000-aaa"
 
@@ -63,17 +63,18 @@ def _seed_record(experiment_dir: Path, **overrides: Any) -> RunRecord:
     return rec
 
 
-def _write_sidecar(
-    experiment_dir: Path, *, preempted: list[int], other: dict | None = None
-) -> None:
-    tasks: dict[str, dict] = {
-        str(i): {"preempt": {"at": f"2026-06-06T12:0{i}:00Z", "grace_sec": 25}} for i in preempted
-    }
-    if other:
-        tasks.update(other)
-    path = run_sidecar_path(experiment_dir, _RUN_ID)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"tasks": tasks, "task_count": 4}), encoding="utf-8")
+def _fetcher(preempted: list[int] | None):
+    """Build a failures_fetcher stub returning *preempted* as the
+    cluster-authoritative preempted_task_ids (omitted when None)."""
+
+    def _fetch(*, experiment_dir: Path, run_id: str, **kw: Any) -> dict[str, Any]:
+        out: dict[str, Any] = {"run_id": run_id, "failed_count": 0, "clusters": []}
+        if preempted:
+            out["preempted_count"] = len(preempted)
+            out["preempted_task_ids"] = sorted(preempted)
+        return out
+
+    return _fetch
 
 
 class _Recorder:
@@ -100,16 +101,26 @@ class _Recorder:
 
 def test_opt_in_off_never_resubmits(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment, auto_resume_on_kill=False)
-    _write_sidecar(experiment, preempted=[0, 1])
     rec = _Recorder()
+    fetch = _fetcher([0, 1])
 
-    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
+    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
     assert outcome.action == "escalate"
     assert "not enabled" in outcome.reason
     assert rec.calls == []
-    # Counter untouched.
     assert load_run(experiment, _RUN_ID).auto_resume_count == 0
+
+
+def test_opt_in_off_skips_the_cluster_fetch(journal_home: Path, experiment: Path) -> None:
+    """The opt-out short-circuit must avoid the SSH round-trip entirely."""
+    _seed_record(experiment, auto_resume_on_kill=False)
+
+    def _boom(**kw: Any) -> dict[str, Any]:  # pragma: no cover - must not run
+        raise AssertionError("failures_fetcher called for an opt-out run")
+
+    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=_Recorder(), failures_fetcher=_boom)
+    assert outcome.action == "escalate"
 
 
 # ── opt-in ON + preempted + under cap → resume ────────────────────────────
@@ -117,11 +128,12 @@ def test_opt_in_off_never_resubmits(journal_home: Path, experiment: Path) -> Non
 
 def test_resume_fires_with_exactly_preempted_ids(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment)
-    # tasks 0,2 preempted; task 1 OOM (no mark) → only 0,2 resume.
-    _write_sidecar(experiment, preempted=[0, 2], other={"1": {"exit_code": 137}})
     rec = _Recorder(new_job_ids=["9100", "9101"])
+    # Cluster-authoritative report says tasks 0,2 were preempted (task 1 OOMed
+    # and is therefore absent from preempted_task_ids).
+    fetch = _fetcher([0, 2])
 
-    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
+    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
     assert outcome.action == "resume"
     assert outcome.resubmitted is True
@@ -140,7 +152,6 @@ def test_resume_fires_with_exactly_preempted_ids(journal_home: Path, experiment:
     assert call["job_name"] == "myjob"
     assert call["job_env"] == {"EXECUTOR": "python3 .hpc/_hpc_dispatch.py"}
 
-    # Counter incremented exactly once.
     assert load_run(experiment, _RUN_ID).auto_resume_count == 1
     assert outcome.auto_resume_count == 1
 
@@ -150,15 +161,31 @@ def test_resume_fires_with_exactly_preempted_ids(journal_home: Path, experiment:
 
 def test_oom_only_escalates_never_resubmits(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment)
-    _write_sidecar(experiment, preempted=[], other={"0": {"exit_code": 137}})
     rec = _Recorder()
+    # No preempted ids in the report (everything that failed was OOM/error).
+    fetch = _fetcher([])
 
-    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
+    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
     assert outcome.action == "escalate"
     assert "not a resumable kill" in outcome.reason
     assert rec.calls == []
     assert load_run(experiment, _RUN_ID).auto_resume_count == 0
+
+
+def test_preempt_then_oom_cycle_escalates_not_spins(journal_home: Path, experiment: Path) -> None:
+    """Second-failure-is-OOM: the authoritative report reclassifies the task
+    as OOM (absent from preempted_task_ids), so the composite escalates rather
+    than re-resuming a stale preempt mark."""
+    _seed_record(experiment, auto_resume_count=1)  # one prior resume already happened
+    rec = _Recorder()
+    fetch = _fetcher([])  # the resumed task OOMed → no longer "preempted"
+
+    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
+
+    assert outcome.action == "escalate"
+    assert "not a resumable kill" in outcome.reason
+    assert rec.calls == []
 
 
 # ── cap reached → escalate ────────────────────────────────────────────────
@@ -166,10 +193,10 @@ def test_oom_only_escalates_never_resubmits(journal_home: Path, experiment: Path
 
 def test_cap_reached_escalates(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment, max_auto_resumes=2, auto_resume_count=2)
-    _write_sidecar(experiment, preempted=[0])
     rec = _Recorder()
+    fetch = _fetcher([0])
 
-    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
+    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
     assert outcome.action == "escalate"
     assert "cap reached (2/2)" in outcome.reason
@@ -177,74 +204,54 @@ def test_cap_reached_escalates(journal_home: Path, experiment: Path) -> None:
     assert load_run(experiment, _RUN_ID).auto_resume_count == 2
 
 
-# ── missing sidecar → escalate (no marks = not a resumable kill) ──────────
+# ── cluster fetch failure → escalate gracefully (don't crash the monitor) ──
 
 
-def test_missing_sidecar_escalates(journal_home: Path, experiment: Path) -> None:
+def test_fetch_error_escalates(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment)
-    # no sidecar written
     rec = _Recorder()
 
-    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
+    def _boom(**kw: Any) -> dict[str, Any]:
+        raise errors.SshUnreachable("ssh down")
+
+    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=_boom)
 
     assert outcome.action == "escalate"
-    assert "not a resumable kill" in outcome.reason
+    assert "could not fetch cluster failures" in outcome.reason
     assert rec.calls == []
 
 
-# ── dedup re-entry: same preempt generation must not burn a cap slot ──────
+# ── distinct request_id per cap-loop attempt ──────────────────────────────
+
+
+def test_request_id_distinct_per_attempt(journal_home: Path, experiment: Path) -> None:
+    """Each fired resume folds the current count into the request_id so two
+    genuine preemptions of the same set are NOT deduped against each other."""
+    _seed_record(experiment, max_auto_resumes=5)
+    rec = _Recorder()
+    fetch = _fetcher([0, 1])
+
+    maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
+    maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
+
+    assert rec.calls[0]["request_id"] != rec.calls[1]["request_id"]
+    assert load_run(experiment, _RUN_ID).auto_resume_count == 2
+
+
+# ── deduped replay does not consume a cap slot ────────────────────────────
 
 
 def test_deduped_replay_does_not_increment_count(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment)
-    _write_sidecar(experiment, preempted=[0, 1])
-    # resubmit_flow reports a dedup (the new array isn't visible yet, the
-    # monitor re-entered FAILED on the same preempt marks).
     rec = _Recorder(deduped=True)
+    fetch = _fetcher([0, 1])
 
-    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
+    outcome = maybe_auto_resume(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
-    # Still a "resume" verdict (the run is live from the prior submit), but
-    # nothing new fired and the cap counter is untouched.
     assert outcome.action == "resume"
     assert outcome.resubmitted is False
     assert len(rec.calls) == 1
     assert load_run(experiment, _RUN_ID).auto_resume_count == 0
-
-
-def test_request_id_stable_for_same_marks_distinct_for_new(
-    journal_home: Path, experiment: Path
-) -> None:
-    """Two resumes on the SAME marks share a request_id (→ dedup); a fresh
-    preempt generation (new timestamps) mints a distinct id (→ fires)."""
-    # High cap so the counter never gates this determinism check.
-    _seed_record(experiment, max_auto_resumes=10)
-    _write_sidecar(experiment, preempted=[0, 1])
-    rec = _Recorder()
-
-    maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
-    rid_first = rec.calls[0]["request_id"]
-
-    # Same marks → same request_id.
-    maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
-    assert rec.calls[1]["request_id"] == rid_first
-
-    # New preemption generation (different timestamps) → different id.
-    path = run_sidecar_path(experiment, _RUN_ID)
-    path.write_text(
-        json.dumps(
-            {
-                "tasks": {
-                    "0": {"preempt": {"at": "2026-06-06T13:00:00Z"}},
-                    "1": {"preempt": {"at": "2026-06-06T13:00:00Z"}},
-                },
-                "task_count": 4,
-            }
-        ),
-        encoding="utf-8",
-    )
-    maybe_auto_resume(experiment, _RUN_ID, resubmit=rec)
-    assert rec.calls[2]["request_id"] != rid_first
 
 
 # ── no journal record → escalate gracefully ───────────────────────────────
@@ -252,7 +259,9 @@ def test_request_id_stable_for_same_marks_distinct_for_new(
 
 def test_no_record_escalates(journal_home: Path, experiment: Path) -> None:
     rec = _Recorder()
-    outcome = maybe_auto_resume(experiment, "nonexistent-run", resubmit=rec)
+    outcome = maybe_auto_resume(
+        experiment, "nonexistent-run", resubmit=rec, failures_fetcher=_fetcher([0])
+    )
     assert outcome.action == "escalate"
     assert "no journal record" in outcome.reason
     assert rec.calls == []
