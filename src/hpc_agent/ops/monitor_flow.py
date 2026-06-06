@@ -388,6 +388,48 @@ def monitor_flow(
                 escalation_reason=complete_escalation,
             )
         if terminal == LifecycleState.FAILED:
+            # #294 Layer-2 auto-fire (#299): when the run opted into
+            # auto-resume, consult the gate BEFORE surfacing FAILED. On a
+            # "resume" verdict the preempted tasks are re-submitted from
+            # checkpoint and the run is live again — reload the record (extended
+            # job_ids + bumped count) and keep polling instead of marking
+            # terminal. On "escalate" (opt-out, OOM/error, or cap reached) fall
+            # through to the normal FAILED surface, enriching the reason so the
+            # escalation-as-data path (#234) carries why auto-resume declined.
+            if record.auto_resume_on_kill:
+                from hpc_agent.ops.auto_resume_flow import maybe_auto_resume
+
+                outcome = maybe_auto_resume(experiment_dir, run_id, record=record)
+                if outcome.action == "resume":
+                    actions.append(
+                        {
+                            "kind": "auto_resume",
+                            "task_ids": list(outcome.task_ids),
+                            "resubmitted": outcome.resubmitted,
+                            "auto_resume_count": outcome.auto_resume_count,
+                        }
+                    )
+                    # Reset adaptive backoff — the run state just changed
+                    # materially (a fresh array is queued) so the next poll
+                    # should run at the floor, not a backed-off interval.
+                    unchanged_count = 0
+                    last_fingerprint = None
+                    effective_interval = float(poll_interval_seconds)
+                    _append_tick(
+                        experiment_dir,
+                        run_id,
+                        summary=last_status,
+                        diff_from_prev=diff,
+                        actions=actions,
+                        lifecycle_state="in_flight",
+                        next_tick_seconds=effective_interval,
+                    )
+                    refreshed = load_run(experiment_dir, run_id)
+                    if refreshed is not None:
+                        record = refreshed
+                    _sleep(effective_interval)
+                    continue
+                esc_reason = outcome.reason
             mark_terminal(experiment_dir, run_id, status=LifecycleState.FAILED)
             _append_tick(
                 experiment_dir,
