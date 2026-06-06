@@ -287,6 +287,12 @@ def build_submit_spec(
         job_env["HPC_RUNTIME"] = "uv"
     if campaign_id:
         job_env["HPC_CAMPAIGN_ID"] = campaign_id
+    if spec.walltime_sec:
+        # #294: surface the walltime to the cluster preamble so it can stamp
+        # HPC_WALLTIME_END_EPOCH (job start + walltime) for checkpoint-aware
+        # executors — should_checkpoint(strategy="walltime_margin") / run_iterations
+        # then checkpoint with margin to spare before the scheduler's walltime kill.
+        job_env["HPC_WALLTIME_SEC"] = str(int(spec.walltime_sec))
     # Service-dependency passthrough (#231 Tier 1): ship the externally-
     # provisioned address as JSON ``HPC_SERVICE_ENV`` so the cluster-side
     # dispatcher threads each entry into every task's env as

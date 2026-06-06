@@ -607,6 +607,17 @@ def test_check_executor_var_references_unit() -> None:
     )
 
 
+def test_walltime_sec_stamped_into_job_env_for_checkpoint_deadline() -> None:
+    """#294: a submit with a walltime stamps HPC_WALLTIME_SEC so the cluster
+    preamble can derive HPC_WALLTIME_END_EPOCH for walltime-margin checkpointing.
+    Absent a walltime, the key is omitted (no deadline → checkpoint no-op)."""
+    spec = build_submit_spec(spec=BuildSubmitSpecInput(**_required(), walltime_sec=7200))
+    assert spec["job_env"]["HPC_WALLTIME_SEC"] == "7200"
+    assert "HPC_WALLTIME_SEC" not in build_submit_spec(spec=BuildSubmitSpecInput(**_required()))[
+        "job_env"
+    ]
+
+
 def test_assembled_spec_passes_submit_flow_input_schema() -> None:
     """Belt-and-suspenders: the schema validator inside the primitive must
     accept its own output. A regression here means the framework-default

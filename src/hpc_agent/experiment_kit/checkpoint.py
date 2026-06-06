@@ -76,10 +76,11 @@ __all__ = [
 _CHECKPOINT_SUBDIR = "_checkpoints"
 _CHECKPOINT_RE = re.compile(r"^checkpoint-(\d+)\.pkl$")
 
-# Env var the framework will export with the unix epoch (seconds) at which the
-# job's walltime expires. Read by the ``walltime_margin`` strategy. Exporting it
-# from the array template is a PR2 follow-up; absent it, ``walltime_margin``
-# degrades to a no-op (unless the caller passes ``deadline_epoch`` directly).
+# Env var carrying the unix epoch (seconds) at which the job's walltime expires,
+# read by the ``walltime_margin`` strategy. The shared array preamble
+# (hpc_preamble.sh) stamps it as job-start + HPC_WALLTIME_SEC when the submit set
+# a walltime; absent it (no walltime set, or a caller-supplied ``deadline_epoch``)
+# ``walltime_margin`` degrades to a no-op rather than guessing.
 _WALLTIME_END_ENV = "HPC_WALLTIME_END_EPOCH"
 
 
