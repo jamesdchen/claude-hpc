@@ -47,7 +47,7 @@
       "type": "array"
     },
     "parallel_environments": {
-      "description": "Scheduler parallel environments (SGE qconf -spl/-sp), each {name, allocation_rule, kind (smp|mpi|other), slots}. kind is derived from allocation_rule: $pe_slots=smp (single-node), $round_robin/$fill_up/<int>=mpi (multi-node capable). Empty on schedulers that don't yet enumerate PEs (SLURM/PBS). Optional for back-compat with snapshots written before #293.",
+      "description": "Scheduler 'parallel environments' — the named pools you target for (multi-rank) work: SGE PEs (qconf -spl/-sp), SLURM partitions (scontrol show partition), or PBS execution queues (qstat -Qf). Each carries at least {name, kind, slots}; kind is smp (single-node only), mpi (multi-node capable), or other, derived from the scheduler's node-span rule (SGE allocation_rule; SLURM/PBS MaxNodes/nodect=1 => smp). SGE entries add allocation_rule; SLURM/PBS add max_nodes. Optional for back-compat with snapshots written before #293.",
       "items": {
         "additionalProperties": true,
         "type": "object"

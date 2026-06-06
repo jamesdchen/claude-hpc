@@ -48,7 +48,7 @@ from ._common import (
     _split_section,
 )
 
-__all__ = ["_pbs_inspect", "parse_pbsnodes", "parse_qstat_co_tenants"]
+__all__ = ["_pbs_inspect", "parse_pbsnodes", "parse_qstat_co_tenants", "parse_qstat_queues"]
 
 
 # PBS node states that mean the node is not usable capacity (down / drained
@@ -112,11 +112,13 @@ def _pbs_inspect(
     pbsnodes_cmd = "pbsnodes -av" if family == "pbspro" else "pbsnodes -a"
     combined = (
         f"echo __HPC_PBSNODES__; {pbsnodes_cmd}; echo __HPC_PBSNODES_RC__=$?; "
-        "echo __HPC_QSTAT__; qstat -an1 2>/dev/null; echo __HPC_QSTAT_RC__=$?"
+        "echo __HPC_QSTAT__; qstat -an1 2>/dev/null; echo __HPC_QSTAT_RC__=$?; "
+        "echo __HPC_QUEUES__; qstat -Qf 2>/dev/null; echo __HPC_QUEUES_RC__=$?"
     )
     rc_all, out_all, err = runner.run(combined)
     rc, out = _split_section(out_all, "__HPC_PBSNODES__", "__HPC_PBSNODES_RC__")
     _qstat_rc, qstat_out = _split_section(out_all, "__HPC_QSTAT__", "__HPC_QSTAT_RC__")
+    _queues_rc, queues_out = _split_section(out_all, "__HPC_QUEUES__", "__HPC_QUEUES_RC__")
     # Markers absent → round-trip died before the shell ran; fall back so the
     # pbsnodes-failure branch still fires on the combined result.
     if rc is None:
@@ -150,6 +152,7 @@ def _pbs_inspect(
         now_iso=utcnow_iso(),
         nodes=nodes,
         errors=[],
+        parallel_environments=parse_qstat_queues(queues_out),
     )
 
 
@@ -222,6 +225,60 @@ def parse_qstat_co_tenants(text: str) -> dict[str, list[dict[str, Any]]]:
                     "gpus": None,
                 }
             )
+    return out
+
+
+def _queue_entry(name: str, fields: dict[str, str]) -> dict[str, Any] | None:
+    """Build a parallel_environment entry for one PBS queue, or None to skip it.
+
+    Route queues forward jobs to execution queues rather than running them, so
+    they aren't a place you'd target a multi-rank job — skipped. ``kind`` is
+    ``smp`` only when ``resources_max.nodect=1`` (capped to one node), else
+    ``mpi`` (PBS allows multi-node by default).
+    """
+    if not name or fields.get("queue_type", "").lower() == "route":
+        return None
+    nodect = fields.get("resources_max.nodect", "").strip()
+    return {
+        "name": name,
+        "kind": "smp" if nodect == "1" else "mpi",
+        "slots": _to_int_or_none(fields.get("resources_max.ncpus")),
+        "max_nodes": nodect,
+    }
+
+
+def parse_qstat_queues(text: str) -> list[dict[str, Any]]:
+    """Parse ``qstat -Qf`` execution queues into parallel_environment entries (#293).
+
+    PBS's analog to an SGE PE / SLURM partition is the *queue* you submit to.
+    ``qstat -Qf`` prints per-queue ``Queue: <name>`` blocks of ``key = value``
+    lines. Returns ``{name, kind, slots, max_nodes}`` for each non-Route queue.
+    Permissive — unparseable lines skipped, never raises.
+    """
+    out: list[dict[str, Any]] = []
+    name: str | None = None
+    fields: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("Queue:"):
+            if name is not None:
+                entry = _queue_entry(name, fields)
+                if entry is not None:
+                    out.append(entry)
+            name = line.split(":", 1)[1].strip()
+            fields = {}
+            continue
+        if name is None:
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            fields[key.strip()] = val.strip()
+    if name is not None:
+        entry = _queue_entry(name, fields)
+        if entry is not None:
+            out.append(entry)
     return out
 
 

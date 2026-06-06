@@ -229,11 +229,14 @@ def _runner(responses):
     return _R()
 
 
-def _pbs_combined(pbsnodes_out: str, pbsnodes_rc: int, qstat_out: str = "") -> str:
-    """Marker-framed stdout the merged pbsnodes + qstat -an1 inspect probe emits."""
+def _pbs_combined(
+    pbsnodes_out: str, pbsnodes_rc: int, qstat_out: str = "", queues_out: str = ""
+) -> str:
+    """Marker-framed stdout the merged pbsnodes + qstat -an1 + qstat -Qf probe emits."""
     return (
         f"__HPC_PBSNODES__\n{pbsnodes_out}\n__HPC_PBSNODES_RC__={pbsnodes_rc}\n"
         f"__HPC_QSTAT__\n{qstat_out}\n__HPC_QSTAT_RC__=0\n"
+        f"__HPC_QUEUES__\n{queues_out}\n__HPC_QUEUES_RC__=0\n"
     )
 
 
@@ -330,6 +333,44 @@ def test_parse_qstat_co_tenants_unit():
     # queued job (no exec_host) and header/separator lines are ignored.
     assert parse_qstat_co_tenants("102.pbs bob q j 0 1 1 1gb 1:00 Q -- --") == {}
     assert parse_qstat_co_tenants("Job ID Username\n--------------- --------\npbs-server:") == {}
+
+
+def test_pbs_inspect_enumerates_queues_as_parallel_environments():
+    # #293: PBS execution queues surface in parallel_environments; Route queues
+    # (which forward rather than run) are skipped.
+    queues = (
+        "Queue: workq\n"
+        "    queue_type = Execution\n"
+        "    resources_max.nodect = 16\n"
+        "    resources_max.ncpus = 512\n"
+        "Queue: serial\n"
+        "    queue_type = Execution\n"
+        "    resources_max.nodect = 1\n"
+        "Queue: routeq\n"
+        "    queue_type = Route\n"
+    )
+    runner = _runner({"echo __HPC_PBSNODES__": (0, _pbs_combined(_PBSPRO_AV, 0, "", queues), "")})
+    snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
+    pes = {pe["name"]: pe for pe in snap.parallel_environments}
+    assert set(pes) == {"workq", "serial"}  # Route queue skipped
+    assert pes["workq"]["kind"] == "mpi" and pes["workq"]["slots"] == 512
+    assert pes["serial"]["kind"] == "smp" and pes["serial"]["max_nodes"] == "1"
+
+
+def test_parse_qstat_queues_unit():
+    from hpc_agent.infra.inspect.pbs import parse_qstat_queues
+
+    text = (
+        "Queue: big\n"
+        "    queue_type = Execution\n"
+        "    resources_max.nodect = 4\n"
+        "    resources_max.ncpus = 128\n"
+    )
+    assert parse_qstat_queues(text) == [
+        {"name": "big", "kind": "mpi", "slots": 128, "max_nodes": "4"}
+    ]
+    assert parse_qstat_queues("Queue: r\n    queue_type = Route\n") == []
+    assert parse_qstat_queues("") == []
 
 
 def test_parse_pbsnodes_pbspro_clamps_overcommitted_alloc_mem():

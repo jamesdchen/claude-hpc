@@ -196,6 +196,14 @@ def _sge_combined(
     )
 
 
+def _slurm_combined(node_out: str, node_rc: int, part_out: str = "") -> str:
+    """Marker-framed stdout the merged ``scontrol show node`` + ``show partition`` emits."""
+    return (
+        f"__HPC_SCONTROL_NODE__\n{node_out}\n__HPC_SCONTROL_NODE_RC__={node_rc}\n"
+        f"__HPC_SCONTROL_PART__\n{part_out}\n__HPC_SCONTROL_PART_RC__=0\n"
+    )
+
+
 def _write_clusters(tmp_path, scheduler="slurm"):
     """Write a minimal clusters.yaml and point the env var at it."""
     p = tmp_path / "clusters.yaml"
@@ -217,7 +225,8 @@ class TestInspectClusterEntry:
         ins._CACHE.clear()
         runner = _FakeRunner(
             {
-                "scontrol show node": (0, _SCONTROL_FIXTURE, ""),
+                # scontrol node + partition now share ONE merged round-trip (#293).
+                "echo __HPC_SCONTROL_NODE__": (0, _slurm_combined(_SCONTROL_FIXTURE, 0), ""),
                 "sacct": (
                     0,
                     f"99001|alice|RUNNING|24|128G|{_ago_iso(19)}|19:00:00|gres/gpu=1|d11-03",
@@ -239,7 +248,10 @@ class TestInspectClusterEntry:
         monkeypatch.setenv("HPC_CLUSTERS_CONFIG", str(cfg))
         ins._CACHE.clear()
         runner = _FakeRunner(
-            {"scontrol show node": (0, _SCONTROL_FIXTURE, ""), "sacct": (0, "", "")}
+            {
+                "echo __HPC_SCONTROL_NODE__": (0, _slurm_combined(_SCONTROL_FIXTURE, 0), ""),
+                "sacct": (0, "", ""),
+            }
         )
         ins.inspect_cluster("discovery", runner=runner, use_cache=True)
         first_calls = len(runner.calls)
@@ -268,7 +280,9 @@ class TestInspectClusterEntry:
         cfg = _write_clusters(tmp_path)
         monkeypatch.setenv("HPC_CLUSTERS_CONFIG", str(cfg))
         ins._CACHE.clear()
-        runner = _FakeRunner({"scontrol show node": (1, "", "auth failed")})
+        # scontrol-node section exits non-zero (captured inline) even though the
+        # merged shell ran → still routes to the scontrol_failed error.
+        runner = _FakeRunner({"echo __HPC_SCONTROL_NODE__": (0, _slurm_combined("", 1), "")})
         snap = ins.inspect_cluster("discovery", runner=runner, use_cache=False)
         assert snap.nodes == []
         assert snap.errors and snap.errors[0]["code"] == "scontrol_failed"
@@ -309,10 +323,16 @@ class TestInspectClusterEntry:
         monkeypatch.setenv("HPC_CLUSTERS_CONFIG", str(cfg))
         ins._CACHE.clear()
         runner = _FakeRunner(
-            {"scontrol show node": (0, _SCONTROL_FIXTURE, ""), "sacct": (0, "", "")}
+            {
+                "echo __HPC_SCONTROL_NODE__": (0, _slurm_combined(_SCONTROL_FIXTURE, 0), ""),
+                "sacct": (0, "", ""),
+            }
         )
         ins.inspect_cluster("discovery", runner=runner, use_cache=False)
-        assert any(c.startswith("scontrol show node") for c in runner.calls)
+        # node + partition ride one merged call; sacct stays its own dependent call.
+        assert any(
+            "scontrol show node" in c and "scontrol show partition" in c for c in runner.calls
+        )
         assert any(c.startswith("sacct -N") for c in runner.calls)
 
     def test_sge_qhost_qstat_share_one_ssh_call(self) -> None:
@@ -399,3 +419,46 @@ class TestInspectClusterEntry:
         assert pes == [
             {"name": "orte", "allocation_rule": "$round_robin", "kind": "mpi", "slots": 16}
         ]
+
+    def test_slurm_enumerates_partitions_as_parallel_environments(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # #293: SLURM partitions surface in parallel_environments, classified
+        # mpi (multi-node) vs smp (MaxNodes=1) — riding the node probe's round-trip.
+        cfg = _write_clusters(tmp_path, scheduler="slurm")
+        monkeypatch.setenv("HPC_CLUSTERS_CONFIG", str(cfg))
+        ins._CACHE.clear()
+        partitions = (
+            "PartitionName=batch\n"
+            "   MaxNodes=UNLIMITED TotalCPUs=512 State=UP\n"
+            "\n"
+            "PartitionName=single\n"
+            "   MaxNodes=1 TotalCPUs=64 State=UP\n"
+        )
+        runner = _FakeRunner(
+            {
+                "echo __HPC_SCONTROL_NODE__": (
+                    0,
+                    _slurm_combined(_SCONTROL_FIXTURE, 0, partitions),
+                    "",
+                ),
+                "sacct": (0, "", ""),
+            }
+        )
+        snap = ins.inspect_cluster("discovery", runner=runner, use_cache=False)
+        pes = {pe["name"]: pe for pe in snap.parallel_environments}
+        assert set(pes) == {"batch", "single"}
+        assert pes["batch"]["kind"] == "mpi" and pes["batch"]["slots"] == 512
+        assert pes["single"]["kind"] == "smp" and pes["single"]["max_nodes"] == "1"
+
+    def test_parse_scontrol_show_partition_unit(self) -> None:
+        from hpc_agent.infra.inspect.slurm import parse_scontrol_show_partition
+
+        text = (
+            "PartitionName=gpu\n   MaxNodes=8 TotalCPUs=256\n\n"
+            "PartitionName=debug\n   MaxNodes=1 TotalCPUs=16\n"
+        )
+        pes = {p["name"]: p for p in parse_scontrol_show_partition(text)}
+        assert pes["gpu"]["kind"] == "mpi" and pes["gpu"]["slots"] == 256
+        assert pes["debug"]["kind"] == "smp"
+        assert parse_scontrol_show_partition("") == []
