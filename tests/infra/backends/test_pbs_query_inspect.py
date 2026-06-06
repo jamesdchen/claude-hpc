@@ -229,8 +229,17 @@ def _runner(responses):
     return _R()
 
 
+def _pbs_combined(pbsnodes_out: str, pbsnodes_rc: int, qstat_out: str = "") -> str:
+    """Marker-framed stdout the merged pbsnodes + qstat -an1 inspect probe emits."""
+    return (
+        f"__HPC_PBSNODES__\n{pbsnodes_out}\n__HPC_PBSNODES_RC__={pbsnodes_rc}\n"
+        f"__HPC_QSTAT__\n{qstat_out}\n__HPC_QSTAT_RC__=0\n"
+    )
+
+
 def test_pbs_inspect_pbspro_happy_path_populates_nodes():
-    runner = _runner({"pbsnodes -av": (0, _PBSPRO_AV, "")})
+    # pbsnodes + qstat now ride ONE merged ssh round-trip (PBS co-tenant work).
+    runner = _runner({"echo __HPC_PBSNODES__": (0, _pbs_combined(_PBSPRO_AV, 0), "")})
     snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
     d = snap.to_dict()
     assert d["scheduler_kind"] == "pbspro"
@@ -241,26 +250,33 @@ def test_pbs_inspect_pbspro_happy_path_populates_nodes():
     }
     # Real data present → the minimal-fallback note is dropped.
     assert d["errors"] == []
-    assert runner.calls == ["pbsnodes -av"]
+    # exactly one round-trip carried both pbsnodes and qstat
+    assert len(runner.calls) == 1
+    assert "pbsnodes -av" in runner.calls[0] and "qstat -an1" in runner.calls[0]
 
 
 def test_pbs_inspect_torque_uses_plain_pbsnodes_a():
-    runner = _runner({"pbsnodes -a": (0, _TORQUE_A, "")})
+    runner = _runner({"echo __HPC_PBSNODES__": (0, _pbs_combined(_TORQUE_A, 0), "")})
     snap = get_backend_class("torque").inspect_cluster("c", {}, runner=runner)
-    assert runner.calls == ["pbsnodes -a"]
+    assert len(runner.calls) == 1
+    assert "pbsnodes -a" in runner.calls[0] and "pbsnodes -av" not in runner.calls[0]
     assert len(snap.nodes) == 3
     assert snap.errors == []
 
 
 def test_pbs_inspect_falls_back_to_minimal_on_command_failure():
-    runner = _runner({"pbsnodes": (1, "", "pbsnodes: server down")})
+    # pbsnodes exits non-zero (captured inline as the section's $?), even though
+    # the merged shell itself ran → still routes to the safe minimal snapshot.
+    runner = _runner({"echo __HPC_PBSNODES__": (0, _pbs_combined("", 1), "")})
     snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
     assert snap.nodes == []
     assert any(e["code"] == "pbs_inspect_minimal" for e in snap.errors)
 
 
 def test_pbs_inspect_falls_back_to_minimal_on_unparseable_output():
-    runner = _runner({"pbsnodes": (0, "garbage with no stanzas\n", "")})
+    runner = _runner(
+        {"echo __HPC_PBSNODES__": (0, _pbs_combined("garbage with no stanzas", 0), "")}
+    )
     snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
     assert snap.nodes == []
     assert any(e["code"] == "pbs_inspect_minimal" for e in snap.errors)
@@ -273,11 +289,47 @@ def test_pbs_inspect_pbspro_output_conforms_to_schema():
     # errors — lifted to partial_errors by the CLI wrapper — don't apply here.)
     from hpc_agent._kernel.contract.schema import _output_schema_for, validate
 
-    runner = _runner({"pbsnodes -av": (0, _PBSPRO_AV, "")})
+    runner = _runner({"echo __HPC_PBSNODES__": (0, _pbs_combined(_PBSPRO_AV, 0), "")})
     snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
     assert snap.errors == []
     schema = _output_schema_for("inspect-cluster")
     validate(snap.to_dict(), schema)  # raises on any field/constraint mismatch
+
+
+def test_pbs_inspect_attaches_co_tenants_from_qstat():
+    # PBS co-tenant parity with SLURM/SGE: qstat -an1 jobs are bucketed per node.
+    qstat = (
+        "pbs-server:\n"
+        "                                                            Req'd  Req'd   Elap\n"
+        "Job ID          Username Queue    Jobname  SessID NDS TSK Memory Time S Time\n"
+        "--------------- -------- -------- -------- ------ --- --- ------ ---- - ----\n"
+        "101.pbs alice workq train 1234 1 4 8gb 24:00 R 01:23 gpu-node-01/0*4\n"
+        "102.pbs bob   workq sim   1235 2 8 16gb 24:00 R 00:30 cpu-node-02/0*4+gpu-node-01/0*2\n"
+        "103.pbs carol workq queued -- 1 1 1gb 01:00 Q -- --\n"
+    )
+    runner = _runner({"echo __HPC_PBSNODES__": (0, _pbs_combined(_PBSPRO_AV, 0, qstat), "")})
+    snap = get_backend_class("pbspro").inspect_cluster("c", {}, runner=runner)
+    nodes = {n.name: n for n in snap.nodes}
+    by_user = {t["user"]: t for t in nodes["gpu-node-01"].co_tenants}
+    assert set(by_user) == {"alice", "bob"}  # both placed on gpu-node-01
+    assert by_user["alice"]["cpus"] == 4 and by_user["alice"]["state"] == "R"
+    assert by_user["bob"]["cpus"] == 2  # bob's gpu-node-01 share, not his 4 on cpu-node-02
+    # carol's job is queued (no exec_host) → attributed to no node.
+    assert all(t["user"] != "carol" for n in snap.nodes for t in n.co_tenants)
+
+
+def test_parse_qstat_co_tenants_unit():
+    from hpc_agent.infra.inspect.pbs import parse_qstat_co_tenants
+
+    out = parse_qstat_co_tenants(
+        "101.pbs alice workq j 1234 1 4 8gb 24:00 R 01:23 node01/0*4+node02/0*2\n"
+    )
+    assert set(out) == {"node01", "node02"}
+    assert out["node01"][0]["cpus"] == 4 and out["node01"][0]["user"] == "alice"
+    assert out["node02"][0]["cpus"] == 2
+    # queued job (no exec_host) and header/separator lines are ignored.
+    assert parse_qstat_co_tenants("102.pbs bob q j 0 1 1 1gb 1:00 Q -- --") == {}
+    assert parse_qstat_co_tenants("Job ID Username\n--------------- --------\npbs-server:") == {}
 
 
 def test_parse_pbsnodes_pbspro_clamps_overcommitted_alloc_mem():

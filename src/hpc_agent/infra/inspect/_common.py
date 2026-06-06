@@ -25,7 +25,32 @@ __all__ = [
     "_parse_gpu_count_from_tres",
     "_is_stressed",
     "_snapshot_from_dict",
+    "_split_section",
 ]
+
+
+def _split_section(stdout: str, begin: str, rc_marker: str) -> tuple[int | None, str]:
+    """Extract one ``echo``-delimited section from a merged multi-command stdout.
+
+    A merged probe (#295 Fix 3, extended in #293) frames each command as
+    ``echo <begin>; <cmd>; echo <rc_marker>=$?`` so a single ssh round-trip can
+    carry several. This pulls back ``(exit_code, body)`` for one section: *body*
+    is the text between *begin* and *rc_marker*, *exit_code* the integer after
+    ``<rc_marker>=``. Returns ``(None, "")`` when the markers are absent (the
+    round-trip died before that command ran), letting the caller fall back to the
+    combined result. Presence-based, so command output interleaved around the
+    markers never corrupts the split.
+    """
+    if begin not in stdout or rc_marker not in stdout:
+        return None, ""
+    after = stdout.split(begin, 1)[1]
+    body, _, tail = after.partition(rc_marker)
+    rc_field = tail.lstrip("=").splitlines()[0].strip() if tail else ""
+    try:
+        rc = int(rc_field)
+    except ValueError:
+        rc = None
+    return rc, body.strip("\n")
 
 
 # In-process cache so a single submit cycle that calls inspect_cluster

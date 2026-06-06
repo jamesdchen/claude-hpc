@@ -28,6 +28,7 @@ from ._common import (
     NodeSnapshot,
     _CommandRunner,
     _is_stressed,
+    _split_section,
 )
 
 __all__ = [
@@ -100,30 +101,6 @@ def _parse_parallel_environments(text: str) -> list[dict[str, Any]]:
     if name is not None:
         pes.append(_pe_entry(name, fields))
     return pes
-
-
-def _split_section(stdout: str, begin: str, rc_marker: str) -> tuple[int | None, str]:
-    """Extract one ``echo``-delimited section from the combined qhost/qstat stdout.
-
-    The merged probe (#295 Fix 3) frames each command as
-    ``echo <begin>; <cmd>; echo <rc_marker>=$?`` so a single ssh round-trip
-    carries both. This pulls back ``(exit_code, body)`` for one section: *body*
-    is the text between *begin* and *rc_marker*, *exit_code* the integer after
-    ``<rc_marker>=``. Returns ``(None, "")`` when the markers are absent (the
-    round-trip failed before that command ran), letting the caller fall back to
-    the combined result. Presence-based, so qhost/qstat output interleaved
-    around the markers never corrupts the split.
-    """
-    if begin not in stdout or rc_marker not in stdout:
-        return None, ""
-    after = stdout.split(begin, 1)[1]
-    body, _, tail = after.partition(rc_marker)
-    rc_field = tail.lstrip("=").splitlines()[0].strip() if tail else ""
-    try:
-        rc = int(rc_field)
-    except ValueError:
-        rc = None
-    return rc, body.strip("\n")
 
 
 def _sge_inspect(
