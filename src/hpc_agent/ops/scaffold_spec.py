@@ -18,12 +18,13 @@ listed in ``unresolved_fields``; the agent overrides those and invokes.
 ``verb="query"`` — read-only, no side effects (it never writes the spec to
 disk; the skeleton rides the envelope ``data``, like ``prepare-phase2-spec``).
 
-Coverage (the verbs with measured divination loops in #287): the three
-submit-family verbs ``build-submit-spec`` (7 rounds), ``validate-campaign``
-(3 rounds), and ``resolve-submit-inputs`` (11 rounds). ``campaign-run`` —
-which composes three nested *workflow* specs — is a documented follow-up;
-asking for it returns an actionable ``spec_invalid`` naming the supported
-verbs.
+Coverage: the four verbs #287 names. The three submit-family verbs with
+measured divination loops in the demo — ``build-submit-spec`` (7 rounds),
+``validate-campaign`` (3), ``resolve-submit-inputs`` (11) — plus
+``campaign-run``, which composes three nested *workflow* specs
+(submit-pipeline → submit-and-verify → submit-flow, status-pipeline →
+monitor-flow, aggregate-flow). campaign-run is the worst offender to
+hand-build, so scaffolding its full nested structure is the biggest win.
 
 I/O contracts:
 
@@ -44,6 +45,7 @@ from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import primitive
 from hpc_agent._wire.actions.build_submit_spec import BuildSubmitSpecInput
 from hpc_agent._wire.queries.scaffold_spec import ScaffoldSpecResult
+from hpc_agent._wire.workflows.campaign_run import CampaignRunSpec
 from hpc_agent._wire.workflows.resolve_submit_inputs import ResolveSubmitInputsSpec
 from hpc_agent._wire.workflows.validate_campaign import ValidateCampaignSpec
 from hpc_agent.cli._dispatch import CliArg, CliShape
@@ -74,6 +76,8 @@ _PH_CLUSTER = "PLACEHOLDER"
 _PH_BACKEND = "slurm"
 _PH_EXECUTOR = "python executor.py"
 _PH_RESULT_DIR = "results/{run_id}/task_{task_id}"
+_PH_JOB_NAME = "PLACEHOLDER_array"
+_PH_SCRIPT = ".hpc/templates/cpu_array.sh"
 
 
 @dataclasses.dataclass
@@ -389,6 +393,135 @@ def _scaffold_resolve_submit_inputs(ctx: _Context, acc: _Acc) -> dict[str, Any]:
     return spec
 
 
+def _build_submit_flow_block(ctx: _Context, acc: _Acc, prefix: str) -> dict[str, Any]:
+    """Populate a ``SubmitFlowSpec`` dict — the deep leaf of campaign-run's submit spine.
+
+    Distinct from ``_build_submit_block`` (which builds ``BuildSubmitSpecInput``,
+    the *input* to build-submit-spec): a submit-flow spec carries the assembled
+    ``job_name`` / ``script`` / ``job_env`` that build-submit-spec would produce.
+    The ``EXECUTOR`` inside ``job_env`` is the real per-task command — not
+    derivable from context — so ``job_env`` is a placeholder the caller fills.
+    """
+    cfg = ctx.cluster_cfg
+    latest = ctx.latest_run
+    d: dict[str, Any] = {}
+    acc.req(
+        d,
+        "profile",
+        ctx.run_name,
+        "load-context latest_run.profile / --run-name",
+        _PH_PROFILE,
+        prefix=prefix,
+    )
+    acc.req(
+        d,
+        "cluster",
+        ctx.cluster_name,
+        "--cluster / clusters.yaml / load-context",
+        _PH_CLUSTER,
+        prefix=prefix,
+    )
+    acc.req(
+        d,
+        "ssh_target",
+        (cfg.ssh_target if cfg else None),
+        f"clusters.yaml#{ctx.cluster_name}.ssh_target",
+        _PH_SSH,
+        prefix=prefix,
+    )
+    remote = latest.get("remote_path")
+    if not remote and cfg and cfg.scratch and ctx.run_name:
+        remote = f"{cfg.scratch.rstrip('/')}/{ctx.run_name}"
+    acc.req(
+        d,
+        "remote_path",
+        remote,
+        "load-context latest_run.remote_path / clusters.yaml#scratch",
+        _PH_REMOTE,
+        prefix=prefix,
+    )
+    acc.req(
+        d,
+        "job_name",
+        (f"{ctx.run_name}_array" if ctx.run_name else None),
+        "derived from run_name",
+        _PH_JOB_NAME,
+        prefix=prefix,
+    )
+    acc.req(d, "run_id", ctx.run_id, f"compute-run-id({ctx.run_name})", _PH_RUN_ID, prefix=prefix)
+    acc.req(
+        d,
+        "total_tasks",
+        _valid_task_count(latest),
+        "load-context latest_run.task_count",
+        1,
+        prefix=prefix,
+    )
+    sched = cfg.scheduler if cfg else None
+    acc.req(
+        d,
+        "backend",
+        (sched if sched in _BACKENDS else None),
+        f"clusters.yaml#{ctx.cluster_name}.scheduler",
+        _PH_BACKEND,
+        prefix=prefix,
+    )
+    acc.req(
+        d,
+        "script",
+        None,
+        "the cluster job script (.hpc/templates/<cpu|gpu>_array.sh)",
+        _PH_SCRIPT,
+        prefix=prefix,
+    )
+    # job_env is required (dict[str, str]); EXECUTOR (the real per-task command)
+    # is not derivable, so the whole dict is a placeholder the caller fills.
+    d["job_env"] = {"EXECUTOR": _PH_EXECUTOR, "HPC_RUN_ID": ctx.run_id or _PH_RUN_ID}
+    acc.sources[f"{prefix}job_env"] = "placeholder — EXECUTOR (real per-task command) not derivable"
+    acc.unresolved.append(f"{prefix}job_env")
+    if latest.get("runtime") == "uv":
+        acc.opt(d, "runtime", "uv", "load-context latest_run.runtime", prefix=prefix)
+    return d
+
+
+def _scaffold_campaign_run(ctx: _Context, acc: _Acc) -> dict[str, Any]:
+    # campaign-run nests three composites: submit-pipeline → submit-and-verify →
+    # submit-flow (the deep leaf), status-pipeline → monitor-flow, and
+    # aggregate-flow. The run identity + cluster fields thread into all three
+    # from one gathered context — getting the 3-level nesting right is the part
+    # that's hardest to hand-build, which is exactly what scaffold-spec supplies.
+    spec: dict[str, Any] = {
+        "submit": {
+            "submit": {"submit": _build_submit_flow_block(ctx, acc, "submit.submit.submit.")}
+        },
+        "status": {"monitor": {}},
+        "aggregate": {},
+    }
+    acc.req(
+        spec["status"]["monitor"],
+        "run_id",
+        ctx.run_id,
+        f"compute-run-id({ctx.run_name})",
+        _PH_RUN_ID,
+        prefix="status.monitor.",
+    )
+    acc.req(
+        spec["aggregate"],
+        "run_id",
+        ctx.run_id,
+        f"compute-run-id({ctx.run_name})",
+        _PH_RUN_ID,
+        prefix="aggregate.",
+    )
+    acc.opt(
+        spec,
+        "campaign_id",
+        ctx.latest_run.get("campaign_id"),
+        "load-context latest_run.campaign_id",
+    )
+    return spec
+
+
 # verb -> (scaffolder, target input model). The model double-checks the
 # emitted skeleton before it leaves (the #287 "refuses to emit a spec the
 # verb would itself reject" guarantee).
@@ -396,15 +529,14 @@ _SCAFFOLDERS: dict[str, Callable[[_Context, _Acc], dict[str, Any]]] = {
     "build-submit-spec": _scaffold_build_submit_spec,
     "validate-campaign": _scaffold_validate_campaign,
     "resolve-submit-inputs": _scaffold_resolve_submit_inputs,
+    "campaign-run": _scaffold_campaign_run,
 }
 _TARGET_MODELS: dict[str, type[pydantic.BaseModel]] = {
     "build-submit-spec": BuildSubmitSpecInput,
     "validate-campaign": ValidateCampaignSpec,
     "resolve-submit-inputs": ResolveSubmitInputsSpec,
+    "campaign-run": CampaignRunSpec,
 }
-# Verbs #287 names but that scaffold-spec does not populate yet — surfaced
-# with a tailored message rather than the generic unknown-verb one.
-_PLANNED = {"campaign-run"}
 
 
 @primitive(
@@ -416,7 +548,7 @@ _PLANNED = {"campaign-run"}
     cli=CliShape(
         help=(
             "Emit a populated, schema-valid --spec skeleton for another verb "
-            "(build-submit-spec / validate-campaign / resolve-submit-inputs), "
+            "(build-submit-spec / resolve-submit-inputs / validate-campaign / campaign-run), "
             "pulling cluster / run_id / context values from clusters.yaml, "
             "compute-run-id, and load-context so the agent stops divining the "
             "schema one spec_invalid at a time (#287). Read the returned spec, "
@@ -462,11 +594,6 @@ def scaffold_spec(
     scaffolder = _SCAFFOLDERS.get(verb)
     if scaffolder is None:
         supported = ", ".join(sorted(_SCAFFOLDERS))
-        if verb in _PLANNED:
-            raise errors.SpecInvalid(
-                f"scaffold-spec does not yet populate {verb!r} — it composes nested "
-                f"workflow specs (a #287 follow-up). Supported verbs: {supported}."
-            )
         raise errors.SpecInvalid(
             f"scaffold-spec has no scaffolder for verb {verb!r}. Supported verbs: {supported}."
         )

@@ -44,8 +44,11 @@ It emits only the coherent conda pair — a `conda_env` without a
 
 Flags only — there is no `--spec` (and so no input schema):
 
-- `--verb` (required) — the target verb to scaffold. Supported today:
-  `build-submit-spec`, `validate-campaign`, `resolve-submit-inputs`.
+- `--verb` (required) — the target verb to scaffold. Supported:
+  `build-submit-spec`, `resolve-submit-inputs`, `validate-campaign`, and
+  `campaign-run` (which nests three workflow specs — submit-pipeline →
+  submit-and-verify → submit-flow, status-pipeline → monitor-flow,
+  aggregate-flow).
 - `--cluster` — clusters.yaml entry (default: the latest run's cluster, or
   the only configured one).
 - `--run-name` — fed to `compute-run-id` (default: the latest run's
@@ -74,10 +77,9 @@ Matches `hpc_agent/schemas/scaffold_spec.output.json`
 ## Errors
 
 - `spec_invalid` — an unsupported `--verb` (the message names the supported
-  set; `campaign-run`, which composes three nested workflow specs, returns
-  a tailored follow-up message). Also raised — and not expected in practice
-  — if a scaffolder ever emits a structurally invalid skeleton, since every
-  skeleton is validated against the target model before it is returned.
+  set). Also raised — and not expected in practice — if a scaffolder ever
+  emits a structurally invalid skeleton, since every skeleton is validated
+  against the target model before it is returned.
 
 ## Idempotency
 

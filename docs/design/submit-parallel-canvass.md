@@ -94,14 +94,14 @@ to overlap — no questions to ask (the user pre-stated everything) **and** a wa
 fast path (preflight cached, deploy cache hit) — the slash runs the simple
 synchronous path. Backgrounding a sub-second dispatch just adds a join.
 
-## Scope and follow-ups
+## Scope and ports
 
-Piloted on `/submit-hpc`. The same shape ports to:
+Piloted on `/submit-hpc`, then ported (same shape) to:
 
-- **`/aggregate-hpc`** — `load-context` (worker) vs. the local results-tree
-  summary (main thread).
-- **`/monitor-hpc`** — the poll-loop tick (worker) vs. the journal-snapshot
-  summary (main thread).
+- **`/aggregate-hpc`** — `load-context` + reconcile + the cluster pull (worker)
+  ∥ the local results-tree summary + the `allow_partial` canvass (main thread).
+- **`/monitor-hpc`** — the poll loop (worker) ∥ the journal-snapshot summary +
+  the `high_failure_rate_action` canvass (main thread).
 
 ## See also
 

@@ -19,6 +19,7 @@ import pytest
 
 from hpc_agent import errors
 from hpc_agent._wire.actions.build_submit_spec import BuildSubmitSpecInput
+from hpc_agent._wire.workflows.campaign_run import CampaignRunSpec
 from hpc_agent._wire.workflows.resolve_submit_inputs import ResolveSubmitInputsSpec
 from hpc_agent._wire.workflows.validate_campaign import ValidateCampaignSpec
 from hpc_agent.infra.clusters import ClusterConfig
@@ -30,7 +31,7 @@ from hpc_agent.ops.scaffold_spec import (
     scaffold_spec,
 )
 
-_SUPPORTED = ["build-submit-spec", "resolve-submit-inputs", "validate-campaign"]
+_SUPPORTED = ["build-submit-spec", "campaign-run", "resolve-submit-inputs", "validate-campaign"]
 
 
 def _warm_ctx(**overrides: Any) -> _Context:
@@ -67,14 +68,6 @@ class TestErrorPaths:
             scaffold_spec(experiment_dir=__import__("pathlib").Path("."), verb="not-a-verb")
         assert "build-submit-spec" in str(exc.value)
 
-    def test_campaign_run_is_a_named_followup(self, tmp_path: Any) -> None:
-        # #287 lists campaign-run but scaffold-spec doesn't populate it yet;
-        # the message says so rather than the generic unknown-verb one.
-        with pytest.raises(errors.SpecInvalid) as exc:
-            scaffold_spec(experiment_dir=tmp_path, verb="campaign-run")
-        msg = str(exc.value)
-        assert "campaign-run" in msg and "follow-up" in msg
-
 
 class TestColdStartValidatesWithPlaceholders:
     def test_build_submit_spec_skeleton_validates(self, tmp_path: Any) -> None:
@@ -102,6 +95,17 @@ class TestColdStartValidatesWithPlaceholders:
     def test_validate_campaign_skeleton_validates(self, tmp_path: Any) -> None:
         res = scaffold_spec(experiment_dir=tmp_path, verb="validate-campaign")
         ValidateCampaignSpec.model_validate(res.spec)
+
+    def test_campaign_run_scaffolds_nested_skeleton(self, tmp_path: Any) -> None:
+        # #287's worst offender: the 3-level submit-pipeline → submit-and-verify
+        # → submit-flow nesting, plus the monitor/aggregate run_ids.
+        res = scaffold_spec(experiment_dir=tmp_path, verb="campaign-run")
+        CampaignRunSpec.model_validate(res.spec)
+        assert set(res.spec) >= {"submit", "status", "aggregate"}
+        assert "submit.submit.submit.run_id" in res.unresolved_fields
+        assert "submit.submit.submit.job_env" in res.unresolved_fields
+        assert "status.monitor.run_id" in res.unresolved_fields
+        assert "aggregate.run_id" in res.unresolved_fields
 
 
 class TestWarmPopulation:
