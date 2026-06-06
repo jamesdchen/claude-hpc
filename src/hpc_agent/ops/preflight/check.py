@@ -461,7 +461,11 @@ def check_preflight(
                 # path is actually green. Skipped when the TCP probe
                 # failed (no point burning 5s on an unreachable host).
                 if tcp_ok:
-                    if uv_pending:
+                    # ``uv_pending`` already implies ``spec`` is a dict with an
+                    # ssh_target (see its definition above); the ``isinstance``
+                    # re-states that invariant so the type checker narrows ``spec``
+                    # from ``dict | None`` here.
+                    if uv_pending and isinstance(spec, dict):
                         # #295 Fix 2: collapse the two independent cluster probes
                         # (echo round-trip + the #275 uv probe) into ONE ssh
                         # round-trip. #289 fanned them concurrently (one RTT

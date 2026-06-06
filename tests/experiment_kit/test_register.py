@@ -100,7 +100,11 @@ def test_compute_injects_resume_from_for_opted_in_run(
         "\n"
         "@register_run\n"
         "def run(alpha: float = 1.0, resume_from=None, checkpoint_dir=None):\n"
-        "    return {'alpha': alpha, 'resume_from': resume_from, 'checkpoint_dir': checkpoint_dir}\n"
+        "    return {\n"
+        "        'alpha': alpha,\n"
+        "        'resume_from': resume_from,\n"
+        "        'checkpoint_dir': checkpoint_dir,\n"
+        "    }\n"
     )
     monkeypatch.setenv("HPC_RESUME_FROM", "/ck/checkpoint-7.pkl")
     monkeypatch.setenv("HPC_CHECKPOINT_DIR", "/ck")

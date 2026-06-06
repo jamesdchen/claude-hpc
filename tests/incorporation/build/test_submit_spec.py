@@ -567,9 +567,7 @@ def test_default_executor_does_not_import_tasks_py(
 
     calls: list = []
     real = hpc_agent.load_tasks_module
-    monkeypatch.setattr(
-        hpc_agent, "load_tasks_module", lambda p: (calls.append(p), real(p))[1]
-    )
+    monkeypatch.setattr(hpc_agent, "load_tasks_module", lambda p: (calls.append(p), real(p))[1])
     exp = tmp_path / "exp"
     exp.mkdir()
     _write_tasks_py(exp, "{'seed': i}")
@@ -613,9 +611,10 @@ def test_walltime_sec_stamped_into_job_env_for_checkpoint_deadline() -> None:
     Absent a walltime, the key is omitted (no deadline → checkpoint no-op)."""
     spec = build_submit_spec(spec=BuildSubmitSpecInput(**_required(), walltime_sec=7200))
     assert spec["job_env"]["HPC_WALLTIME_SEC"] == "7200"
-    assert "HPC_WALLTIME_SEC" not in build_submit_spec(spec=BuildSubmitSpecInput(**_required()))[
-        "job_env"
-    ]
+    assert (
+        "HPC_WALLTIME_SEC"
+        not in build_submit_spec(spec=BuildSubmitSpecInput(**_required()))["job_env"]
+    )
 
 
 def test_assembled_spec_passes_submit_flow_input_schema() -> None:
