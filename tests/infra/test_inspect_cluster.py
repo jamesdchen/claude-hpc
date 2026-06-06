@@ -403,8 +403,13 @@ class TestInspectClusterEntry:
         assert pes["mpi"]["kind"] == "mpi" and pes["mpi"]["max_nodes"] is None
         assert pes["make"]["kind"] == "mpi"  # $round_robin → multi-node capable
         assert pes["make"]["raw"]["allocation_rule"] == "$round_robin"
-        # surfaced on the serialized envelope too
+        # surfaced on the serialized envelope too, and the SGE-emitted entries
+        # validate against the pinned _ParallelEnvironment def (additionalProperties
+        # = False) — symmetric with the PBS conformance check.
         assert "parallel_environments" in snap.to_dict()
+        from hpc_agent._kernel.contract.schema import _output_schema_for, validate
+
+        validate(snap.to_dict(), _output_schema_for("inspect-cluster"))
 
     def test_parse_parallel_environments_unit(self) -> None:
         from hpc_agent.infra.inspect.sge import _classify_pe, _parse_parallel_environments
@@ -460,6 +465,10 @@ class TestInspectClusterEntry:
         assert pes["batch"]["kind"] == "mpi" and pes["batch"]["max_nodes"] is None  # UNLIMITED
         assert pes["batch"]["raw"]["slots"] == 512
         assert pes["single"]["kind"] == "smp" and pes["single"]["max_nodes"] == 1
+        # SLURM-emitted entries validate against the pinned _ParallelEnvironment def.
+        from hpc_agent._kernel.contract.schema import _output_schema_for, validate
+
+        validate(snap.to_dict(), _output_schema_for("inspect-cluster"))
 
     def test_parse_scontrol_show_partition_unit(self) -> None:
         from hpc_agent.infra.inspect.slurm import parse_scontrol_show_partition
