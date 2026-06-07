@@ -98,18 +98,28 @@ _DEFAULT_WAIT_BUDGET_SEC = 1800  # 30 min — long enough for a 1-task probe
 # actually LOADED (it walks newest→oldest and skips corrupt files), so a present
 # file with next_iteration<=0 is the "wrong format" signal — distinct from a
 # legitimately checkpointed ``None`` state, which still yields next_iteration>0.
+#
+# After reading, it REMOVES the canary's _checkpoints/ dir: the canary checkpoint
+# is a throwaway probe, and a result_dir_template WITHOUT {run_id} (e.g.
+# "results/task_{task_id}") would otherwise have the MAIN run's task 0 share the
+# dir and resume off the canary's checkpoint (run_iterations always reads latest).
+# Cleanup runs after the JSON is emitted so the verdict is unaffected; harmless
+# for the recommended {run_id}-scoped template where there is no sharing.
 _REMOTE_CHECKPOINT_SNIPPET = (
-    "import json,sys\n"
+    "import json,sys,shutil\n"
     "from hpc_agent.experiment_kit.checkpoint import "
-    "latest_checkpoint, read_latest_checkpoint\n"
+    "latest_checkpoint, read_latest_checkpoint, checkpoint_dir\n"
     "d=sys.argv[1]\n"
     "p=latest_checkpoint(d)\n"
     "if p is None:\n"
-    "    print(json.dumps({'status':'missing'}));sys.exit(0)\n"
-    "_,nxt=read_latest_checkpoint(d)\n"
-    "if int(nxt)<=0:\n"
-    "    print(json.dumps({'status':'unloadable','path':str(p)}));sys.exit(0)\n"
-    "print(json.dumps({'status':'ok','path':str(p),'next_iteration':int(nxt)}))\n"
+    "    print(json.dumps({'status':'missing'}))\n"
+    "else:\n"
+    "    _,nxt=read_latest_checkpoint(d)\n"
+    "    if int(nxt)<=0:\n"
+    "        print(json.dumps({'status':'unloadable','path':str(p)}))\n"
+    "    else:\n"
+    "        print(json.dumps({'status':'ok','path':str(p),'next_iteration':int(nxt)}))\n"
+    "shutil.rmtree(str(checkpoint_dir(d)), ignore_errors=True)\n"
 )
 
 

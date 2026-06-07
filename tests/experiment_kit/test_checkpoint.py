@@ -276,8 +276,11 @@ def test_preempt_self_under_dispatcher_signals_parent(
     monkeypatch.setattr(ck.os, "getppid", lambda: 4242)
     signaled: list[tuple[int, int]] = []
     monkeypatch.setattr(ck.os, "kill", lambda pid, sig: signaled.append((pid, sig)))
-    # Block loop should fall through immediately, then exit 130.
-    monkeypatch.setattr(ck.time, "monotonic", lambda: 1e18)
+    # monotonic: first call computes the deadline (0.0 + WAIT), the next is the
+    # while-check — return a value past the deadline so the block loop exits at
+    # once, then we exit 130.
+    ticks = iter([0.0, 1e9, 1e9])
+    monkeypatch.setattr(ck.time, "monotonic", lambda: next(ticks))
     monkeypatch.setattr(ck.time, "sleep", lambda _: None)
     monkeypatch.setattr(ck.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
     with pytest.raises(SystemExit):

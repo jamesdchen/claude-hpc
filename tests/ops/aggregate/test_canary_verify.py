@@ -795,6 +795,43 @@ def test_checkpoint_mode_off_keeps_normal_marker_scan(tmp_path: Path, journal_ho
     assert out["failure_kind"] == "dispatcher_failed"
 
 
+def test_remote_checkpoint_snippet_logic(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise the REMOTE snippet (executed as a string on the cluster) in-process
+    so its missing/ok/unloadable branches + the throwaway-checkpoint cleanup are
+    actually covered — otherwise they only fail on a real cluster."""
+    import json
+    import sys
+
+    from hpc_agent.experiment_kit import checkpoint as ck
+    from hpc_agent.ops.verify_canary import _REMOTE_CHECKPOINT_SNIPPET
+
+    code = compile(_REMOTE_CHECKPOINT_SNIPPET, "<snippet>", "exec")
+    d = tmp_path / "rd"
+
+    def _run() -> dict:
+        monkeypatch.setattr(sys, "argv", ["-c", str(d)])
+        exec(code, {})  # noqa: S102 — exercising the remote snippet's own logic
+        return json.loads(capsys.readouterr().out.strip())
+
+    # No checkpoint yet → missing.
+    assert _run()["status"] == "missing"
+
+    # A loadable checkpoint → ok, resumes at iteration 1, and the dir is cleaned up.
+    ck.write_checkpoint({"w": [1, 2]}, iteration=0, result_dir=d)
+    out = _run()
+    assert out["status"] == "ok"
+    assert out["next_iteration"] == 1
+    assert not (d / "_checkpoints").exists()  # throwaway probe cleaned up
+
+    # A present-but-corrupt checkpoint → unloadable (distinct from missing).
+    ckdir = d / "_checkpoints"
+    ckdir.mkdir(parents=True)
+    (ckdir / "checkpoint-0.pkl").write_bytes(b"\x80\x05 not a pickle")
+    assert _run()["status"] == "unloadable"
+
+
 def test_passes_remote_activation_from_canary_sidecar(tmp_path: Path, journal_home: Path) -> None:
     """#176: the status reporter runs on the login node via ssh, so it needs the
     run's conda activation — otherwise it falls to bare login python, every poll
