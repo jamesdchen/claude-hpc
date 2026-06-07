@@ -319,9 +319,7 @@ def _preempt_self() -> None:
     # Parent never killed us (or no dispatcher) — exit as preempted (130) so the
     # canary terminates exactly as a real preemption would. ``os._exit`` skips
     # atexit/buffer flush, mirroring a signal-driven teardown.
-    sys.stderr.write(
-        "[hpc-agent] checkpoint canary: simulated preemption at iteration 2\n"
-    )
+    sys.stderr.write("[hpc-agent] checkpoint canary: simulated preemption at iteration 2\n")
     sys.stderr.flush()
     os._exit(130)
 

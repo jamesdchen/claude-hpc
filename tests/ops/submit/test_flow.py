@@ -873,9 +873,7 @@ class TestCheckpointCanaryEnv:
             _submit_one_spec(experiment_dir=tmp_path, spec=spec)
         return captured
 
-    def test_canary_carries_marker_main_does_not(
-        self, tmp_path: Any, _journal_home: Any
-    ) -> None:
+    def test_canary_carries_marker_main_does_not(self, tmp_path: Any, _journal_home: Any) -> None:
         spec = _spec("rCK", canary=True, force_canary=True, auto_resume_on_kill=True)
         captured = self._run_one(tmp_path, spec)
         assert captured["rCK_canary"]["HPC_CHECKPOINT_CANARY"] == "1"

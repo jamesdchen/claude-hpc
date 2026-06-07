@@ -711,9 +711,7 @@ def test_checkpoint_canary_probe_failure_is_reporter_unreachable(
         mock.patch("hpc_agent.infra.cluster_logs.fetch_task_logs", return_value=_PREEMPT_STDERR),
         mock.patch(
             "hpc_agent.infra.remote.ssh_run",
-            return_value=_fake_ssh_completed(
-                returncode=1, stderr="No module named 'hpc_agent'"
-            ),
+            return_value=_fake_ssh_completed(returncode=1, stderr="No module named 'hpc_agent'"),
         ),
     ):
         out = verify_canary(
@@ -723,9 +721,7 @@ def test_checkpoint_canary_probe_failure_is_reporter_unreachable(
     assert out["failure_kind"] == "reporter_unreachable"
 
 
-def test_checkpoint_canary_explicit_result_dir_override(
-    tmp_path: Path, journal_home: Path
-) -> None:
+def test_checkpoint_canary_explicit_result_dir_override(tmp_path: Path, journal_home: Path) -> None:
     """An explicit checkpoint_result_dir is used verbatim (no sidecar template
     derivation needed)."""
     from hpc_agent.ops.verify_canary import verify_canary
@@ -757,9 +753,7 @@ def test_checkpoint_canary_explicit_result_dir_override(
     assert "custom/dir" in m_ssh.call_args.args[0]
 
 
-def test_checkpoint_canary_unrenderable_template_raises(
-    tmp_path: Path, journal_home: Path
-) -> None:
+def test_checkpoint_canary_unrenderable_template_raises(tmp_path: Path, journal_home: Path) -> None:
     """A result_dir_template that references a per-task kwarg can't be rendered
     locally → SpecInvalid asking for an explicit checkpoint_result_dir."""
     from hpc_agent.ops.verify_canary import verify_canary

@@ -200,14 +200,15 @@ def _resolve_canary_checkpoint_dir(
     if explicit:
         return explicit
     template = sidecar.get("result_dir_template")
-    if not template or not isinstance(template, str):
+    if not isinstance(template, str) or not template:
         raise errors.SpecInvalid(
             f"checkpoint verification for canary {canary_run_id!r} needs the canary's "
             "result dir, but its sidecar carries no result_dir_template and no explicit "
             "checkpoint_result_dir was passed."
         )
     try:
-        return template.format(task_id=0, run_id=canary_run_id)
+        rendered: str = template.format(task_id=0, run_id=canary_run_id)
+        return rendered
     except (KeyError, IndexError) as exc:
         raise errors.SpecInvalid(
             f"cannot derive the canary checkpoint dir: result_dir_template "
