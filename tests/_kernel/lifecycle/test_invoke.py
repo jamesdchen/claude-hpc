@@ -13,6 +13,7 @@ from hpc_agent._kernel.lifecycle.invoke import (
     ClaudeCliInvoker,
     ClaudeCliOAuthInvoker,
     CodexCliInvoker,
+    GeminiCliInvoker,
     InvocationResult,
     RenderedPrompt,
     get_invoker,
@@ -696,3 +697,155 @@ def test_codex_missing_credential_remediation_message_when_absent(
     assert "CODEX_API_KEY" in msg
     # Prefer CODEX_API_KEY over ambient OPENAI_API_KEY (shadow hazard, #3286).
     assert "OPENAI_API_KEY" in msg
+
+
+# ─── Gemini CLI invoker ─────────────────────────────────────────────────────
+
+
+def _gemini_capture_run(seen: dict[str, object], *, response: str = "gemini report"):
+    """A fake ``subprocess.run`` recording argv/cwd/env/stdin and the
+    GEMINI_SYSTEM_MD content, returning the fixed {response, stats, error}
+    envelope on stdout."""
+    import json
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"response": response, "stats": {}, "error": None})
+        stderr = ""
+
+    def _fake_run(argv: list[str], **kwargs: object) -> _Proc:
+        seen["argv"] = argv
+        seen["cwd"] = kwargs.get("cwd")
+        seen["env"] = kwargs.get("env")
+        seen["input"] = kwargs.get("input")
+        env = kwargs.get("env")
+        assert isinstance(env, dict)
+        seen["system_md"] = Path(env["GEMINI_SYSTEM_MD"]).read_text(encoding="utf-8")
+        return _Proc()
+
+    return _fake_run
+
+
+def _redirect_gemini_policy_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point GEMINI_DIR at a temp dir so the policy TOML lands there, not ~/.gemini."""
+    monkeypatch.setenv("GEMINI_DIR", str(tmp_path / "gemini-home"))
+    return tmp_path / "gemini-home" / "policies"
+
+
+def test_gemini_cli_invoker_builds_the_right_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _redirect_gemini_policy_dir(monkeypatch, tmp_path)
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _gemini_capture_run(seen))
+
+    prompt = RenderedPrompt(cacheable_prefix="PREFIX", variable_suffix="SUFFIX")
+    result = GeminiCliInvoker().invoke(prompt, cwd=tmp_path)
+
+    assert isinstance(result, InvocationResult)
+    assert result.exit_code == 0
+    # Output is the unwrapped `response` field of the JSON envelope.
+    assert result.output == "gemini report"
+    assert result.cache_stats is None
+
+    argv = seen["argv"]
+    assert isinstance(argv, list)
+    assert argv[0:2] == ["gemini", "-p"]
+    # Concrete model id pin (not an alias).
+    assert argv[argv.index("--model") + 1] == "gemini-2.5-flash"
+    assert "--output-format" in argv and "json" in argv
+    # The cacheable prefix is the full-replacement system prompt; the variable
+    # suffix is the user prompt on stdin. Both off argv (#169).
+    assert seen["system_md"] == "PREFIX"
+    assert seen["input"] == "SUFFIX"
+    assert "PREFIX" not in argv and "SUFFIX" not in argv
+    assert seen["cwd"] == str(tmp_path)
+
+
+def test_gemini_does_not_select_a_sandbox_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # GEMINI_SANDBOX names a backend, not a bool — it must be unset so no
+    # sandbox is selected (the worker SSH/rsyncs out).
+    _redirect_gemini_policy_dir(monkeypatch, tmp_path)
+    monkeypatch.setenv("GEMINI_SANDBOX", "docker")
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _gemini_capture_run(seen))
+    GeminiCliInvoker().invoke(RenderedPrompt("P", "S"), cwd=tmp_path)
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert "GEMINI_SANDBOX" not in env
+
+
+def test_gemini_policy_toml_installed_at_user_tier_with_full_deny(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    policy_dir = _redirect_gemini_policy_dir(monkeypatch, tmp_path)
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _gemini_capture_run(seen))
+    GeminiCliInvoker().invoke(RenderedPrompt("P", "S"), cwd=tmp_path)
+
+    # The fence lands at the USER tier (~/.gemini/policies via GEMINI_DIR), NOT
+    # the workspace tier (which silently no-ops, #18186).
+    toml_files = list(policy_dir.glob("*.toml"))
+    assert len(toml_files) == 1
+    toml = toml_files[0].read_text(encoding="utf-8")
+    # Every cluster-op command is denied at a priority above any allow tier.
+    for cmd in invoke_mod._CLUSTER_OP_DENY_COMMANDS:
+        assert f'commandPrefix = "{cmd}"' in toml
+    assert 'decision = "deny"' in toml
+    assert f"priority = {invoke_mod._GEMINI_DENY_PRIORITY}" in toml
+    for op in ("scancel", "qdel", "bkill", "ssh", "rsync", "scp", "curl", "wget"):
+        assert op in toml
+
+
+def test_gemini_model_pin_overridable_by_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _redirect_gemini_policy_dir(monkeypatch, tmp_path)
+    monkeypatch.setenv("HPC_AGENT_GEMINI_WORKER_MODEL", "gemini-2.5-custom")
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _gemini_capture_run(seen))
+    GeminiCliInvoker().invoke(RenderedPrompt("P", "S"), cwd=tmp_path)
+    argv = seen["argv"]
+    assert isinstance(argv, list)
+    assert argv[argv.index("--model") + 1] == "gemini-2.5-custom"
+
+
+def test_gemini_unwraps_response_envelope() -> None:
+    import json
+
+    envelope = json.dumps({"response": "the report", "stats": {"x": 1}, "error": None})
+    assert invoke_mod._unwrap_gemini_json(envelope) == "the report"
+
+
+def test_gemini_non_json_stdout_returned_verbatim() -> None:
+    # A crash before the envelope leaves raw stdout so report-parse sees the
+    # worker's last words (the #304 floor handles it).
+    assert invoke_mod._unwrap_gemini_json("Not authenticated. Bye.") == "Not authenticated. Bye."
+
+
+def test_gemini_missing_credential_remediation_none_when_gemini_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    assert GeminiCliInvoker().missing_credential_remediation() is None
+
+
+def test_gemini_missing_credential_remediation_none_when_google_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "v-key")
+    assert GeminiCliInvoker().missing_credential_remediation() is None
+
+
+def test_gemini_missing_credential_remediation_message_when_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    msg = GeminiCliInvoker().missing_credential_remediation()
+    assert msg is not None
+    assert "GEMINI_API_KEY" in msg and "GOOGLE_API_KEY" in msg

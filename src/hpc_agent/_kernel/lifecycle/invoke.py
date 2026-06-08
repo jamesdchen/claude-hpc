@@ -793,10 +793,168 @@ class CodexCliInvoker:
         return _CODEX_MISSING_CREDENTIAL_REMEDIATION
 
 
+# Gemini Policy Engine: a deny only beats an allow when it carries a HIGHER
+# ``priority`` (unlike Claude/Codex where deny inherently wins). 1000 is well
+# above any plausible allow tier so the cluster-op deny always out-ranks.
+_GEMINI_DENY_PRIORITY = 1000
+
+
+def _gemini_policy_dir() -> Path:
+    """The USER-tier Gemini Policy Engine directory (``~/.gemini/policies``).
+
+    The policy fence MUST live at the User (or Admin) tier: the workspace tier
+    is currently broken (upstream #18186) — project-local policies silently
+    no-op, so a fence installed there would quietly drop the cluster-safety
+    invariant. ``GEMINI_DIR`` relocates the Gemini home (mirrors how the OAuth
+    Claude driver relocates ``CLAUDE_CONFIG_DIR``); otherwise it is
+    ``~/.gemini``. Returned as a directory so the caller can write the TOML.
+    """
+    base = os.environ.get("GEMINI_DIR")
+    root = Path(base) if base else Path.home() / ".gemini"
+    return root / "policies"
+
+
+def _gemini_policy_toml() -> str:
+    """The User/Admin-tier Policy Engine TOML fencing the cluster-op deny.
+
+    One ``[[rules]]`` entry per command in :data:`_CLUSTER_OP_DENY_COMMANDS`,
+    each ``decision = "deny"`` at :data:`_GEMINI_DENY_PRIORITY` — higher than any
+    allow tier, because the Gemini Policy Engine is priority-ordered, not
+    deny-beats-allow. ``commandPrefix`` matches the bare invocation
+    (``ssh …`` / ``scancel …``); the same list covers the network deny
+    (``curl`` / ``wget`` / ``ssh`` / ``rsync`` / ``scp``). The worker still
+    reaches the cluster through ``hpc-agent`` (its own transport internally),
+    which this top-level prefix fence does not match.
+    """
+    lines = [
+        "# hpc-agent worker cluster-op fence (Gemini Policy Engine, USER tier).",
+        "# Installed at the User/Admin tier, NOT workspace — the workspace tier",
+        "# silently no-ops (upstream #18186). Deny out-ranks allow via priority",
+        "# (the Policy Engine is priority-ordered, not deny-beats-allow). This is",
+        "# the #283/#228 no-scancel / no-exfil invariant.",
+    ]
+    for cmd in _CLUSTER_OP_DENY_COMMANDS:
+        lines.append("")
+        lines.append("[[rules]]")
+        lines.append('toolName = "run_shell_command"')
+        lines.append(f'commandPrefix = "{cmd}"')
+        lines.append('decision = "deny"')
+        lines.append(f"priority = {_GEMINI_DENY_PRIORITY}")
+    return "\n".join(lines) + "\n"
+
+
+def _unwrap_gemini_json(stdout: str) -> str:
+    """Lift the worker's final report text out of Gemini's JSON envelope.
+
+    ``gemini --output-format json`` wraps the reply in a FIXED
+    ``{response, stats, error}`` envelope; the worker's final text (which then
+    feeds :func:`parse_worker_report` upstream) is the ``response`` field. A
+    malformed / non-JSON stdout (a crash before the envelope) is returned
+    verbatim so the caller's report-parse still surfaces the worker's last
+    words. There is no CLI decode schema for Gemini (``responseSchema`` is
+    API/SDK-only), so this path leans entirely on the #304 floor — the path
+    that motivates #304's repair loop.
+    """
+    try:
+        envelope = json.loads(stdout)
+    except json.JSONDecodeError:
+        return stdout
+    if isinstance(envelope, dict):
+        response = envelope.get("response")
+        if isinstance(response, str):
+            return response
+    return stdout
+
+
+class GeminiCliInvoker:
+    """Runs the worker as a fresh ``gemini -p`` child process.
+
+    Transport (axis 1): the cacheable prefix is written to a tempfile referenced
+    by ``GEMINI_SYSTEM_MD`` (a FULL replacement of Gemini's built-in system
+    prompt), and the variable suffix is fed on stdin — both off argv (#169).
+    Output comes from ``--output-format json``, whose fixed
+    ``{response, stats, error}`` envelope is unwrapped to the worker's final
+    text (:func:`_unwrap_gemini_json`), which then feeds ``parse_worker_report``
+    upstream.
+
+    Sandbox (axis 2): ``GEMINI_SANDBOX`` is deliberately left UNSET — it names a
+    backend (``docker`` / ``podman`` / …), not a bool, so omitting it selects no
+    sandbox. The worker must SSH/rsync out unattended.
+
+    Tool fence (axis 3): a Policy Engine TOML (:func:`_gemini_policy_toml`)
+    installed at the User/Admin tier (:func:`_gemini_policy_dir`) — NOT the
+    workspace tier, which silently no-ops (#18186) — with the cluster-op deny at
+    a higher ``priority`` than any allow (the Policy Engine is priority-ordered,
+    not deny-beats-allow).
+
+    Decode schema (axis 4): NONE at the CLI layer (``responseSchema`` is
+    API/SDK-only), so the Gemini path leans entirely on the #304 floor
+    (:func:`parse_worker_report`) — the path that motivates #304's repair loop.
+    ``cache_stats`` is ``None`` (the CLI surfaces no cache-creation/cache-read
+    split).
+    """
+
+    name = "gemini-cli"
+
+    def __init__(self, *, executable: str = "gemini") -> None:
+        self._executable = executable
+
+    def invoke(
+        self, prompt: RenderedPrompt, *, cwd: Path, report_cache_stats: bool = False
+    ) -> InvocationResult:
+        # report_cache_stats is accepted for Protocol conformance; Gemini's CLI
+        # surfaces no cache-creation/cache-read split, so cache_stats stays None.
+        policy_dir = _gemini_policy_dir()
+        policy_dir.mkdir(parents=True, exist_ok=True)
+        (policy_dir / "hpc-agent-worker.toml").write_text(_gemini_policy_toml(), encoding="utf-8")
+        with tempfile.TemporaryDirectory(prefix="hpc-agent-gemini-") as work_dir:
+            system_md = Path(work_dir) / "system.md"
+            system_md.write_text(prompt.cacheable_prefix, encoding="utf-8")
+            # GEMINI_SYSTEM_MD points at the full-replacement system prompt;
+            # GEMINI_SANDBOX is intentionally NOT set (see class docstring).
+            env = {**os.environ, "GEMINI_SYSTEM_MD": str(system_md)}
+            env.pop("GEMINI_SANDBOX", None)
+            proc = subprocess.run(
+                [
+                    self._executable,
+                    "-p",
+                    # Pin the CONCRETE model id, not an alias (aliases now
+                    # resolve to a preview generation).
+                    "--model",
+                    _worker_model(_GEMINI_WORKER_MODEL_ENV, _GEMINI_WORKER_MODEL),
+                    # The fixed {response, stats, error} envelope, unwrapped below.
+                    "--output-format",
+                    "json",
+                ],
+                # The variable suffix is the user prompt on stdin (the prefix is
+                # the GEMINI_SYSTEM_MD system prompt); both stay off argv (#169).
+                input=prompt.variable_suffix,
+                cwd=str(cwd),
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+        return InvocationResult(
+            exit_code=proc.returncode,
+            output=_unwrap_gemini_json(proc.stdout),
+            stderr=getattr(proc, "stderr", None) or "",
+            cache_stats=None,
+        )
+
+    def missing_credential_remediation(self) -> str | None:
+        if any(os.environ.get(var) for var in _GEMINI_CREDENTIAL_ENV_VARS):
+            return None
+        return _GEMINI_MISSING_CREDENTIAL_REMEDIATION
+
+
 _INVOKERS: dict[str, Callable[..., WorkerInvoker]] = {
     "claude-cli": ClaudeCliInvoker,
     "claude-cli-oauth": ClaudeCliOAuthInvoker,
     "codex-cli": CodexCliInvoker,
+    "gemini-cli": GeminiCliInvoker,
 }
 DEFAULT_INVOKER = "claude-cli"
 
