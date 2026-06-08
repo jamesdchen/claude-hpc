@@ -38,13 +38,46 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["load_context", "plan_action", "main"]
+if TYPE_CHECKING:
+    from hpc_agent._kernel.extension.spawn_prompt import WorkerReport
 
-# delegate.step -> the hpc-agent verb that performs a deterministic step.
-_STEP_VERB: dict[str, str] = {
+__all__ = [
+    "StepTable",
+    "JudgementResolver",
+    "CampaignLoopConfig",
+    "load_context",
+    "plan_action",
+    "default_judgement_resolver",
+    "main",
+]
+
+# The mechanism below is neutral — it does not know about campaigns. The
+# domain knowledge stays with the caller, injected as a ``StepTable`` (which
+# deterministic verb each ``delegate.step`` maps to) and a
+# ``JudgementResolver`` (how an ``agent`` step is actually executed). This is
+# the same "mechanism is neutral; the caller owns policy" seam that
+# ``_kernel/decision/kernel.py`` establishes one level down.
+
+# A delegate-step name -> the hpc-agent verb that performs that deterministic
+# (``kind == "cli"``) step. Injected by the caller; ``CampaignLoopConfig``
+# supplies the campaign map.
+StepTable = Mapping[str, str]
+
+# How an ``agent`` (judgement) step is executed. Takes the delegate block's
+# ``spawn_request`` and the experiment dir; returns the parsed worker report
+# (to print as the per-tick record) and the worker's exit code. Injected so
+# the loop never hardcodes ``claude -p``; the default wraps ``run_workflow``.
+JudgementResolver = Callable[[dict[str, Any], Path], "tuple[WorkerReport, int]"]
+
+# Campaign's deterministic steps. The only campaign-flavored content the loop
+# needs — kept here, in the campaign module, and handed to the neutral
+# mechanism via ``CampaignLoopConfig``.
+_CAMPAIGN_STEP_VERB: dict[str, str] = {
     "monitor": "monitor-flow",
     "aggregate": "aggregate-flow",
 }
@@ -72,11 +105,18 @@ def load_context(experiment_dir: Path) -> dict[str, Any]:
     return data
 
 
-def plan_action(delegate: dict[str, Any] | None, *, allow_agent_steps: bool) -> dict[str, Any]:
+def plan_action(
+    delegate: dict[str, Any] | None,
+    *,
+    step_table: StepTable,
+    allow_agent_steps: bool,
+) -> dict[str, Any]:
     """Map a ``delegate`` block to a concrete action intent.
 
-    Pure function (no I/O) so the routing logic is unit-testable.
-    Returns one of:
+    Pure function (no I/O) so the routing logic is unit-testable. The
+    *step_table* (delegate-step -> hpc-agent verb) is injected by the caller —
+    the mechanism stays neutral; the campaign map lives in
+    :data:`CampaignLoopConfig`. Returns one of:
 
     - ``{"action": "cli", "verb": ..., "run_id": ..., "step": ...}``
     - ``{"action": "agent", "spawn_request": ..., "step": ...}``
@@ -89,7 +129,7 @@ def plan_action(delegate: dict[str, Any] | None, *, allow_agent_steps: bool) -> 
     step = delegate.get("step")
 
     if kind == "cli":
-        verb = _STEP_VERB.get(step) if isinstance(step, str) else None
+        verb = step_table.get(step) if isinstance(step, str) else None
         if verb is None:
             return {"action": "skip", "reason": f"no cli verb mapped for step {step!r}"}
         run_id = delegate.get("run_id")
@@ -139,16 +179,22 @@ def _run_cli_step(verb: str, run_id: str, experiment_dir: Path) -> int:
             os.unlink(spec_path)
 
 
-def _run_agent_step(spawn_request: dict[str, Any], experiment_dir: Path) -> int:
-    """Run a judgement step in a fresh-context worker.
+def default_judgement_resolver(
+    spawn_request: dict[str, Any], experiment_dir: Path
+) -> tuple[WorkerReport, int]:
+    """Resolve a judgement step via ``claude -p`` — the default resolver.
 
     *spawn_request* is the delegate block's ``spawn_request`` — a
     ``{workflow, experiment_dir, fields}`` dict. It is handed to
     :func:`hpc_agent._kernel.lifecycle.run.run_workflow`, the same
     code-orchestrated entrypoint ``hpc-agent run`` uses: it validates
     and renders the request into the canonical worker prompt, invokes a
-    fresh-context worker, and parses the worker's report. The parsed
-    report is printed so a cron/`/loop` tick leaves a record of the step.
+    fresh-context worker, and parses the worker's report.
+
+    Returns the parsed report (which the loop prints as the per-tick record)
+    and the worker's exit code. This is the exact current Claude path; the
+    seam exists so an alternate transport can be injected (#305) without the
+    loop knowing.
     """
     from hpc_agent._kernel.lifecycle.run import run_workflow
 
@@ -157,12 +203,43 @@ def _run_agent_step(spawn_request: dict[str, Any], experiment_dir: Path) -> int:
         experiment_dir=str(experiment_dir),
         fields=spawn_request.get("fields", {}),
     )
+    return report, exit_code
+
+
+def _run_agent_step(
+    spawn_request: dict[str, Any],
+    experiment_dir: Path,
+    resolver: JudgementResolver,
+) -> int:
+    """Run a judgement step via the injected *resolver* and record it.
+
+    The resolver returns the parsed worker report and the exit code; the
+    report is printed so a cron/`/loop` tick leaves a record of the step.
+    """
+    report, exit_code = resolver(spawn_request, experiment_dir)
     print(json.dumps(report.model_dump(mode="json"), indent=2, sort_keys=True))
     return exit_code
 
 
-def main(argv: list[str] | None = None) -> int:
+@dataclass(frozen=True)
+class CampaignLoopConfig:
+    """The campaign-flavored configuration the neutral loop runs under.
+
+    Bundles the two seams the loop injects — *step_table* (which deterministic
+    verb each ``delegate.step`` maps to) and *resolver* (how a judgement step
+    is executed). The defaults reproduce today's ``hpc-campaign-driver``
+    behavior exactly: the monitor/aggregate map and the ``run_workflow``-backed
+    ``claude -p`` resolver.
+    """
+
+    step_table: StepTable = field(default_factory=lambda: _CAMPAIGN_STEP_VERB)
+    resolver: JudgementResolver = default_judgement_resolver
+
+
+def main(argv: list[str] | None = None, *, config: CampaignLoopConfig | None = None) -> int:
     """Advance one campaign workflow step. Returns a process exit code."""
+    if config is None:
+        config = CampaignLoopConfig()
     parser = argparse.ArgumentParser(
         prog="hpc-campaign-driver",
         description="Advance one campaign workflow step from load-context's delegate block.",
@@ -187,7 +264,11 @@ def main(argv: list[str] | None = None) -> int:
 
     data = load_context(args.experiment_dir)
     delegate = data.get("delegate")
-    plan = plan_action(delegate, allow_agent_steps=args.allow_agent_steps)
+    plan = plan_action(
+        delegate,
+        step_table=config.step_table,
+        allow_agent_steps=args.allow_agent_steps,
+    )
 
     print(json.dumps({"delegate": delegate, "plan": plan}, indent=2, sort_keys=True))
 
@@ -196,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     if plan["action"] == "cli":
         return _run_cli_step(plan["verb"], plan["run_id"], args.experiment_dir)
     if plan["action"] == "agent":
-        return _run_agent_step(plan["spawn_request"], args.experiment_dir)
+        return _run_agent_step(plan["spawn_request"], args.experiment_dir, config.resolver)
     return 0
 
 
