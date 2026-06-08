@@ -13,9 +13,9 @@ non-campaign injection.
 
 from __future__ import annotations
 
+from hpc_agent._kernel.lifecycle.drive import _run_agent_step
 from hpc_agent.meta.campaign.driver import (
     CampaignLoopConfig,
-    _run_agent_step,
     plan_action,
 )
 
