@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.23 — 2026-06-08
+
+### Changed — lift the status/lifecycle vocabularies out of the worker-execution package (internal)
+
+`_kernel/lifecycle/lifecycle.py` — the cross-cutting `JournalStatus` / `LifecycleState` / `TaskStatus` / `FailureCategory` StrEnum vocabularies (the canonical value sets the wire, state, and ops layers agree on) — lived inside `_kernel/lifecycle/`, the *worker / model-call execution* package, with a `lifecycle/lifecycle.py` package-module name collision. They are unrelated to execution, so they move to `_kernel/contract/vocabulary.py`, grouping with the other typed-contract modules (`task_id`, `layout`, `schema`). `_kernel/lifecycle/` now means exactly worker / model-call execution (`run`, `invoke`, `structured`, `chat_models`, `playbook`). Internal `_kernel` path change only — no public or wire surface; the ~13 importers and the two test modules (now `tests/_kernel/contract/test_vocabulary*.py`) were updated.
+
 ## 0.10.22 — 2026-06-08
 
 ### Added — OpenAI-compatible `ChatModel` with strict `json_schema` decode (#304, Phase 2)

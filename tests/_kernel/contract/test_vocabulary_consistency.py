@@ -1,4 +1,4 @@
-"""Cross-source consistency between ``_kernel/lifecycle/lifecycle.py``
+"""Cross-source consistency between ``_kernel/contract/vocabulary.py``
 StrEnums and ``_wire/_shared.py`` Pydantic Literals.
 
 The runtime code uses StrEnums for type-safe equality checks
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import typing
 
-from hpc_agent._kernel.lifecycle.lifecycle import (
+from hpc_agent._kernel.contract.vocabulary import (
     TERMINAL_STATUSES,
     JournalStatus,
     LifecycleState,
