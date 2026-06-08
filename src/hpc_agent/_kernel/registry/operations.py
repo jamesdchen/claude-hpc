@@ -29,7 +29,30 @@ from hpc_agent._kernel.registry.primitive import get_registry
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["operations_catalog", "render_llms_full", "schema_for"]
+__all__ = [
+    "BOOTSTRAP_FIELDS",
+    "operations_bootstrap",
+    "operations_catalog",
+    "render_llms_full",
+    "schema_for",
+]
+
+# Single source of truth for the thin per-op row the `capabilities`
+# bootstrap envelope carries (#306): only the machine-readable flags an
+# orchestrator gates on at startup. The heavier per-primitive fields —
+# the schema-file pointers, the Python entry point, the one-line summary,
+# the doc body — are deliberately NOT in this set; they're fetched on
+# demand via `find` / `describe` / `--full`. The `_OperationCatalogEntry`
+# wire model is pinned to this tuple by a contract test, so the thin
+# shape is defined once, not re-stated per consumer.
+BOOTSTRAP_FIELDS: tuple[str, ...] = (
+    "name",
+    "verb",
+    "idempotent",
+    "side_effects",
+    "cli",
+    "agent_facing",
+)
 
 _PACKAGE_ROOT = hpc_agent._PACKAGE_ROOT
 
@@ -92,6 +115,23 @@ def operations_catalog() -> list[dict[str, Any]]:
     Order: stable, sorted by (verb, name) so consumers can diff.
     """
     return sorted(_from_registry(), key=lambda o: (o["verb"], o["name"]))
+
+
+def operations_bootstrap() -> list[dict[str, Any]]:
+    """Project the catalog down to the thin bootstrap row (#306).
+
+    The ``capabilities`` default envelope carries this instead of the
+    full :func:`operations_catalog` row: only the flags an orchestrator
+    gates on at startup (:data:`BOOTSTRAP_FIELDS` — name, verb,
+    idempotency, side-effect class, CLI, agent-facing). The heavier
+    per-primitive fields (schema-file pointers, the Python entry point,
+    the one-line summary, the doc body) are fetched on demand via
+    ``hpc-agent find "<intent>"`` (thin search) or ``hpc-agent describe
+    <name>`` (one full contract). Single-sourcing the field set in
+    :data:`BOOTSTRAP_FIELDS` keeps the envelope from silently re-growing
+    the default-path context leak ``find`` was built to retire.
+    """
+    return [{k: entry[k] for k in BOOTSTRAP_FIELDS} for entry in operations_catalog()]
 
 
 def _from_registry() -> list[dict[str, Any]]:

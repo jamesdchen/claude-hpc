@@ -43,14 +43,15 @@ class _OperationCatalogEntry(BaseModel):
         ),
     )
 
-    # NOTE: this bootstrap row is deliberately thin (#306). The forensic
-    # pointers (`python`, `input_schema`, `output_schema`) and the
-    # one-line `summary` are NOT carried here — they live in the full
-    # catalog projection (`operations_catalog()`) and are fetched on
-    # demand via `hpc-agent describe <name>` (full contract) or
+    # NOTE: this bootstrap row is deliberately thin (#306). Its field set
+    # is single-sourced as `operations.BOOTSTRAP_FIELDS` (the projection
+    # `operations_bootstrap()` uses); `test_bootstrap_fields_match_wire_model`
+    # pins these model fields to that tuple, so the thin shape is defined
+    # once, not re-stated here. The forensic pointers (`python`,
+    # `input_schema`, `output_schema`) and the one-line `summary` are NOT
+    # carried — they live in the full `operations_catalog()` row and are
+    # fetched on demand via `hpc-agent describe <name>` (full contract) or
     # `hpc-agent find "<intent>"` (thin {name,verb,cli,summary} rows).
-    # Inlining them on all ~90 rows of every bootstrap call was the
-    # default-path context leak `find` was built to retire.
 
 
 class CapabilitiesResult(BaseModel):
