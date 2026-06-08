@@ -5,25 +5,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
-## 0.10.24 — 2026-06-08
+## 0.10.25 — 2026-06-08
 
 ### Fixed — strict json_schema decode now guarantees an object root (#304, Phase 2)
 
 `_to_strict_schema` strictified every object node but left the *root* as Pydantic emitted it. A normal `BaseModel` roots as a flat object (fine), but a `RootModel` wrapping a model emits a bare `{"$ref": …}` root, and a `RootModel` over a list/scalar emits a non-object root — both of which strict `response_format: {type: json_schema}` rejects, so `structured()` against such a model would have POSTed a payload the endpoint 400s on. The transform now inlines a root `$ref` (and a single-element `allOf: [{$ref}]` wrapper) so a `RootModel[Object]` resolves to a proper object root with `additionalProperties:false` + all-`required`, and raises a clear `SpecInvalid` (naming the `HPC_AGENT_MODEL_RESPONSE_FORMAT=json_object` fallback) on a genuinely non-object root instead of sending a doomed request. Normal `BaseModel` schemas (the common case, incl. `WorkerReport`) are unaffected — root promotion is a no-op for an already-object root.
 
-## 0.10.23 — 2026-06-08
+## 0.10.24 — 2026-06-08
 
 ### Changed — lift the status/lifecycle vocabularies out of the worker-execution package (internal)
 
 `_kernel/lifecycle/lifecycle.py` — the cross-cutting `JournalStatus` / `LifecycleState` / `TaskStatus` / `FailureCategory` StrEnum vocabularies (the canonical value sets the wire, state, and ops layers agree on) — lived inside `_kernel/lifecycle/`, the *worker / model-call execution* package, with a `lifecycle/lifecycle.py` package-module name collision. They are unrelated to execution, so they move to `_kernel/contract/vocabulary.py`, grouping with the other typed-contract modules (`task_id`, `layout`, `schema`). `_kernel/lifecycle/` now means exactly worker / model-call execution (`run`, `invoke`, `structured`, `chat_models`, `playbook`). Internal `_kernel` path change only — no public or wire surface; the ~13 importers and the two test modules (now `tests/_kernel/contract/test_vocabulary*.py`) were updated.
 
-## 0.10.22 — 2026-06-08
+## 0.10.23 — 2026-06-08
 
 ### Added — OpenAI-compatible `ChatModel` with strict `json_schema` decode (#304, Phase 2)
 
 The first real adapter behind the Phase-1 `ChatModel` boundary: a single OpenAI-compatible `/chat/completions` client (`hpc_agent._kernel.lifecycle.chat_models.openai_compat.OpenAICompatModel`) that targets DeepSeek-hosted, OpenAI, or a self-hosted vLLM by swapping `HPC_AGENT_MODEL_BASE_URL` / `HPC_AGENT_MODEL_API_KEY` / `HPC_AGENT_MODEL_NAME` — one wire shape, the endpoint is the only variable. The phase's core is the **accelerator**: in the default `json_schema` mode the offered schema is sent as a `response_format={"type":"json_schema", …, "strict":true}` **decode-time constraint**, so a conforming server *cannot* emit non-conforming tokens — the raw model-call sibling of the spawned worker's `--json-schema` gate (#269), not a prompt hint. Strictness is achieved by an `_to_strict_schema` boundary transform applied only to the decode-constraint **copy** (recursively `additionalProperties:false` + all-properties-`required` on every object node, refs preserved) — the **source Pydantic models are untouched**, and the parse-validate-repair floor in `structured()` still validates against the original lenient model, so a strict-decoded output is always a superset-constrained case of the lenient validate (the two never conflict). The floor remains the universal **backstop** in every mode (it still catches the semantic / `post_validate` errors a shape constraint can't express, and carries providers/schemas where strict isn't honoured). `HPC_AGENT_MODEL_RESPONSE_FORMAT` is the per-endpoint **downgrade knob**: `json_schema` (default, strict — OpenAI / vLLM), `json_object` (JSON-valid only + schema hint + floor, for json_object-only providers like DeepSeek-hosted), `none` (floor only). Transport / malformed-envelope failures raise a dedicated retry-safe `ModelEndpointError` (`network` category, new `model_endpoint_error` code) that propagates OUT of `structured()` uncaught — a transport error is not a validation failure to repair, and it is distinct from `StructuredOutputError` (a valid completion that failed the floor). **Zero new runtime dependencies** (stdlib `urllib.request` + `json`), the adapter registers lazily inside `get_model` and is **default-off** (it never auto-selects), and it ships **unvalidated against a live endpoint** behind a manual live-validation checklist in `docs/reference/env-vars.md` (the #269 discipline).
 
-## 0.10.21 — 2026-06-08
+## 0.10.22 — 2026-06-08
 
 ### Added — provider-agnostic `structured()` boundary + repair-loop floor (#304, Phase 1)
 
@@ -33,7 +33,7 @@ The first raw model-call seam. Until now every model-facing path spawned an *age
 
 `src/hpc_agent/models/` was a documented architectural tier ("domain logic that runs on the cluster, not the laptop" — the array-dispatch + combine + reduce machinery and the cluster-deployed job templates, governed by `docs/reference/boundary-contract.md`), but the name read as "ML models" and collided with the `ChatModel` concept introduced by #304. The single `mapreduce` tenant is unchanged; the tier is renamed `execution/` (`hpc_agent.execution.mapreduce.*`) — a namespace with room for the cluster-side execution models still to come (MPI / multi-rank #293, many-tiny-task meta-scheduling #227). The previously-empty `execution/__init__.py` now documents the tier and its boundary contract so the intent is explicit rather than looking like an inert wrapper. Internal path change only (no public wire surface); external code importing `hpc_agent.models.mapreduce.*` directly must move to `hpc_agent.execution.*`.
 
-## 0.10.20 — 2026-06-08
+## 0.10.21 — 2026-06-08
 
 ### Changed — refuse the hand-authored `skip_rsync_deploy` agent form (#283, instance #2)
 
@@ -42,6 +42,16 @@ The first raw model-call seam. Until now every model-facing path spawned an *age
 ### Added — lint guards the preflight/deploy-bypass teaching class (#283)
 
 A new `tests/worker_prompts/test_prose_lints.py` lint refuses any worker-prompt example that sets a safety-bypass field (`skip_preflight`, `skip_rsync_deploy`) true. It matches the assignment form (`field: true` / `field=true`) while leaving the negative demotion prose ("there is no longer a `skip_preflight` field") legal — so a new bypass field added to a worker-prompt example fails CI the same way #275/#283 refused the field at the wire.
+
+## 0.10.20 — 2026-06-08
+
+### Added — `find` discovery tier so agents search for a name instead of dumping the catalog (#306)
+
+Tool discovery was all-or-nothing: `capabilities` already inlines the entire ~90-row operations catalog in its default envelope, and `capabilities --full` additionally dumps every agent-facing primitive's doc body + input/output schemas — so the only way to learn a name was to materialize the whole surface into context. At the other end `describe <name>` fetches exactly one contract. The missing middle is a search step. New `hpc-agent find "<intent>"` returns a thin candidate list of `{name, verb, cli, summary}` — no schemas, no doc bodies — giving a headless loop the three-step economy **find (explore) → describe (read one) → invoke** without re-dumping the catalog each iteration. Matching is stdlib-only: a fuzzy `difflib.get_close_matches` pass over primitive names (`submit-batch` → `submit-flow-batch`) unioned with a token/substring scan over `name + summary` (the intent phrase `submit a batch`), returned in stable catalog order and capped at `--limit` (default 15); a blank query matches nothing rather than dumping everything. To feed the scan, the operations catalog projection (`operations_catalog()`) now carries a `summary` field — the primitive's `CliShape` help string — which also surfaces in `describe` output and the baked `operations.json`. It is deliberately *not* added to the fixed-width catalog tables (`capabilities --full`, `docs/generated/operations.md`): summaries run up to ~530 chars, which would blow the column width and destroy scannability — `find` is the surface that puts a summary next to a name without wrecking a table. The `find → describe` flow is taught in the integration docs (`docs/integrations/CONTRACT.md`, `docs/reference/agent-surface.md`) and, for the interactive path, in the `hpc-submit` skill's framework-state guidance — framed as a *sequential* pair, distinct from the skill's parallel independent-lookup batching.
+
+### Changed (wire) — `capabilities` default envelope's `operations` block slimmed to the thin bootstrap row (#306)
+
+Now that `find` carries `{name, verb, cli, summary}` on demand, the per-op rows in the default `capabilities` envelope no longer inline the forensic pointers (`python`, `input_schema`, `output_schema`) or the one-line `summary` — those move "behind `describe`" (fetch one full contract) and `find` (thin search). Each row keeps the machine-readable flags an orchestrator actually gates on at bootstrap: `name`, `verb`, `idempotent`, `side_effects`, `cli`, `agent_facing`. This shrinks the block from ~48 KB to ~19 KB for the ~90-primitive core (a 61% cut, and smaller than before `summary` was added), retiring the default-path context leak the issue flagged. **Breaking on the wire**: a consumer reading `capabilities().operations[].{python,input_schema,output_schema}` must switch to `hpc-agent describe <name>`; nothing in-tree depended on those fields. `capabilities.output.json` and `docs/reference/cli-spec.md` updated to match.
 
 ## 0.10.19 — 2026-06-07
 
