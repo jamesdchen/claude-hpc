@@ -12,6 +12,7 @@ from hpc_agent import errors
 from hpc_agent._kernel.lifecycle.invoke import (
     ClaudeCliInvoker,
     ClaudeCliOAuthInvoker,
+    CodexCliInvoker,
     InvocationResult,
     RenderedPrompt,
     get_invoker,
@@ -546,3 +547,152 @@ def test_schema_constrained_unwraps_string_result(
         RenderedPrompt(cacheable_prefix="P", variable_suffix="S"), cwd=tmp_path
     )
     assert result.output == inner
+
+
+# ─── Codex CLI invoker ──────────────────────────────────────────────────────
+
+
+def _codex_capture_run(seen: dict[str, object], *, report: str = "codex report"):
+    """A fake ``subprocess.run`` recording argv/cwd/env/stdin and writing the
+    Codex ``--output-last-message`` file (Codex reads the report from there, not
+    stdout). Also captures the execpolicy ``.rules`` body while the temp dir
+    still exists."""
+
+    class _Proc:
+        returncode = 0
+        stdout = "codex stdout (not the report)"
+        stderr = ""
+
+    def _fake_run(argv: list[str], **kwargs: object) -> _Proc:
+        seen["argv"] = argv
+        seen["cwd"] = kwargs.get("cwd")
+        seen["env"] = kwargs.get("env")
+        seen["input"] = kwargs.get("input")
+        rules_path = argv[argv.index("--config") + 1].split("=", 1)[1]
+        seen["rules"] = Path(rules_path).read_text(encoding="utf-8")
+        last_idx = argv.index("--output-last-message") + 1
+        Path(argv[last_idx]).write_text(report, encoding="utf-8")
+        return _Proc()
+
+    return _fake_run
+
+
+def test_codex_cli_invoker_builds_the_right_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("HPC_AGENT_WORKER_JSON_SCHEMA", raising=False)
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _codex_capture_run(seen))
+
+    prompt = RenderedPrompt(cacheable_prefix="PREFIX", variable_suffix="SUFFIX")
+    result = CodexCliInvoker().invoke(prompt, cwd=tmp_path)
+
+    assert isinstance(result, InvocationResult)
+    assert result.exit_code == 0
+    # The report is the --output-last-message file, NOT stdout.
+    assert result.output == "codex report"
+    # cache_stats not surfaced at the Codex CLI layer.
+    assert result.cache_stats is None
+
+    argv = seen["argv"]
+    assert isinstance(argv, list)
+    assert argv[0:4] == ["codex", "exec", "-m", "gpt-5.4-mini"]
+    # Autonomy posture: full disk+net, zero prompts (worker SSH/rsyncs out).
+    assert "--dangerously-bypass-approvals-and-sandbox" in argv
+    # Schema accelerator OFF by default → no --output-schema.
+    assert "--output-schema" not in argv
+    # Whole prompt on stdin (no prefix/suffix split for Codex), nothing on argv.
+    assert argv[-1] == "-"
+    assert seen["input"] == prompt.joined
+    assert "PREFIX" not in argv and "SUFFIX" not in argv
+    assert seen["cwd"] == str(tmp_path)
+
+
+def test_codex_execpolicy_rules_carry_the_full_cluster_op_deny(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _codex_capture_run(seen))
+    CodexCliInvoker().invoke(RenderedPrompt("P", "S"), cwd=tmp_path)
+
+    rules = seen["rules"]
+    assert isinstance(rules, str)
+    # Strictest-severity-wins: every cluster-op command is forbidden.
+    for cmd in invoke_mod._CLUSTER_OP_DENY_COMMANDS:
+        assert f'prefix_rule(pattern=["{cmd}"], decision="forbidden")' in rules
+    # The cluster-op surface the #283/#228 invariant protects.
+    for op in ("scancel", "qdel", "bkill", "ssh", "rsync", "scp", "curl", "wget"):
+        assert op in rules
+
+
+def test_codex_model_pin_overridable_by_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HPC_AGENT_CODEX_WORKER_MODEL", "gpt-5.4-custom")
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _codex_capture_run(seen))
+    CodexCliInvoker().invoke(RenderedPrompt("P", "S"), cwd=tmp_path)
+    argv = seen["argv"]
+    assert isinstance(argv, list)
+    assert argv[argv.index("-m") + 1] == "gpt-5.4-custom"
+
+
+def test_codex_output_schema_bound_when_flag_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HPC_AGENT_WORKER_JSON_SCHEMA", "1")
+    seen: dict[str, object] = {}
+
+    captured: dict[str, str] = {}
+
+    base = _codex_capture_run(seen)
+
+    def _fake_run(argv: list[str], **kwargs: object):
+        # Capture the schema file content while the temp dir still exists.
+        idx = argv.index("--output-schema") + 1
+        captured["schema"] = Path(argv[idx]).read_text(encoding="utf-8")
+        return base(argv, **kwargs)
+
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _fake_run)
+    CodexCliInvoker().invoke(RenderedPrompt("P", "S"), cwd=tmp_path)
+    argv = seen["argv"]
+    assert isinstance(argv, list)
+    assert "--output-schema" in argv
+    assert "WorkerReport" in captured["schema"]
+
+
+def test_codex_falls_back_to_stdout_when_no_last_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A worker that crashes before writing the last-message file leaves stdout
+    # as the output so the caller's report-parse surfaces its last words.
+    class _Proc:
+        returncode = 1
+        stdout = "Not authenticated. Goodbye."
+        stderr = "boom"
+
+    def _fake_run(argv: list[str], **kwargs: object) -> _Proc:
+        return _Proc()  # never writes --output-last-message
+
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _fake_run)
+    result = CodexCliInvoker().invoke(RenderedPrompt("P", "S"), cwd=tmp_path)
+    assert result.output == "Not authenticated. Goodbye."
+    assert result.exit_code == 1
+
+
+def test_codex_missing_credential_remediation_none_when_key_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex-x")
+    assert CodexCliInvoker().missing_credential_remediation() is None
+
+
+def test_codex_missing_credential_remediation_message_when_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODEX_API_KEY", raising=False)
+    msg = CodexCliInvoker().missing_credential_remediation()
+    assert msg is not None
+    assert "CODEX_API_KEY" in msg
+    # Prefer CODEX_API_KEY over ambient OPENAI_API_KEY (shadow hazard, #3286).
+    assert "OPENAI_API_KEY" in msg
