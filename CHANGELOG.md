@@ -5,6 +5,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.21 — 2026-06-08
+
+### Added — provider-agnostic `structured()` boundary + repair-loop floor (#304, Phase 1)
+
+The first raw model-call seam. Until now every model-facing path spawned an *agent* (a `claude -p --bare` tool loop via `WorkerInvoker`); `structured(model, schema, messages)` is its single-completion → validated-object sibling — the durable counterpart to `run_workflow`'s render→invoke→parse funnel. The floor is parse → extract JSON → validate against a Pydantic-generated schema → **on failure, feed the validation error back for a bounded number of repair turns, then hard-fail** (`StructuredOutputError`); the repair loop is net-new (every prior model-output check was single-pass validate-and-reject). A `ChatModel` Protocol plus `register_model` / `get_model` / `HPC_AGENT_MODEL` registry mirror the invoker layer, so a provider that supports native strict json-schema decoding can bind it as a swappable accelerator behind the boundary while the floor needs zero provider features. The JSON extractor is lifted to `_kernel/contract/json_extract.py` so the worker floor and `structured()` share one implementation. No real provider adapter and no new runtime dependency in this phase; semantic/referential checks stay in code via a `post_validate` hook.
+
+### Changed — rename the cluster-side execution tier `models/` → `execution/` (#293 forward-design)
+
+`src/hpc_agent/models/` was a documented architectural tier ("domain logic that runs on the cluster, not the laptop" — the array-dispatch + combine + reduce machinery and the cluster-deployed job templates, governed by `docs/reference/boundary-contract.md`), but the name read as "ML models" and collided with the `ChatModel` concept introduced by #304. The single `mapreduce` tenant is unchanged; the tier is renamed `execution/` (`hpc_agent.execution.mapreduce.*`) — a namespace with room for the cluster-side execution models still to come (MPI / multi-rank #293, many-tiny-task meta-scheduling #227). The previously-empty `execution/__init__.py` now documents the tier and its boundary contract so the intent is explicit rather than looking like an inert wrapper. Internal path change only (no public wire surface); external code importing `hpc_agent.models.mapreduce.*` directly must move to `hpc_agent.execution.*`.
+
 ## 0.10.20 — 2026-06-08
 
 ### Changed — refuse the hand-authored `skip_rsync_deploy` agent form (#283, instance #2)
@@ -144,7 +154,7 @@ New read-only `scaffold-spec` query verb. When an agent must invoke a verb that 
 
 Audit of the per-verb Python startup tax. Every `hpc-agent <verb>` builds the CLI parser, which `pkgutil.walk_packages`-imports every module under the primitive-discovery roots — so a top-level `import pandas` / `numpy` in any CLI-reachable module would tax *every* verb's startup, not just the aggregate-side one that needs it. The audit found the hot path **already clean**: pandas / numpy / scipy / sklearn / matplotlib are imported nowhere in `src/`, and the lone `pyarrow.parquet` (`ops/validate/input_dataset.py`) is already function-local. The residual startup cost is pydantic + `importlib.metadata` (version + plugin entry-point scans) + transitive `asyncio` — the hot path the issue itself flags as not movable without a model-loading refactor.
 
-Locked in with `tests/contract/test_no_heavy_toplevel_imports.py`: it AST-scans every framework module (excluding the user-facing `models/mapreduce/templates/` scaffolds) and fails if any imports a heavy data/ML dep (`pandas`, `numpy`, `scipy`, `sklearn`, `pyarrow`, `torch`, `matplotlib`, …) at module level — so a future top-level import re-growing the tax trips in CI, with the function-local fix named in the failure message.
+Locked in with `tests/contract/test_no_heavy_toplevel_imports.py`: it AST-scans every framework module (excluding the user-facing `execution/mapreduce/templates/` scaffolds) and fails if any imports a heavy data/ML dep (`pandas`, `numpy`, `scipy`, `sklearn`, `pyarrow`, `torch`, `matplotlib`, …) at module level — so a future top-level import re-growing the tax trips in CI, with the function-local fix named in the failure message.
 
 ### Changed — parallel-by-default audit: fan check-preflight + SGE inspect-cluster ssh probes (#289)
 
@@ -163,13 +173,13 @@ Reconcile two-tier fix off the same demo session. Tier 1 = root cause (the bare-
 
 ### Fixed — reconcile threads `remote_activation` into the reporter probe (Tier 1)
 
-`ops/monitor/reconcile.py::_reconcile_one` called `_ssh_status_report` without the `remote_activation` keyword, defaulting it to the empty string. The cluster-side reporter then ran under the login node's bare `python` (Hoffman2: `/usr/bin/python` 3.6.8, no `hpc_agent`), crashing with `No module named hpc_agent.models.mapreduce.reduce`. The monitor-side `record_status` path (`ops/monitor/status.py:109-125`) already threaded `remote_activation_for_sidecar(_sidecar)` correctly — reconcile just didn't mirror it. Symmetric fix: read the sidecar, compute the activation prefix, pass it to the reporter call. Same bug shape as the 2026-06-03-handoff-withdrawn 0.7.5 "Bug B" — that withdrawal was correct for the monitor/status path; reconcile reborn the same hole independently.
+`ops/monitor/reconcile.py::_reconcile_one` called `_ssh_status_report` without the `remote_activation` keyword, defaulting it to the empty string. The cluster-side reporter then ran under the login node's bare `python` (Hoffman2: `/usr/bin/python` 3.6.8, no `hpc_agent`), crashing with `No module named hpc_agent.execution.mapreduce.reduce`. The monitor-side `record_status` path (`ops/monitor/status.py:109-125`) already threaded `remote_activation_for_sidecar(_sidecar)` correctly — reconcile just didn't mirror it. Symmetric fix: read the sidecar, compute the activation prefix, pass it to the reporter call. Same bug shape as the 2026-06-03-handoff-withdrawn 0.7.5 "Bug B" — that withdrawal was correct for the monitor/status path; reconcile reborn the same hole independently.
 
 ### Fixed — reporter failure routes through `unable_to_verify` (Tier 2)
 
 Pre-0.10.12 `_reconcile_one`'s verdict logic gated `unable_to_verify` solely on `alive_check_failed`. If the alive-check succeeded (scheduler answered "no jobs alive") AND the reporter raised, the verdict still routed through `abandoned` because the reporter exception was caught into a `summary = {"error": str(exc)}` dict but no flag influenced the verdict. The empirical 2026-06-05 demo: reporter died (Tier 1 cause), alive-check confirmed job gone, run marked `abandoned` — but the framework had no independent confirmation results didn't exist. A completed-but-reporter-broken run would have looked identical. Added a `reporter_failed` flag mirroring `alive_check_failed`; either failing routes through `unable_to_verify`. `abandoned` now requires BOTH probes clean + no alive jobs.
 
-Two new tests pin both tiers: `test_reporter_failure_routes_through_unable_to_verify` (Tier 2 — reporter crashes with the empirical "No module named hpc_agent.models.mapreduce.reduce" string, assert envelope = `unable_to_verify` not `abandoned`) and `test_reconcile_threads_remote_activation_to_reporter` (Tier 1 — assert the reporter call receives a non-empty `remote_activation` keyword).
+Two new tests pin both tiers: `test_reporter_failure_routes_through_unable_to_verify` (Tier 2 — reporter crashes with the empirical "No module named hpc_agent.execution.mapreduce.reduce" string, assert envelope = `unable_to_verify` not `abandoned`) and `test_reconcile_threads_remote_activation_to_reporter` (Tier 1 — assert the reporter call receives a non-empty `remote_activation` keyword).
 
 ## 0.10.11 — 2026-06-05
 
@@ -418,7 +428,7 @@ Tiny follow-up release for one prose-layer fix that landed after the 0.10.1 cut.
 
 ### Fixed — `/submit-hpc`, `/monitor-hpc`, `/aggregate-hpc` skills get a Step 0 (idempotent `install-commands`)
 
-When `~/.claude/agents/hpc-worker.md` is missing on a fresh machine, every hpc-submit / hpc-status / hpc-aggregate run failed at the handoff step when it tried to dispatch the rendered procedure to the named subagent. The orchestrator agent then fell back to running the procedure by hand — frequently inventing cluster commands like `python -m hpc_agent.models.mapreduce.reduce.combine` (no such module). Add a Step 0 to all three skill prompts: run `hpc-agent install-commands` first. Idempotent (no-op when assets are already installed) and ~50ms when re-run, so safe to make a hard prerequisite. The 0-byte-collision auto-clear from 0.10.1 handles the empirically common stale-artifact case; non-empty file at the install path still raises a clear `FileExistsError` with remediation.
+When `~/.claude/agents/hpc-worker.md` is missing on a fresh machine, every hpc-submit / hpc-status / hpc-aggregate run failed at the handoff step when it tried to dispatch the rendered procedure to the named subagent. The orchestrator agent then fell back to running the procedure by hand — frequently inventing cluster commands like `python -m hpc_agent.execution.mapreduce.reduce.combine` (no such module). Add a Step 0 to all three skill prompts: run `hpc-agent install-commands` first. Idempotent (no-op when assets are already installed) and ~50ms when re-run, so safe to make a hard prerequisite. The 0-byte-collision auto-clear from 0.10.1 handles the empirically common stale-artifact case; non-empty file at the install path still raises a clear `FileExistsError` with remediation.
 
 ## 0.10.1 — 2026-06-04
 
@@ -911,17 +921,17 @@ External callers should migrate `from hpc_agent import X` →
 |---|---|
 | `MAX_RUNS`, `SIDECAR_SCHEMA_VERSION`, `compute_cmd_sha`, `compute_tasks_py_sha`, `find_existing_runs`, `find_run_by_cmd_sha`, `prune_old_runs`, `read_run_sidecar`, `run_sidecar_path`, `write_run_sidecar` | `hpc_agent.state.runs` |
 | `ssh_run`, `rsync_push`, `rsync_pull`, `deploy_runtime`, `run_combiner`, `run_combiner_checked` | `hpc_agent.infra.remote` |
-| `check_results`, `check_results_from_tasks`, `report_status`, `report_status_from_tasks`, `rollup_by_grid_point`, `detect_scheduler` | `hpc_agent.models.mapreduce.reduce.status` |
+| `check_results`, `check_results_from_tasks`, `report_status`, `report_status_from_tasks`, `rollup_by_grid_point`, `detect_scheduler` | `hpc_agent.execution.mapreduce.reduce.status` |
 | `pick_gpu` | `hpc_agent.infra.gpu` |
-| `reduce_metrics`, `reduce_by_grid_point`, `reduce_partials`, `reduce_resource_usage` | `hpc_agent.models.mapreduce.reduce.metrics` |
-| `classify_failure` | `hpc_agent.models.mapreduce.reduce.classify` |
+| `reduce_metrics`, `reduce_by_grid_point`, `reduce_partials`, `reduce_resource_usage` | `hpc_agent.execution.mapreduce.reduce.metrics` |
+| `classify_failure` | `hpc_agent.execution.mapreduce.reduce.classify` |
 | `ExecutorInfo`, `discover_executors`, `is_executor_source` | `hpc_agent.state.discover` |
 | `ClusterConstraints`, `parse_constraints` | `hpc_agent.infra.constraints` |
 | `WorkloadSpec`, `SubmissionPlan`, `compute_submission_plan`, `build_wave_map` | `hpc_agent.infra.throughput` |
 | `inspect_cluster` | `hpc_agent.infra.inspect` |
 | `append_runtime_sample`, `roll_up_runtime_quantiles` | `hpc_agent.state.runtime_prior` (as `append_sample`, `roll_up_quantiles`) |
 | `compact_task_ids`, `ResubmitBatch`, `ResubmitPlan`, `resubmit_plan` | `hpc_agent.ops.recover.batching` |
-| `write_metrics` | `hpc_agent.models.mapreduce.metrics_io` |
+| `write_metrics` | `hpc_agent.execution.mapreduce.metrics_io` |
 
 The 15 names retained at root: `_PACKAGE_ROOT`, `__version__`,
 `RepoLayout`, `JournalLayout`, `get_template_path`,
@@ -1248,7 +1258,7 @@ Highlights for plugin authors and external integrators:
   cross-subject primitive calls.
 - **`hpc_agent.campaign` → `hpc_agent.meta.campaign`**, including
   the `hpc-campaign-driver` console script entry point.
-- **`hpc_agent.mapreduce` → `hpc_agent.models.mapreduce`**.
+- **`hpc_agent.mapreduce` → `hpc_agent.execution.mapreduce`**.
 - **`hpc_agent.worker_prompts` → `hpc_agent._kernel.extension.worker_prompts`**.
 - **`hpc_agent._internal.session` → `hpc_agent.state.session`**
   (back-compat barrel re-exporting submodules `journal`, `run_record`,
