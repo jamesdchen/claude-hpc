@@ -356,7 +356,7 @@
     "output_schema": "detect_entry_point.output.json",
     "python": "hpc_agent.ops.detect_entry_point.detect_entry_point",
     "side_effects": [],
-    "summary": "Scan an experiment dir for Python entry-point candidates (main.py/train.py/console-scripts/python -m targets/shell scripts), classify each candidate's argv style (argparse / click / typer / hydra / fire / __main__), and locate files carrying @register_run. Collapses the duplicated six-probe shell block in hpc-wrap-entry-point Steps 0 + 1.",
+    "summary": "Scan an experiment dir for Python entry-point candidates (main.py/train.py/console-scripts/python -m targets/shell scripts), classify each candidate's argv style (argparse / click / typer / hydra / fire / __main__), and locate files carrying @register_run. Collapses the duplicated six-probe shell block in hpc-wrap-entry-point Steps 0 + 1. Also surfaces interview.json's materialized entry-point block (kind shell_command / register_run / python_module) so one call answers submit.md Step 0b's wrapper-honor + mature-repo probe.",
     "verb": "query"
   },
   {
