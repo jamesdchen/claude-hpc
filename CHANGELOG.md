@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.22 — 2026-06-08
+
+### Changed — neutralize the tick-loop's transport copy + add a programmatic entry (#220 follow-up)
+
+Follow-up hardening on the #220 extraction, made live by #305. Three gaps closed in `src/hpc_agent/_kernel/lifecycle/drive.py`: (1) the "neutral" loop still advertised `claude -p` in two runtime-visible strings — the `--allow-agent-steps` skip reason and the `--help` text — even though `default_judgement_resolver` routes through `HPC_AGENT_INVOKER` and can now spawn a `codex-cli`/`gemini-cli` worker (#305); both are reworded to the transport-neutral "spawn a worker," with Claude-specificity left to the default resolver. (2) The loop was only reachable through argparse, so an external autonomous agent (Optuna/Ax/LangGraph) had to synthesize argv strings to drive it; a programmatic `drive_once(experiment_dir, *, step_table, resolver, allow_agent_steps, dry_run) -> int` is now the entry, and the argparse `drive()` is a thin wrapper over it. (3) The `JudgementResolver` contract is documented — an injected resolver owns the pre-spawn credential fail-fast (the default inherits it from `run_workflow`) and prompt-cache accounting (#244) is not carried by the 2-tuple. Also: `CampaignLoopConfig` is declared `frozen=True` but its default `step_table` had aliased the mutable `_CAMPAIGN_STEP_VERB` module global, so a caller mutating `config.step_table` would silently pollute it for every later config — the global is now a `MappingProxyType`, making the freeze honest. No wire or behavior change to the `hpc-campaign-driver` surface (the `{delegate, plan}` envelope and dispatch are unchanged); new tests cover `drive_once` routing/dry-run, the `drive()` argparse wrapper's argv→kwargs delegation, the immutable config default, and lock the transport-neutral skip reason. `docs/integrations/CONTRACT.md` updated.
+
 ## 0.10.21 — 2026-06-08
 
 ### Added — multi-harness WorkerInvoker drivers: Gemini CLI and Codex CLI (#305)

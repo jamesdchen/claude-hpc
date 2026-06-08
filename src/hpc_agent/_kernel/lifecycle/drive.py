@@ -15,9 +15,10 @@ load-context`` and executes the next step:
   :data:`StepTable`); no LLM, no cost.
 - ``kind == "agent"`` — a judgement step (a fresh submission, a
   ``decide``). The loop runs the injected :data:`JudgementResolver` — the
-  default shells ``claude -p`` — but **only** when ``--allow-agent-steps``
-  is passed, because spawning an LLM is an explicit, opt-in, billable
-  side effect.
+  default spawns a fresh-context worker (Claude unless ``HPC_AGENT_INVOKER``
+  selects another harness) — but **only** when ``--allow-agent-steps`` is
+  passed, because spawning a worker is an explicit, opt-in, billable side
+  effect.
 
 One step per invocation: idempotent and cron-friendly. Wrap it in cron
 or ``/loop`` to walk a sequence — each tick advances exactly one step
@@ -57,6 +58,7 @@ __all__ = [
     "load_context",
     "plan_action",
     "default_judgement_resolver",
+    "drive_once",
     "drive",
 ]
 
@@ -68,7 +70,16 @@ StepTable = Mapping[str, str]
 # How an ``agent`` (judgement) step is executed. Takes the delegate block's
 # ``spawn_request`` and the experiment dir; returns the parsed worker report
 # (to print as the per-tick record) and the worker's exit code. Injected so
-# the loop never hardcodes ``claude -p``; the default wraps ``run_workflow``.
+# the loop never hardcodes a transport; the default wraps ``run_workflow``.
+#
+# Contract an injected resolver must honor (the default inherits both from
+# ``run_workflow``):
+#   * Pre-spawn credential fail-fast — surface an actionable error *before*
+#     spawning when no usable credential is present (the default routes through
+#     ``WorkerInvoker.missing_credential_remediation`` in ``run.py``), rather
+#     than letting the worker die opaquely.
+#   * Cache-stats (#244) do NOT ride this 2-tuple — a resolver that wants to
+#     surface prompt-cache accounting must report it out of band.
 JudgementResolver = Callable[[dict[str, Any], Path], "tuple[WorkerReport, int]"]
 
 
@@ -132,7 +143,7 @@ def plan_action(
                 "action": "skip",
                 "reason": (
                     f"step {step!r} needs an agent; pass --allow-agent-steps to "
-                    "permit the driver to spawn `claude -p` (a billable side effect)"
+                    "permit the driver to spawn a worker (a billable side effect)"
                 ),
             }
         spawn_request = delegate.get("spawn_request")
@@ -210,6 +221,46 @@ def _run_agent_step(
     return exit_code
 
 
+def drive_once(
+    experiment_dir: Path,
+    *,
+    step_table: StepTable,
+    resolver: JudgementResolver,
+    allow_agent_steps: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Advance one workflow step under the caller's policy. Returns an exit code.
+
+    The neutral loop body, free of any CLI/argparse coupling: ``load-context``,
+    plan the action against the injected *step_table*, print the
+    ``{delegate, plan}`` record, and dispatch — ``cli`` steps run an
+    ``hpc-agent`` verb, ``agent`` steps run the injected *resolver*.
+
+    This is the **programmatic** entry an external autonomous agent
+    (Optuna / Ax / LangGraph / a custom loop) calls directly, supplying its own
+    *step_table* and *resolver* — no argv to synthesize. The argparse
+    :func:`drive` wrapper exists only for the console-script surface and is a
+    thin shell over this.
+    """
+    data = load_context(experiment_dir)
+    delegate = data.get("delegate")
+    plan = plan_action(
+        delegate,
+        step_table=step_table,
+        allow_agent_steps=allow_agent_steps,
+    )
+
+    print(json.dumps({"delegate": delegate, "plan": plan}, indent=2, sort_keys=True))
+
+    if dry_run or plan["action"] == "skip":
+        return 0
+    if plan["action"] == "cli":
+        return _run_cli_step(plan["verb"], plan["run_id"], experiment_dir)
+    if plan["action"] == "agent":
+        return _run_agent_step(plan["spawn_request"], experiment_dir, resolver)
+    return 0
+
+
 def drive(
     argv: list[str] | None,
     *,
@@ -218,13 +269,11 @@ def drive(
     prog: str,
     description: str,
 ) -> int:
-    """Advance one workflow step under the caller's policy. Returns an exit code.
+    """Console-script wrapper: parse args, then delegate to :func:`drive_once`.
 
-    The neutral loop body: parse args, ``load-context``, plan the action
-    against the injected *step_table*, print the ``{delegate, plan}`` envelope,
-    and dispatch. ``cli`` steps run an ``hpc-agent`` verb; ``agent`` steps run
-    the injected *resolver*. *prog* / *description* let the caller brand the
-    CLI surface (the campaign entry point names itself ``hpc-campaign-driver``).
+    *prog* / *description* let the caller brand the CLI surface (the campaign
+    entry point names itself ``hpc-campaign-driver``). All loop behavior lives
+    in :func:`drive_once`; this only translates argv into its keyword args.
     """
     parser = argparse.ArgumentParser(prog=prog, description=description)
     parser.add_argument(
@@ -236,7 +285,7 @@ def drive(
     parser.add_argument(
         "--allow-agent-steps",
         action="store_true",
-        help="Permit the driver to spawn `claude -p` for judgement steps (billable).",
+        help="Permit the driver to spawn a worker for judgement steps (billable).",
     )
     parser.add_argument(
         "--dry-run",
@@ -245,20 +294,10 @@ def drive(
     )
     args = parser.parse_args(argv)
 
-    data = load_context(args.experiment_dir)
-    delegate = data.get("delegate")
-    plan = plan_action(
-        delegate,
+    return drive_once(
+        args.experiment_dir,
         step_table=step_table,
+        resolver=resolver,
         allow_agent_steps=args.allow_agent_steps,
+        dry_run=args.dry_run,
     )
-
-    print(json.dumps({"delegate": delegate, "plan": plan}, indent=2, sort_keys=True))
-
-    if args.dry_run or plan["action"] == "skip":
-        return 0
-    if plan["action"] == "cli":
-        return _run_cli_step(plan["verb"], plan["run_id"], args.experiment_dir)
-    if plan["action"] == "agent":
-        return _run_agent_step(plan["spawn_request"], args.experiment_dir, resolver)
-    return 0

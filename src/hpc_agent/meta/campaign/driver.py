@@ -28,7 +28,9 @@ Usage::
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from hpc_agent._kernel.lifecycle.drive import (
     JudgementResolver,
@@ -51,11 +53,16 @@ __all__ = [
 
 # Campaign's deterministic steps. The only campaign-flavored content the loop
 # needs — kept here, in the campaign module, and handed to the neutral
-# mechanism in ``drive`` via ``CampaignLoopConfig``.
-_CAMPAIGN_STEP_VERB: dict[str, str] = {
-    "monitor": "monitor-flow",
-    "aggregate": "aggregate-flow",
-}
+# mechanism in ``drive`` via ``CampaignLoopConfig``. Wrapped in a
+# ``MappingProxyType`` so the frozen config's default is genuinely immutable:
+# a caller can't mutate ``config.step_table`` and silently pollute this shared
+# module global for every later config.
+_CAMPAIGN_STEP_VERB: Mapping[str, str] = MappingProxyType(
+    {
+        "monitor": "monitor-flow",
+        "aggregate": "aggregate-flow",
+    }
+)
 
 
 @dataclass(frozen=True)

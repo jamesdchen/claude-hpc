@@ -255,8 +255,20 @@ step per invocation, state-on-disk between ticks. The caller owns the
   table skips — the loop bakes in no step vocabulary of its own.
 - **`JudgementResolver`** (`(spawn_request, experiment_dir) -> (report,
   exit_code)`) — how a `kind: "agent"` step is executed. The default
-  resolver shells `claude -p` via `run_workflow`; the seam lets an
-  alternate transport stand in without the loop knowing.
+  resolver spawns a fresh-context worker via `run_workflow` (the transport
+  is whichever `HPC_AGENT_INVOKER` selects — `claude-cli` by default,
+  `codex-cli`/`gemini-cli` per #305); the seam lets a wholly different
+  resolver stand in without the loop knowing. An injected resolver **owns
+  two obligations the default inherits from `run_workflow`**: (1) a
+  pre-spawn credential fail-fast (surface an actionable error *before*
+  spawning rather than letting the worker die opaquely), and (2)
+  prompt-cache accounting (#244) is *not* carried by the 2-tuple — report
+  it out of band if you need it.
+
+An integrator that wants to embed the loop without the console-script
+surface calls **`drive_once(experiment_dir, *, step_table, resolver,
+allow_agent_steps, dry_run)`** directly — no argv to synthesize; the
+`hpc-campaign-driver` CLI is a thin argparse wrapper over it.
 
 This is the same "mechanism is neutral; the caller owns the rules" split
 the deterministic decision kernel uses one layer down. An integrator
