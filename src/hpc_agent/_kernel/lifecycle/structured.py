@@ -21,10 +21,14 @@ it" contract as the spawned worker's ``_worker_output_schema()`` →
 a hard dependency.
 
 Selection precedence mirrors :func:`get_invoker`: an explicit name > the
-``HPC_AGENT_MODEL`` environment variable. No real model is registered in
-Phase 1, so :func:`get_model` raises a clear
+``HPC_AGENT_MODEL`` environment variable. Phase 2 (#304) registers the
+first real adapter — the OpenAI-compatible
+:class:`~hpc_agent._kernel.lifecycle.chat_models.openai_compat.OpenAICompatModel`
+— lazily inside :func:`get_model` (so importing this module stays free of
+provider code). Registration is default-OFF: it never auto-selects, so
+:func:`get_model` still raises a clear
 :class:`~hpc_agent.errors.SpecInvalid` (the same shape as an unknown
-invoker) until an adapter registers one.
+invoker) until ``HPC_AGENT_MODEL`` or an explicit name picks one.
 """
 
 from __future__ import annotations
@@ -225,6 +229,27 @@ class ScriptedModel:
 
 
 _MODELS: dict[str, Callable[..., ChatModel]] = {}
+#: Guards the one-time lazy registration of the built-in adapters.
+_BUILTINS_REGISTERED = False
+
+
+def _register_builtins() -> None:
+    """Lazily register the built-in adapters on first :func:`get_model` call.
+
+    Kept out of import: the OpenAI-compatible adapter (and its
+    ``urllib``-backed transport) loads only when a model is actually
+    requested, so importing this boundary module stays provider-free.
+    Idempotent and default-OFF — it only *registers* the factory under
+    ``"openai-compat"``; it never selects it, so ``get_model`` with nothing
+    chosen still raises (the Phase-1 contract holds).
+    """
+    global _BUILTINS_REGISTERED
+    if _BUILTINS_REGISTERED:
+        return
+    from hpc_agent._kernel.lifecycle.chat_models.openai_compat import OpenAICompatModel
+
+    _MODELS.setdefault("openai-compat", OpenAICompatModel.from_env)
+    _BUILTINS_REGISTERED = True
 
 
 def register_model(name: str, factory: Callable[..., ChatModel]) -> None:
@@ -240,11 +265,13 @@ def register_model(name: str, factory: Callable[..., ChatModel]) -> None:
 def get_model(name: str | None = None) -> ChatModel:
     """Resolve a :class:`ChatModel`: explicit name > ``HPC_AGENT_MODEL``.
 
-    No real model is registered in Phase 1, so this raises
+    The built-in adapters are registered lazily here (:func:`_register_builtins`)
+    so this module imports provider-free. Registration is default-OFF: with
+    nothing selected this still raises
     :class:`~hpc_agent.errors.SpecInvalid` — the same shape as
-    :func:`get_invoker`'s unknown-invoker error — until an adapter calls
-    :func:`register_model`.
+    :func:`get_invoker`'s unknown-invoker error.
     """
+    _register_builtins()
     chosen = name or os.environ.get("HPC_AGENT_MODEL")
     if chosen is None:
         raise errors.SpecInvalid(
