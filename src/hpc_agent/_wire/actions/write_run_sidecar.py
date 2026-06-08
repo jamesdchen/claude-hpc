@@ -122,4 +122,9 @@ class WriteRunSidecarInput(BaseModel):
     # (task-ordered; e.g. an Optuna trial number per task). Recorded verbatim
     # and re-surfaced by prior_records(); never interpreted by the framework.
     trial_tokens: list[Any] | None = None
+    # Provenance: DATA + ENVIRONMENT identity to complement cmd_sha (params)
+    # and tasks_py_sha (code) — see compute_data_sha / compute_env_hash (#222).
+    # Both are bare sha256 hex; an empty/absent value means "not captured".
+    data_sha: str | None = Field(default=None, pattern=r"^([0-9a-f]{64})?$")
+    env_hash: str | None = Field(default=None, pattern=r"^([0-9a-f]{64})?$")
     job_ids: list[str] | None = None

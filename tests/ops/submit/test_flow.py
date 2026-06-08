@@ -731,6 +731,37 @@ class TestSidecarGuarantee:
             "mem_mb": 8192,
         }
 
+    def test_records_env_hash_on_synthesized_sidecar(
+        self, tmp_path: Any, _journal_home: Any
+    ) -> None:
+        # #222: Step 6d captures ENVIRONMENT identity from the resolved
+        # activation in job_env, alongside the param/code shas.
+        from hpc_agent.ops import submit_flow as sf_module
+        from hpc_agent.ops.submit_flow import submit_flow_batch
+        from hpc_agent.state.run_sha import compute_env_hash
+        from hpc_agent.state.runs import read_run_sidecar
+
+        spec = _spec(
+            "rEnv",
+            job_env={
+                "EXECUTOR": "python run.py --task $HPC_TASK_ID",
+                "HPC_CMD_SHA": "abcd1234",
+                "MODULES": "python/3.11.9 cuda/12.1",
+                "CONDA_SOURCE": "/opt/conda/etc/profile.d/conda.sh",
+                "CONDA_ENV": "ml",
+            },
+        )
+        p1, p2, p3 = _mock_prelude_and_submit(sf_module)
+        with p1, p2, p3:
+            submit_flow_batch(tmp_path, spec=_batch([spec]))
+        sc = read_run_sidecar(tmp_path, "rEnv")
+        assert sc["env_hash"] == compute_env_hash(
+            modules=["python/3.11.9", "cuda/12.1"],
+            conda_source="/opt/conda/etc/profile.d/conda.sh",
+            conda_envs=["ml"],
+            runtime=None,
+        )
+
     def test_raises_when_missing_and_no_result_dir_template(
         self, tmp_path: Any, _journal_home: Any
     ) -> None:

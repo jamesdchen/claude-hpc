@@ -76,6 +76,8 @@ _V2_CONFIG = frozenset(
         "aggregate_defaults",
         "results",
         "trial_tokens",
+        "data_sha",
+        "env_hash",
     ]
 )
 _RUNTIME_WRITTEN = frozenset(

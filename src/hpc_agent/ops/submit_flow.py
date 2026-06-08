@@ -572,6 +572,23 @@ def _ensure_run_sidecar(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
 
     resources = spec.resources.model_dump(exclude_none=True) if spec.resources else None
 
+    # #222: capture ENVIRONMENT identity alongside the param (cmd_sha) and
+    # code (tasks_py_sha) identities. ``job_env`` carries the resolved
+    # activation the cluster preamble consumes ($MODULES / $CONDA_SOURCE /
+    # $CONDA_ENV) and the $HPC_RUNTIME selector — i.e. exactly what this run
+    # executes under. ``$MODULES`` is a space-joined string in job_env; split
+    # it back to the ordered list compute_env_hash expects.
+    from hpc_agent.state.run_sha import compute_env_hash
+
+    modules_str = (job_env.get("MODULES") or "").strip()
+    conda_env_str = (job_env.get("CONDA_ENV") or "").strip()
+    env_hash = compute_env_hash(
+        modules=modules_str.split() if modules_str else [],
+        conda_source=(job_env.get("CONDA_SOURCE") or "").strip() or None,
+        conda_envs=[conda_env_str] if conda_env_str else [],
+        runtime=job_env.get("HPC_RUNTIME") or spec.runtime or None,
+    )
+
     write_run_sidecar(
         experiment_dir,
         run_id=spec.run_id,
@@ -588,6 +605,7 @@ def _ensure_run_sidecar(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
         campaign_id=spec.campaign_id or None,
         runtime=spec.runtime,
         resources=resources or None,
+        env_hash=env_hash,
     )
 
 

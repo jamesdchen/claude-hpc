@@ -123,6 +123,8 @@ def write_run_sidecar(*, experiment_dir: Path, spec: WriteRunSidecarInput) -> di
         aggregate_defaults=spec.aggregate_defaults,
         results=spec.results,
         trial_tokens=spec.trial_tokens,
+        data_sha=spec.data_sha,
+        env_hash=spec.env_hash,
         job_ids=spec.job_ids,
     )
     return {"path": str(target)}
