@@ -167,9 +167,7 @@ class OpenAICompatModel:
             response_format_mode=mode,
         )
 
-    def complete(
-        self, messages: list[ChatMessage], *, schema: dict[str, Any] | None = None
-    ) -> str:
+    def complete(self, messages: list[ChatMessage], *, schema: dict[str, Any] | None = None) -> str:
         """One chat completion. Honours the offered *schema* per the mode.
 
         Builds the request body, applies the accelerator

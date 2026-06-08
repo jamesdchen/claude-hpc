@@ -332,9 +332,7 @@ def test_structured_repair_loop_recovers_through_adapter(
     # First completion is valid JSON but the WRONG shape (missing required
     # fields); the floor feeds the error back and the second corrects it.
     bad = json.dumps({"label": "x"})  # missing `nested`
-    good = json.dumps(
-        {"label": "x", "count": 1, "nested": {"inner_label": "n"}, "tags": []}
-    )
+    good = json.dumps({"label": "x", "count": 1, "nested": {"inner_label": "n"}, "tags": []})
     _capture_urlopen(monkeypatch, [_envelope(bad), _envelope(good)])
     model = _model(response_format_mode="none")  # floor carries shape
     result = structured(model, _Answer, [ChatMessage(role="user", content="go")])

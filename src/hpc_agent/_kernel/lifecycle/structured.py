@@ -211,17 +211,14 @@ class ScriptedModel:
         #: Schemas seen per call, so a test can assert the offer was made.
         self.schemas_seen: list[dict[str, Any] | None] = []
 
-    def complete(
-        self, messages: list[ChatMessage], *, schema: dict[str, Any] | None = None
-    ) -> str:
+    def complete(self, messages: list[ChatMessage], *, schema: dict[str, Any] | None = None) -> str:
         self.schemas_seen.append(schema)
         if self._schema_response is not None and schema is not None and self._index == 0:
             self._index += 1
             return self._schema_response
         if self._index >= len(self._responses):
             raise AssertionError(
-                "ScriptedModel exhausted: complete() called more times than "
-                "responses were scripted"
+                "ScriptedModel exhausted: complete() called more times than responses were scripted"
             )
         response = self._responses[self._index]
         self._index += 1
@@ -280,7 +277,5 @@ def get_model(name: str | None = None) -> ChatModel:
         )
     factory = _MODELS.get(chosen)
     if factory is None:
-        raise errors.SpecInvalid(
-            f"unknown chat model {chosen!r}; registered: {sorted(_MODELS)}"
-        )
+        raise errors.SpecInvalid(f"unknown chat model {chosen!r}; registered: {sorted(_MODELS)}")
     return factory()
