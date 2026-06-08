@@ -213,6 +213,48 @@ def test_to_strict_schema_drops_unsupported_format() -> None:
     assert "format" not in strict["properties"]["email"]
 
 
+def test_to_strict_schema_promotes_rootmodel_ref_root() -> None:
+    # A RootModel wrapping a model emits a bare {"$ref": ...} root (no object),
+    # which strict mode rejects. _to_strict_schema must inline it to an object.
+    class Inner(pydantic.BaseModel):
+        a: int
+        b: str = "x"
+
+    class Wrap(pydantic.RootModel[Inner]):
+        pass
+
+    schema = Wrap.model_json_schema()
+    assert "$ref" in schema and "properties" not in schema  # precondition: bare-ref root
+    strict = _to_strict_schema(schema)
+    assert strict["type"] == "object"
+    assert strict["additionalProperties"] is False
+    assert sorted(strict["required"]) == ["a", "b"]  # all properties forced required
+    assert "$defs" in strict  # carried forward so inner refs still resolve
+
+
+def test_to_strict_schema_promotes_allof_ref_root() -> None:
+    # Some shapes wrap the root ref in a single-element allOf; inline that too.
+    schema = {
+        "$defs": {"X": {"type": "object", "properties": {"a": {"type": "integer"}}}},
+        "allOf": [{"$ref": "#/$defs/X"}],
+        "title": "Wrapper",
+    }
+    strict = _to_strict_schema(schema)
+    assert strict["type"] == "object"
+    assert strict["additionalProperties"] is False
+    assert strict["required"] == ["a"]
+
+
+def test_to_strict_schema_rejects_non_object_root() -> None:
+    # A RootModel over a non-object (list / scalar) cannot be a strict object
+    # root — fail fast with guidance instead of POSTing a payload the API 400s.
+    class Items(pydantic.RootModel[list[int]]):
+        pass
+
+    with pytest.raises(errors.SpecInvalid, match="object-rooted"):
+        _to_strict_schema(Items.model_json_schema())
+
+
 # ── json_object mode ───────────────────────────────────────────────────────
 
 

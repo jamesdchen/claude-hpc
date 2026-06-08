@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.24 — 2026-06-08
+
+### Fixed — strict json_schema decode now guarantees an object root (#304, Phase 2)
+
+`_to_strict_schema` strictified every object node but left the *root* as Pydantic emitted it. A normal `BaseModel` roots as a flat object (fine), but a `RootModel` wrapping a model emits a bare `{"$ref": …}` root, and a `RootModel` over a list/scalar emits a non-object root — both of which strict `response_format: {type: json_schema}` rejects, so `structured()` against such a model would have POSTed a payload the endpoint 400s on. The transform now inlines a root `$ref` (and a single-element `allOf: [{$ref}]` wrapper) so a `RootModel[Object]` resolves to a proper object root with `additionalProperties:false` + all-`required`, and raises a clear `SpecInvalid` (naming the `HPC_AGENT_MODEL_RESPONSE_FORMAT=json_object` fallback) on a genuinely non-object root instead of sending a doomed request. Normal `BaseModel` schemas (the common case, incl. `WorkerReport`) are unaffected — root promotion is a no-op for an already-object root.
+
 ## 0.10.23 — 2026-06-08
 
 ### Changed — lift the status/lifecycle vocabularies out of the worker-execution package (internal)
