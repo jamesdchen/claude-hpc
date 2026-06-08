@@ -402,11 +402,14 @@ def find(*, query: str, limit: int = 15) -> dict[str, Any]:
 
     catalog = operations_catalog()
     needle = query.strip().lower()
-    if not needle:
+    # Clamp negatives to 0 so a stray ``--limit -1`` returns nothing rather
+    # than silently lopping the last row off via ``rows[:-1]``.
+    limit = max(limit, 0)
+    if not needle or limit == 0:
         return {"query": query, "count": 0, "matches": []}
 
     names = [entry["name"] for entry in catalog]
-    fuzzy = set(difflib.get_close_matches(needle, names, n=max(limit, 1), cutoff=0.5))
+    fuzzy = set(difflib.get_close_matches(needle, names, n=limit, cutoff=0.5))
 
     tokens = [t for t in re.split(r"\W+", needle) if t]
     keyword: set[str] = set()

@@ -66,6 +66,14 @@ def test_limit_caps_results() -> None:
     assert len(result["matches"]) <= 2
 
 
+def test_nonpositive_limit_returns_nothing() -> None:
+    """A zero or negative limit returns empty — never drops rows via [:-1]."""
+    for n in (0, -1, -5):
+        result = find(query="submit", limit=n)
+        assert result["count"] == 0
+        assert result["matches"] == []
+
+
 def test_blank_query_matches_nothing() -> None:
     """A blank / whitespace query returns empty — it does not dump the catalog."""
     for q in ("", "   ", "\t"):
