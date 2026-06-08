@@ -84,7 +84,7 @@ class CapabilitiesResult(BaseModel):
             "orchestrator gates on. Heavier content — schema-file "
             "pointers, the Python entry point, the one-line summary, and "
             "the full doc body — is intentionally NOT inlined here (#306): "
-            "fetch it on demand with `hpc-agent find \"<intent>\"` (thin "
+            'fetch it on demand with `hpc-agent find "<intent>"` (thin '
             "search) or `hpc-agent describe <name>` (one full contract)."
         ),
     )
