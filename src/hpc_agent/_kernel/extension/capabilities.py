@@ -83,6 +83,14 @@ def capabilities(*, subcommands: list[str]) -> dict[str, Any]:
     from hpc_agent._kernel.registry.plugins import get_plugin_manifests
     from hpc_agent.infra.clusters import CLUSTER_YAML_KEYS
 
+    # #306: the bootstrap envelope carries only the thin per-op row an
+    # orchestrator gates on. The forensic pointers (python / input_schema
+    # / output_schema) and the one-line summary stay in the full
+    # operations_catalog() projection and are fetched on demand via
+    # `find` (thin search) / `describe` (one full contract) / `--full`.
+    _bootstrap_op_keys = ("name", "verb", "idempotent", "side_effects", "cli", "agent_facing")
+    operations = [{k: entry[k] for k in _bootstrap_op_keys} for entry in operations_catalog()]
+
     return {
         "version": hpc_agent.__version__,
         "subcommands": list(subcommands),
@@ -107,5 +115,5 @@ def capabilities(*, subcommands: list[str]) -> dict[str, Any]:
         # plugin is installed or when installed plugins haven't yet
         # declared a manifest (a DeprecationWarning fires in that case).
         "plugins": [m.model_dump(mode="json") for m in get_plugin_manifests().values()],
-        "operations": operations_catalog(),
+        "operations": operations,
     }

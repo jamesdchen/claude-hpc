@@ -30,18 +30,6 @@ class _OperationCatalogEntry(BaseModel):
     idempotent: bool
     side_effects: list[str]
     cli: str | None = None
-    python: str | None = None
-    input_schema: str | None = None
-    output_schema: str | None = None
-    summary: str = Field(
-        default="",
-        description=(
-            "One-line gloss of the primitive — its CliShape help string. "
-            "The `find` discovery tier searches over name + summary so an "
-            "agent can resolve intent to a short candidate list without "
-            "dumping every primitive's full doc body."
-        ),
-    )
     agent_facing: bool | None = Field(
         default=None,
         description=(
@@ -54,6 +42,15 @@ class _OperationCatalogEntry(BaseModel):
             "for primitives the agent calls directly."
         ),
     )
+
+    # NOTE: this bootstrap row is deliberately thin (#306). The forensic
+    # pointers (`python`, `input_schema`, `output_schema`) and the
+    # one-line `summary` are NOT carried here — they live in the full
+    # catalog projection (`operations_catalog()`) and are fetched on
+    # demand via `hpc-agent describe <name>` (full contract) or
+    # `hpc-agent find "<intent>"` (thin {name,verb,cli,summary} rows).
+    # Inlining them on all ~90 rows of every bootstrap call was the
+    # default-path context leak `find` was built to retire.
 
 
 class CapabilitiesResult(BaseModel):
@@ -78,13 +75,16 @@ class CapabilitiesResult(BaseModel):
     operations: list[_OperationCatalogEntry] | None = Field(
         default=None,
         description=(
-            "Per-operation catalog. The CLI subcommands listed in "
-            "`subcommands` are the invocable surface; this `operations` "
-            "block carries machine-readable metadata about each one "
-            "(verb tier, idempotency, side-effect class, schema files). "
-            "Source-tree installs read from docs/primitives/ "
-            "frontmatter; future wheel installs will read a baked "
-            "operations.json shipped in the package."
+            "Per-operation catalog — the thin bootstrap row for every "
+            "primitive: name, verb tier, idempotency, side-effect class, "
+            "CLI invocation, and whether it's agent-facing. The CLI "
+            "subcommands listed in `subcommands` are the invocable "
+            "surface; this block adds the machine-readable flags an "
+            "orchestrator gates on. Heavier content — schema-file "
+            "pointers, the Python entry point, the one-line summary, and "
+            "the full doc body — is intentionally NOT inlined here (#306): "
+            "fetch it on demand with `hpc-agent find \"<intent>\"` (thin "
+            "search) or `hpc-agent describe <name>` (one full contract)."
         ),
     )
     plugins: list[PluginManifest] = Field(
