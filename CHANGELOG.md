@@ -5,23 +5,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
-## 0.10.22 — 2026-06-08
+## 0.10.28 — 2026-06-08
 
 ### Changed — neutralize the tick-loop's transport copy + add a programmatic entry (#220 follow-up)
 
 Follow-up hardening on the #220 extraction, made live by #305. Three gaps closed in `src/hpc_agent/_kernel/lifecycle/drive.py`: (1) the "neutral" loop still advertised `claude -p` in two runtime-visible strings — the `--allow-agent-steps` skip reason and the `--help` text — even though `default_judgement_resolver` routes through `HPC_AGENT_INVOKER` and can now spawn a `codex-cli`/`gemini-cli` worker (#305); both are reworded to the transport-neutral "spawn a worker," with Claude-specificity left to the default resolver. (2) The loop was only reachable through argparse, so an external autonomous agent (Optuna/Ax/LangGraph) had to synthesize argv strings to drive it; a programmatic `drive_once(experiment_dir, *, step_table, resolver, allow_agent_steps, dry_run) -> int` is now the entry, and the argparse `drive()` is a thin wrapper over it. (3) The `JudgementResolver` contract is documented — an injected resolver owns the pre-spawn credential fail-fast (the default inherits it from `run_workflow`) and prompt-cache accounting (#244) is not carried by the 2-tuple. Also: `CampaignLoopConfig` is declared `frozen=True` but its default `step_table` had aliased the mutable `_CAMPAIGN_STEP_VERB` module global, so a caller mutating `config.step_table` would silently pollute it for every later config — the global is now a `MappingProxyType`, making the freeze honest. No wire or behavior change to the `hpc-campaign-driver` surface (the `{delegate, plan}` envelope and dispatch are unchanged); new tests cover `drive_once` routing/dry-run, the `drive()` argparse wrapper's argv→kwargs delegation, the immutable config default, and lock the transport-neutral skip reason. `docs/integrations/CONTRACT.md` updated.
 
-## 0.10.21 — 2026-06-08
+## 0.10.27 — 2026-06-08
 
 ### Added — multi-harness WorkerInvoker drivers: Gemini CLI and Codex CLI (#305)
 
 The headless worker can now run under OpenAI Codex CLI or Gemini CLI, not just Claude. Two new `WorkerInvoker` drivers (`hpc_agent._kernel.lifecycle.invoke`) join `claude-cli`/`claude-cli-oauth`, each normalizing the same four axes on its own config surface. **`codex-cli`** (`codex exec`): whole prompt on stdin (no append-system-prompt cache to split), final report read from `--output-last-message`; `--dangerously-bypass-approvals-and-sandbox` so the worker SSH/rsyncs out unattended; an `execpolicy` `.rules` fence (`decision="forbidden"`, strictest-severity-wins) re-imposing the no-`scancel`/no-exfil cluster-op deny; optional `--output-schema` gated behind `HPC_AGENT_WORKER_JSON_SCHEMA` (off by default); auth via `CODEX_API_KEY` (preferred over ambient `OPENAI_API_KEY`, which a stored ChatGPT login can shadow); model pinned to `gpt-5.4-mini`. **`gemini-cli`** (`gemini -p`): cacheable prefix as a full-replacement system prompt via `GEMINI_SYSTEM_MD`, suffix on stdin, output unwrapped from the `--output-format json` `{response, stats, error}` envelope; no sandbox backend selected (`GEMINI_SANDBOX` left unset); a Policy Engine TOML fence installed at the User/Admin tier (NOT workspace tier — upstream #18186 silently no-ops it) with deny entries out-ranking allow by `priority`; no CLI decode schema, so it leans entirely on the `parse_worker_report` floor (#304); auth via `GEMINI_API_KEY`/`GOOGLE_API_KEY`; model pinned to the concrete `gemini-2.5-flash`. Both surface `cache_stats=None` (the CLIs expose no cache-creation/cache-read split). Registered as `codex-cli`/`gemini-cli` and selectable via `HPC_AGENT_INVOKER`. Auto-selection is extended without changing existing behavior: Claude credentials still win (API key → `claude-cli`, then an OAuth file → `claude-cli-oauth`); only when no Claude credential is present does it fall through to `CODEX_API_KEY` → `codex-cli`, then Gemini creds → `gemini-cli`, then the unchanged `claude-cli` final fallback. The `WorkerInvoker` contract (all four axes + the auth-guard method + the `cache_stats=None` fallback) is documented in the module docstring; the new auth/model env vars and `HPC_AGENT_INVOKER` values are in `docs/reference/env-vars.md`. Contract-tested at the argv/transport/auth level (the existing Claude testing style); live end-to-end validation is deferred (no `codex`/`gemini` binary or key in this environment). Follow-ups noted but out of scope: `setup --harness {gemini,codex}` (the human slash-command reskin) and the worker-prompt Claude-ism audit (native-file-tool instructions in `submit.md`) that unblocks real e2e runs.
 
-## 0.10.20 — 2026-06-08
+## 0.10.26 — 2026-06-08
 
 ### Changed — extract the headless tick-loop as neutral substrate the campaign configures (#220)
 
 Internal refactor; no wire or behavior change. The generic loop that walks a campaign one `delegate` step per invocation had zero static coupling to `meta/campaign` but hardcoded two campaign-flavored bits inline: the `monitor`/`aggregate` → flow-verb map and the `claude -p` judgement path. Both are now injected seams — a `StepTable` (delegate-step → hpc-agent verb) and a `JudgementResolver` ((`spawn_request`, `experiment_dir`) → (`report`, `exit_code`)) — and the neutral mechanism (`load_context`, `plan_action`, the `cli`/`agent` dispatch, the new `drive()` loop body) moved to `src/hpc_agent/_kernel/lifecycle/drive.py`. The dependency now points `meta/campaign` → `_kernel/lifecycle/drive`, never the reverse; `drive` does not import `meta.campaign`. `meta/campaign/driver.py` is a thin shim that holds `CampaignLoopConfig` (the campaign step map + default resolver) and the campaign `main()`, and re-exports `plan_action` so the `hpc-campaign-driver` console script and existing importers are unchanged. Same "mechanism owns the protocol; the caller owns the policy" split `_kernel/decision/kernel.py` establishes one layer down. The `{delegate, plan}` envelope is byte-for-byte identical (verified via `hpc-campaign-driver --dry-run`); the `hpc-campaign-driver` entry point is preserved through the shim.
+
+## 0.10.25 — 2026-06-08
+
+### Fixed — strict json_schema decode now guarantees an object root (#304, Phase 2)
+
+`_to_strict_schema` strictified every object node but left the *root* as Pydantic emitted it. A normal `BaseModel` roots as a flat object (fine), but a `RootModel` wrapping a model emits a bare `{"$ref": …}` root, and a `RootModel` over a list/scalar emits a non-object root — both of which strict `response_format: {type: json_schema}` rejects, so `structured()` against such a model would have POSTed a payload the endpoint 400s on. The transform now inlines a root `$ref` (and a single-element `allOf: [{$ref}]` wrapper) so a `RootModel[Object]` resolves to a proper object root with `additionalProperties:false` + all-`required`, and raises a clear `SpecInvalid` (naming the `HPC_AGENT_MODEL_RESPONSE_FORMAT=json_object` fallback) on a genuinely non-object root instead of sending a doomed request. Normal `BaseModel` schemas (the common case, incl. `WorkerReport`) are unaffected — root promotion is a no-op for an already-object root.
+
+## 0.10.24 — 2026-06-08
+
+### Changed — lift the status/lifecycle vocabularies out of the worker-execution package (internal)
+
+`_kernel/lifecycle/lifecycle.py` — the cross-cutting `JournalStatus` / `LifecycleState` / `TaskStatus` / `FailureCategory` StrEnum vocabularies (the canonical value sets the wire, state, and ops layers agree on) — lived inside `_kernel/lifecycle/`, the *worker / model-call execution* package, with a `lifecycle/lifecycle.py` package-module name collision. They are unrelated to execution, so they move to `_kernel/contract/vocabulary.py`, grouping with the other typed-contract modules (`task_id`, `layout`, `schema`). `_kernel/lifecycle/` now means exactly worker / model-call execution (`run`, `invoke`, `structured`, `chat_models`, `playbook`). Internal `_kernel` path change only — no public or wire surface; the ~13 importers and the two test modules (now `tests/_kernel/contract/test_vocabulary*.py`) were updated.
+
+## 0.10.23 — 2026-06-08
+
+### Added — OpenAI-compatible `ChatModel` with strict `json_schema` decode (#304, Phase 2)
+
+The first real adapter behind the Phase-1 `ChatModel` boundary: a single OpenAI-compatible `/chat/completions` client (`hpc_agent._kernel.lifecycle.chat_models.openai_compat.OpenAICompatModel`) that targets DeepSeek-hosted, OpenAI, or a self-hosted vLLM by swapping `HPC_AGENT_MODEL_BASE_URL` / `HPC_AGENT_MODEL_API_KEY` / `HPC_AGENT_MODEL_NAME` — one wire shape, the endpoint is the only variable. The phase's core is the **accelerator**: in the default `json_schema` mode the offered schema is sent as a `response_format={"type":"json_schema", …, "strict":true}` **decode-time constraint**, so a conforming server *cannot* emit non-conforming tokens — the raw model-call sibling of the spawned worker's `--json-schema` gate (#269), not a prompt hint. Strictness is achieved by an `_to_strict_schema` boundary transform applied only to the decode-constraint **copy** (recursively `additionalProperties:false` + all-properties-`required` on every object node, refs preserved) — the **source Pydantic models are untouched**, and the parse-validate-repair floor in `structured()` still validates against the original lenient model, so a strict-decoded output is always a superset-constrained case of the lenient validate (the two never conflict). The floor remains the universal **backstop** in every mode (it still catches the semantic / `post_validate` errors a shape constraint can't express, and carries providers/schemas where strict isn't honoured). `HPC_AGENT_MODEL_RESPONSE_FORMAT` is the per-endpoint **downgrade knob**: `json_schema` (default, strict — OpenAI / vLLM), `json_object` (JSON-valid only + schema hint + floor, for json_object-only providers like DeepSeek-hosted), `none` (floor only). Transport / malformed-envelope failures raise a dedicated retry-safe `ModelEndpointError` (`network` category, new `model_endpoint_error` code) that propagates OUT of `structured()` uncaught — a transport error is not a validation failure to repair, and it is distinct from `StructuredOutputError` (a valid completion that failed the floor). **Zero new runtime dependencies** (stdlib `urllib.request` + `json`), the adapter registers lazily inside `get_model` and is **default-off** (it never auto-selects), and it ships **unvalidated against a live endpoint** behind a manual live-validation checklist in `docs/reference/env-vars.md` (the #269 discipline).
+
+## 0.10.22 — 2026-06-08
+
+### Added — provider-agnostic `structured()` boundary + repair-loop floor (#304, Phase 1)
+
+The first raw model-call seam. Until now every model-facing path spawned an *agent* (a `claude -p --bare` tool loop via `WorkerInvoker`); `structured(model, schema, messages)` is its single-completion → validated-object sibling — the durable counterpart to `run_workflow`'s render→invoke→parse funnel. The floor is parse → extract JSON → validate against a Pydantic-generated schema → **on failure, feed the validation error back for a bounded number of repair turns, then hard-fail** (`StructuredOutputError`); the repair loop is net-new (every prior model-output check was single-pass validate-and-reject). A `ChatModel` Protocol plus `register_model` / `get_model` / `HPC_AGENT_MODEL` registry mirror the invoker layer, so a provider that supports native strict json-schema decoding can bind it as a swappable accelerator behind the boundary while the floor needs zero provider features. The JSON extractor is lifted to `_kernel/contract/json_extract.py` so the worker floor and `structured()` share one implementation. No real provider adapter and no new runtime dependency in this phase; semantic/referential checks stay in code via a `post_validate` hook.
+
+### Changed — rename the cluster-side execution tier `models/` → `execution/` (#293 forward-design)
+
+`src/hpc_agent/models/` was a documented architectural tier ("domain logic that runs on the cluster, not the laptop" — the array-dispatch + combine + reduce machinery and the cluster-deployed job templates, governed by `docs/reference/boundary-contract.md`), but the name read as "ML models" and collided with the `ChatModel` concept introduced by #304. The single `mapreduce` tenant is unchanged; the tier is renamed `execution/` (`hpc_agent.execution.mapreduce.*`) — a namespace with room for the cluster-side execution models still to come (MPI / multi-rank #293, many-tiny-task meta-scheduling #227). The previously-empty `execution/__init__.py` now documents the tier and its boundary contract so the intent is explicit rather than looking like an inert wrapper. Internal path change only (no public wire surface); external code importing `hpc_agent.models.mapreduce.*` directly must move to `hpc_agent.execution.*`.
+
+## 0.10.21 — 2026-06-08
+
+### Changed — refuse the hand-authored `skip_rsync_deploy` agent form (#283, instance #2)
+
+`skip_rsync_deploy` was an agent-settable wire field on `SubmitFlowSpec`: an agent that set it `true` on a raw `submit-flow` spec ASSERTED "Phase 1 already deployed the same tree, nothing changed since," and a stale assertion silently launched the main array against whatever code the previous deploy shipped if the local tree had drifted (#185). That is the same class as `skip_preflight` (#275) and `--inline` (#155) — an agent-facing lever over a cluster-side safety step. The field is now off the wire (`extra="forbid"` refuses a hand-authored `skip_rsync_deploy`); the skip is operator/internal-only via `HPC_AGENT_SKIP_RSYNC_DEPLOY=1` or a Python-only `_skip_rsync_deploy` kwarg threaded by the trusted in-process caller (`submit_and_verify`'s post-canary main launch, where "Phase 1 just deployed the same tree" is a structural fact the code knows, not an assertion). `prepare-phase2-spec` drops the former `skip_rsync_deploy` flip (its wire output can no longer carry the field; the production agent flow uses in-process `submit-pipeline`/`submit-and-verify`, which skip the redundant deploy correctly). The `worker_prompts/submit.md` Phase-2 teaching is updated to state the skip is operator/internal-only and not a spec field.
+
+### Added — lint guards the preflight/deploy-bypass teaching class (#283)
+
+A new `tests/worker_prompts/test_prose_lints.py` lint refuses any worker-prompt example that sets a safety-bypass field (`skip_preflight`, `skip_rsync_deploy`) true. It matches the assignment form (`field: true` / `field=true`) while leaving the negative demotion prose ("there is no longer a `skip_preflight` field") legal — so a new bypass field added to a worker-prompt example fails CI the same way #275/#283 refused the field at the wire.
+
+## 0.10.20 — 2026-06-08
+
+### Added — `find` discovery tier so agents search for a name instead of dumping the catalog (#306)
+
+Tool discovery was all-or-nothing: `capabilities` already inlines the entire ~90-row operations catalog in its default envelope, and `capabilities --full` additionally dumps every agent-facing primitive's doc body + input/output schemas — so the only way to learn a name was to materialize the whole surface into context. At the other end `describe <name>` fetches exactly one contract. The missing middle is a search step. New `hpc-agent find "<intent>"` returns a thin candidate list of `{name, verb, cli, summary}` — no schemas, no doc bodies — giving a headless loop the three-step economy **find (explore) → describe (read one) → invoke** without re-dumping the catalog each iteration. Matching is stdlib-only: a fuzzy `difflib.get_close_matches` pass over primitive names (`submit-batch` → `submit-flow-batch`) unioned with a token/substring scan over `name + summary` (the intent phrase `submit a batch`), returned in stable catalog order and capped at `--limit` (default 15); a blank query matches nothing rather than dumping everything. To feed the scan, the operations catalog projection (`operations_catalog()`) now carries a `summary` field — the primitive's `CliShape` help string — which also surfaces in `describe` output and the baked `operations.json`. It is deliberately *not* added to the fixed-width catalog tables (`capabilities --full`, `docs/generated/operations.md`): summaries run up to ~530 chars, which would blow the column width and destroy scannability — `find` is the surface that puts a summary next to a name without wrecking a table. The `find → describe` flow is taught in the integration docs (`docs/integrations/CONTRACT.md`, `docs/reference/agent-surface.md`) and, for the interactive path, in the `hpc-submit` skill's framework-state guidance — framed as a *sequential* pair, distinct from the skill's parallel independent-lookup batching.
+
+### Changed (wire) — `capabilities` default envelope's `operations` block slimmed to the thin bootstrap row (#306)
+
+Now that `find` carries `{name, verb, cli, summary}` on demand, the per-op rows in the default `capabilities` envelope no longer inline the forensic pointers (`python`, `input_schema`, `output_schema`) or the one-line `summary` — those move "behind `describe`" (fetch one full contract) and `find` (thin search). Each row keeps the machine-readable flags an orchestrator actually gates on at bootstrap: `name`, `verb`, `idempotent`, `side_effects`, `cli`, `agent_facing`. This shrinks the block from ~48 KB to ~19 KB for the ~90-primitive core (a 61% cut, and smaller than before `summary` was added), retiring the default-path context leak the issue flagged. **Breaking on the wire**: a consumer reading `capabilities().operations[].{python,input_schema,output_schema}` must switch to `hpc-agent describe <name>`; nothing in-tree depended on those fields. `capabilities.output.json` and `docs/reference/cli-spec.md` updated to match.
 
 ## 0.10.19 — 2026-06-07
 
@@ -152,7 +200,7 @@ New read-only `scaffold-spec` query verb. When an agent must invoke a verb that 
 
 Audit of the per-verb Python startup tax. Every `hpc-agent <verb>` builds the CLI parser, which `pkgutil.walk_packages`-imports every module under the primitive-discovery roots — so a top-level `import pandas` / `numpy` in any CLI-reachable module would tax *every* verb's startup, not just the aggregate-side one that needs it. The audit found the hot path **already clean**: pandas / numpy / scipy / sklearn / matplotlib are imported nowhere in `src/`, and the lone `pyarrow.parquet` (`ops/validate/input_dataset.py`) is already function-local. The residual startup cost is pydantic + `importlib.metadata` (version + plugin entry-point scans) + transitive `asyncio` — the hot path the issue itself flags as not movable without a model-loading refactor.
 
-Locked in with `tests/contract/test_no_heavy_toplevel_imports.py`: it AST-scans every framework module (excluding the user-facing `models/mapreduce/templates/` scaffolds) and fails if any imports a heavy data/ML dep (`pandas`, `numpy`, `scipy`, `sklearn`, `pyarrow`, `torch`, `matplotlib`, …) at module level — so a future top-level import re-growing the tax trips in CI, with the function-local fix named in the failure message.
+Locked in with `tests/contract/test_no_heavy_toplevel_imports.py`: it AST-scans every framework module (excluding the user-facing `execution/mapreduce/templates/` scaffolds) and fails if any imports a heavy data/ML dep (`pandas`, `numpy`, `scipy`, `sklearn`, `pyarrow`, `torch`, `matplotlib`, …) at module level — so a future top-level import re-growing the tax trips in CI, with the function-local fix named in the failure message.
 
 ### Changed — parallel-by-default audit: fan check-preflight + SGE inspect-cluster ssh probes (#289)
 
@@ -171,13 +219,13 @@ Reconcile two-tier fix off the same demo session. Tier 1 = root cause (the bare-
 
 ### Fixed — reconcile threads `remote_activation` into the reporter probe (Tier 1)
 
-`ops/monitor/reconcile.py::_reconcile_one` called `_ssh_status_report` without the `remote_activation` keyword, defaulting it to the empty string. The cluster-side reporter then ran under the login node's bare `python` (Hoffman2: `/usr/bin/python` 3.6.8, no `hpc_agent`), crashing with `No module named hpc_agent.models.mapreduce.reduce`. The monitor-side `record_status` path (`ops/monitor/status.py:109-125`) already threaded `remote_activation_for_sidecar(_sidecar)` correctly — reconcile just didn't mirror it. Symmetric fix: read the sidecar, compute the activation prefix, pass it to the reporter call. Same bug shape as the 2026-06-03-handoff-withdrawn 0.7.5 "Bug B" — that withdrawal was correct for the monitor/status path; reconcile reborn the same hole independently.
+`ops/monitor/reconcile.py::_reconcile_one` called `_ssh_status_report` without the `remote_activation` keyword, defaulting it to the empty string. The cluster-side reporter then ran under the login node's bare `python` (Hoffman2: `/usr/bin/python` 3.6.8, no `hpc_agent`), crashing with `No module named hpc_agent.execution.mapreduce.reduce`. The monitor-side `record_status` path (`ops/monitor/status.py:109-125`) already threaded `remote_activation_for_sidecar(_sidecar)` correctly — reconcile just didn't mirror it. Symmetric fix: read the sidecar, compute the activation prefix, pass it to the reporter call. Same bug shape as the 2026-06-03-handoff-withdrawn 0.7.5 "Bug B" — that withdrawal was correct for the monitor/status path; reconcile reborn the same hole independently.
 
 ### Fixed — reporter failure routes through `unable_to_verify` (Tier 2)
 
 Pre-0.10.12 `_reconcile_one`'s verdict logic gated `unable_to_verify` solely on `alive_check_failed`. If the alive-check succeeded (scheduler answered "no jobs alive") AND the reporter raised, the verdict still routed through `abandoned` because the reporter exception was caught into a `summary = {"error": str(exc)}` dict but no flag influenced the verdict. The empirical 2026-06-05 demo: reporter died (Tier 1 cause), alive-check confirmed job gone, run marked `abandoned` — but the framework had no independent confirmation results didn't exist. A completed-but-reporter-broken run would have looked identical. Added a `reporter_failed` flag mirroring `alive_check_failed`; either failing routes through `unable_to_verify`. `abandoned` now requires BOTH probes clean + no alive jobs.
 
-Two new tests pin both tiers: `test_reporter_failure_routes_through_unable_to_verify` (Tier 2 — reporter crashes with the empirical "No module named hpc_agent.models.mapreduce.reduce" string, assert envelope = `unable_to_verify` not `abandoned`) and `test_reconcile_threads_remote_activation_to_reporter` (Tier 1 — assert the reporter call receives a non-empty `remote_activation` keyword).
+Two new tests pin both tiers: `test_reporter_failure_routes_through_unable_to_verify` (Tier 2 — reporter crashes with the empirical "No module named hpc_agent.execution.mapreduce.reduce" string, assert envelope = `unable_to_verify` not `abandoned`) and `test_reconcile_threads_remote_activation_to_reporter` (Tier 1 — assert the reporter call receives a non-empty `remote_activation` keyword).
 
 ## 0.10.11 — 2026-06-05
 
@@ -426,7 +474,7 @@ Tiny follow-up release for one prose-layer fix that landed after the 0.10.1 cut.
 
 ### Fixed — `/submit-hpc`, `/monitor-hpc`, `/aggregate-hpc` skills get a Step 0 (idempotent `install-commands`)
 
-When `~/.claude/agents/hpc-worker.md` is missing on a fresh machine, every hpc-submit / hpc-status / hpc-aggregate run failed at the handoff step when it tried to dispatch the rendered procedure to the named subagent. The orchestrator agent then fell back to running the procedure by hand — frequently inventing cluster commands like `python -m hpc_agent.models.mapreduce.reduce.combine` (no such module). Add a Step 0 to all three skill prompts: run `hpc-agent install-commands` first. Idempotent (no-op when assets are already installed) and ~50ms when re-run, so safe to make a hard prerequisite. The 0-byte-collision auto-clear from 0.10.1 handles the empirically common stale-artifact case; non-empty file at the install path still raises a clear `FileExistsError` with remediation.
+When `~/.claude/agents/hpc-worker.md` is missing on a fresh machine, every hpc-submit / hpc-status / hpc-aggregate run failed at the handoff step when it tried to dispatch the rendered procedure to the named subagent. The orchestrator agent then fell back to running the procedure by hand — frequently inventing cluster commands like `python -m hpc_agent.execution.mapreduce.reduce.combine` (no such module). Add a Step 0 to all three skill prompts: run `hpc-agent install-commands` first. Idempotent (no-op when assets are already installed) and ~50ms when re-run, so safe to make a hard prerequisite. The 0-byte-collision auto-clear from 0.10.1 handles the empirically common stale-artifact case; non-empty file at the install path still raises a clear `FileExistsError` with remediation.
 
 ## 0.10.1 — 2026-06-04
 
@@ -919,17 +967,17 @@ External callers should migrate `from hpc_agent import X` →
 |---|---|
 | `MAX_RUNS`, `SIDECAR_SCHEMA_VERSION`, `compute_cmd_sha`, `compute_tasks_py_sha`, `find_existing_runs`, `find_run_by_cmd_sha`, `prune_old_runs`, `read_run_sidecar`, `run_sidecar_path`, `write_run_sidecar` | `hpc_agent.state.runs` |
 | `ssh_run`, `rsync_push`, `rsync_pull`, `deploy_runtime`, `run_combiner`, `run_combiner_checked` | `hpc_agent.infra.remote` |
-| `check_results`, `check_results_from_tasks`, `report_status`, `report_status_from_tasks`, `rollup_by_grid_point`, `detect_scheduler` | `hpc_agent.models.mapreduce.reduce.status` |
+| `check_results`, `check_results_from_tasks`, `report_status`, `report_status_from_tasks`, `rollup_by_grid_point`, `detect_scheduler` | `hpc_agent.execution.mapreduce.reduce.status` |
 | `pick_gpu` | `hpc_agent.infra.gpu` |
-| `reduce_metrics`, `reduce_by_grid_point`, `reduce_partials`, `reduce_resource_usage` | `hpc_agent.models.mapreduce.reduce.metrics` |
-| `classify_failure` | `hpc_agent.models.mapreduce.reduce.classify` |
+| `reduce_metrics`, `reduce_by_grid_point`, `reduce_partials`, `reduce_resource_usage` | `hpc_agent.execution.mapreduce.reduce.metrics` |
+| `classify_failure` | `hpc_agent.execution.mapreduce.reduce.classify` |
 | `ExecutorInfo`, `discover_executors`, `is_executor_source` | `hpc_agent.state.discover` |
 | `ClusterConstraints`, `parse_constraints` | `hpc_agent.infra.constraints` |
 | `WorkloadSpec`, `SubmissionPlan`, `compute_submission_plan`, `build_wave_map` | `hpc_agent.infra.throughput` |
 | `inspect_cluster` | `hpc_agent.infra.inspect` |
 | `append_runtime_sample`, `roll_up_runtime_quantiles` | `hpc_agent.state.runtime_prior` (as `append_sample`, `roll_up_quantiles`) |
 | `compact_task_ids`, `ResubmitBatch`, `ResubmitPlan`, `resubmit_plan` | `hpc_agent.ops.recover.batching` |
-| `write_metrics` | `hpc_agent.models.mapreduce.metrics_io` |
+| `write_metrics` | `hpc_agent.execution.mapreduce.metrics_io` |
 
 The 15 names retained at root: `_PACKAGE_ROOT`, `__version__`,
 `RepoLayout`, `JournalLayout`, `get_template_path`,
@@ -1256,7 +1304,7 @@ Highlights for plugin authors and external integrators:
   cross-subject primitive calls.
 - **`hpc_agent.campaign` → `hpc_agent.meta.campaign`**, including
   the `hpc-campaign-driver` console script entry point.
-- **`hpc_agent.mapreduce` → `hpc_agent.models.mapreduce`**.
+- **`hpc_agent.mapreduce` → `hpc_agent.execution.mapreduce`**.
 - **`hpc_agent.worker_prompts` → `hpc_agent._kernel.extension.worker_prompts`**.
 - **`hpc_agent._internal.session` → `hpc_agent.state.session`**
   (back-compat barrel re-exporting submodules `journal`, `run_record`,

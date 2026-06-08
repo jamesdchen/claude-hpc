@@ -73,7 +73,7 @@ some subcommands keep for back-compat. Consumers should prefer
 ```json
 {
   "ok": false,
-  "error_code": "<one of 16>",
+  "error_code": "<one of 17>",
   "message": "<human-readable>",
   "category": "user|cluster|network|internal",
   "retry_safe": <bool>,
@@ -110,7 +110,7 @@ Wired in `hpc_agent/cli/_helpers.py` (`_EXIT_CODE_BY_CATEGORY`).
 |---|---|---|---|
 | 0 | — | success | (no error envelope) |
 | 1 | `user` | caller-fixable | `spec_invalid`, `executor_not_found`, `cluster_unknown`, `config_invalid`, `precondition_failed` |
-| 2 | `cluster`, `network` | remote/cluster issue | `ssh_unreachable`, `scheduler_throttled`, `remote_command_failed`, `combiner_failed`, `cluster_timeout`, `outputs_missing`, `cluster_partially_degraded`, `preempted` |
+| 2 | `cluster`, `network` | remote/cluster issue | `ssh_unreachable`, `scheduler_throttled`, `remote_command_failed`, `combiner_failed`, `cluster_timeout`, `outputs_missing`, `cluster_partially_degraded`, `preempted`, `model_endpoint_error` |
 | 3 | `internal` | bug in framework or corrupt state | `journal_corrupt`, `internal`, `schema_incompat` |
 
 `preflight` returns 2 when any check fails (it is a `cluster`-class diagnostic, even though the envelope is `ok=true`).
@@ -168,9 +168,15 @@ shape:
   "ssh_multiplexing": true,
   "required_env": ["SSH_AUTH_SOCK", "HPC_JOURNAL_DIR", "HPC_CLUSTERS_CONFIG"],
   "cluster_yaml_keys": [{"key": "scheduler", "type": "Literal", "required": true, "description": "..."}, ...],
-  "operations": [{"name": "<primitive>", "verb": "...", "idempotent": true, "side_effects": [...], "cli": "...", "input_schema": "<file>", "output_schema": "<file>", "agent_facing": true}, ...]
+  "operations": [{"name": "<primitive>", "verb": "...", "idempotent": true, "side_effects": [...], "cli": "...", "agent_facing": true}, ...]
 }
 ```
+
+Each `operations` row is the thin bootstrap shape: name, verb, idempotency,
+side-effect class, CLI invocation, and the agent-facing flag. The schema-file
+pointers, Python entry point, and one-line summary are not inlined here — fetch
+them with `hpc-agent find "<intent>"` (thin search) or `hpc-agent describe
+<name>` (one full contract), keeping every bootstrap call cheap (#306).
 
 Full schema: `hpc_agent/schemas/capabilities.output.json`.
 
