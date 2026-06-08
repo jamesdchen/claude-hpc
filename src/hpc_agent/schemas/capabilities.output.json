@@ -263,6 +263,12 @@
           "default": null,
           "title": "Output Schema"
         },
+        "summary": {
+          "default": "",
+          "description": "One-line gloss of the primitive — its CliShape help string. The `find` discovery tier searches over name + summary so an agent can resolve intent to a short candidate list without dumping every primitive's full doc body.",
+          "title": "Summary",
+          "type": "string"
+        },
         "agent_facing": {
           "anyOf": [
             {

@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**89 operations total**: 78 primitive atoms + 11 workflow atoms.
+**90 operations total**: 79 primitive atoms + 11 workflow atoms.
 
 ## How to read this page
 
@@ -14,7 +14,7 @@ Every operation in `hpc-agent` is a CLI atom or a Python-only primitive that emi
 
 **Discoverability**: `hpc-agent capabilities` returns this same catalog at runtime in `data.operations`. Agents that don't have access to this page can introspect the framework via that subprocess call.
 
-## `query` (42)
+## `query` (43)
 
 Read-only, no side effects. Freely composable; cacheable.
 
@@ -44,6 +44,7 @@ Read-only, no side effects. Freely composable; cacheable.
 | [`discover-runs`](../primitives/discover-runs.md) | ✓ | _none_ | `hpc-agent discover-runs [--experiment-dir <dir>]` | `hpc_agent.state.discover.discover_runs` | — | — |
 | [`failures`](../primitives/failures.md) | ✓ | ssh | `hpc-agent failures [--experiment-dir <dir>] --run-id <run_id> [--lines <lines>]` | `hpc_agent.ops.recover.failures_atom.fetch_failures` | — | `hpc_agent/schemas/failures.output.json` |
 | [`fetch-skill-return`](../primitives/fetch-skill-return.md) | ✓ | filesystem | `hpc-agent fetch-skill-return [--experiment-dir <dir>] --skill <skill> [--no-clear]` | `hpc_agent.cli.skill_returns.fetch_skill_return` | — | — |
+| [`find`](../primitives/find.md) | ✓ | _none_ | `hpc-agent find <query> [--limit <limit>]` | `hpc_agent.cli.setup.find` | — | — |
 | [`find-prior-run`](../primitives/find-prior-run.md) | ✓ | _none_ | `hpc-agent find-prior-run [--experiment-dir <dir>] --cmd-sha <cmd_sha>` | `hpc_agent.cli.setup_actions.find_prior_run` | — | `hpc_agent/schemas/find_prior_run.output.json` |
 | [`inspect-parallel-axes`](../primitives/inspect-parallel-axes.md) | ✓ | _none_ | `hpc-agent inspect-parallel-axes [--experiment-dir <dir>]` | `hpc_agent.ops.inspect_parallel_axes.inspect_parallel_axes` | `hpc_agent/schemas/inspect_parallel_axes.input.json` | `hpc_agent/schemas/inspect_parallel_axes.output.json` |
 | [`list-in-flight`](../primitives/list-in-flight.md) | ✓ | _none_ | `hpc-agent list-in-flight [--experiment-dir <dir>]` | `hpc_agent.ops.monitor.list_in_flight.list_in_flight` | — | `hpc_agent/schemas/list_in_flight.output.json` |

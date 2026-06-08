@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.20 — 2026-06-08
+
+### Added — `find` discovery tier so agents search for a name instead of dumping the catalog (#306)
+
+Tool discovery was all-or-nothing: `capabilities` already inlines the entire ~90-row operations catalog in its default envelope, and `capabilities --full` additionally dumps every agent-facing primitive's doc body + input/output schemas — so the only way to learn a name was to materialize the whole surface into context. At the other end `describe <name>` fetches exactly one contract. The missing middle is a search step. New `hpc-agent find "<intent>"` returns a thin candidate list of `{name, verb, cli, summary}` — no schemas, no doc bodies — giving a headless loop the three-step economy **find (explore) → describe (read one) → invoke** without re-dumping the catalog each iteration. Matching is stdlib-only: a fuzzy `difflib.get_close_matches` pass over primitive names (`submit-batch` → `submit-flow-batch`) unioned with a token/substring scan over `name + summary` (the intent phrase `submit a batch`), returned in stable catalog order and capped at `--limit` (default 15); a blank query matches nothing rather than dumping everything. To feed the scan, the operations catalog projection now carries a `summary` field — the primitive's `CliShape` help string — which also surfaces in the `capabilities` envelope's `operations` block (additive: old harnesses ignore the new field).
+
 ## 0.10.19 — 2026-06-07
 
 ### Fixed — canary no longer false-fails on a divined `expect_output` (output-side of #287)

@@ -128,6 +128,11 @@ def _from_registry() -> list[dict[str, Any]]:
                 "input_schema": schema_for(meta.name, "input", backed),
                 "output_schema": schema_for(meta.name, "output", backed),
                 "agent_facing": bool(meta.agent_facing),
+                # One-line help (the CliShape help string). Threaded here so
+                # the `find` discovery tier can scan name + summary without
+                # materializing each primitive's doc body, and so the catalog
+                # table / capabilities block carry a human-readable gloss.
+                "summary": meta.cli.help if meta.cli is not None else "",
             }
         )
     return sorted(out, key=lambda o: (o["verb"], o["name"]))

@@ -33,6 +33,15 @@ class _OperationCatalogEntry(BaseModel):
     python: str | None = None
     input_schema: str | None = None
     output_schema: str | None = None
+    summary: str = Field(
+        default="",
+        description=(
+            "One-line gloss of the primitive — its CliShape help string. "
+            "The `find` discovery tier searches over name + summary so an "
+            "agent can resolve intent to a short candidate list without "
+            "dumping every primitive's full doc body."
+        ),
+    )
     agent_facing: bool | None = Field(
         default=None,
         description=(
