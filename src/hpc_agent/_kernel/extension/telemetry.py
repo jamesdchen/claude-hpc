@@ -30,6 +30,19 @@ Sinks
   ``experiment_dir`` in *payload* or as additional arguments. Held
   under an exclusive flock so concurrent writers cannot interleave
   bytes (the A9 invariant).
+* ``"otel"`` (alias ``"otlp"``) — emit each event as an OpenTelemetry
+  span whose name is *event* and whose attributes are the flattened
+  *payload* (so a submit / state-transition / resubmit / canary /
+  campaign-decision record — including its structured ``reason`` and
+  ``trial_token`` — shows up in Grafana or any OTLP backend). The
+  OpenTelemetry SDK is an **optional** dependency: importing this module
+  never pulls it in, and the import is deferred to the point the sink is
+  actually selected. If the SDK is not installed, selecting this sink
+  raises :class:`hpc_agent.errors.ConfigInvalid` with a pip hint rather
+  than failing silently — the operator explicitly asked for OTLP export,
+  so a clear error beats a silent no-op. Configure the exporter endpoint
+  via the standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` /
+  ``OTEL_EXPORTER_OTLP_*`` env vars the SDK already reads.
 * ``"none"`` — silently drop. The default when ``HPC_TELEMETRY_SINK``
   is unset.
 
@@ -88,6 +101,92 @@ def _resolve_sink(explicit: str | None) -> str:
     return os.environ.get(_ENV_VAR, "none")
 
 
+# Cached OpenTelemetry tracer. Built on first ``otel``-sink emit and
+# reused thereafter so we don't re-resolve the global provider per
+# event. ``None`` means "not yet built"; a missing SDK raises before we
+# ever cache.
+_OTEL_TRACER: Any | None = None
+
+
+def _otel_attr_value(value: Any) -> Any:
+    """Coerce *value* into an OpenTelemetry-attribute-safe form.
+
+    OTel attribute values must be ``bool | int | float | str`` or a
+    homogeneous sequence of one of those. ``None`` is not permitted and
+    nested dicts / lists-of-dicts are not. We pass primitives through
+    untouched (so ``trial_token`` stays a string and numeric metrics
+    stay numeric) and JSON-encode everything else — a structured
+    ``reason`` dict survives as a queryable JSON string rather than
+    being dropped.
+    """
+    if isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(v, bool | int | float | str) for v in value
+    ):
+        return list(value)
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _otel_tracer() -> Any:
+    """Return the cached OpenTelemetry tracer, building it on first use.
+
+    Raises :class:`hpc_agent.errors.ConfigInvalid` when the SDK is not
+    installed. The import is local so that merely importing this module
+    never hard-requires the optional ``opentelemetry`` packages.
+    """
+    global _OTEL_TRACER
+    if _OTEL_TRACER is not None:
+        return _OTEL_TRACER
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError as exc:
+        raise errors.ConfigInvalid(
+            "HPC_TELEMETRY_SINK='otel' needs the OpenTelemetry SDK. "
+            "Install the optional extra: pip install 'hpc-agent[otel]' "
+            "(or: pip install opentelemetry-sdk "
+            "opentelemetry-exporter-otlp-proto-http). Point it at a "
+            "collector with OTEL_EXPORTER_OTLP_ENDPOINT."
+        ) from exc
+
+    # Only install our own provider if the process hasn't already set
+    # one up (an embedding host may own the global provider). The SDK's
+    # default provider is a no-op ProxyTracerProvider; detect that.
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider(resource=Resource.create({"service.name": "hpc-agent"}))
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        trace.set_tracer_provider(provider)
+
+    _OTEL_TRACER = trace.get_tracer("hpc_agent.telemetry")
+    return _OTEL_TRACER
+
+
+def _emit_otel(event: str, payload: dict[str, Any]) -> None:
+    """Emit one event as a short-lived OpenTelemetry span.
+
+    The span name is *event*; every *payload* field becomes a
+    ``hpc.<key>`` attribute (coerced via :func:`_otel_attr_value`).
+    Export failures are swallowed — telemetry must never crash the
+    parent loop — but a *missing SDK* surfaces as ``ConfigInvalid`` from
+    :func:`_otel_tracer` because that is operator misconfiguration, not
+    a transient backend hiccup.
+    """
+    tracer = _otel_tracer()
+    with (
+        tracer.start_as_current_span(event) as span,
+        contextlib.suppress(Exception),
+    ):
+        for key, value in payload.items():
+            span.set_attribute(f"hpc.{key}", _otel_attr_value(value))
+
+
 def record(
     event: str,
     payload: dict[str, Any],
@@ -109,6 +208,11 @@ def record(
     (the resolved path of ``<run_id>.monitor.jsonl``). The append is
     held under an exclusive flock; failures are swallowed so a flaky
     log volume cannot tank the parent operation.
+
+    When ``sink in ("otel", "otlp")`` the event is exported as an
+    OpenTelemetry span (see the module docstring). The OTel SDK is an
+    optional dependency; a missing SDK raises
+    :class:`hpc_agent.errors.ConfigInvalid`.
     """
     sink = _resolve_sink(sink)
     if sink == "none":
@@ -130,6 +234,9 @@ def record(
         except OSError:
             # Telemetry writes must never crash the parent loop.
             pass
+        return
+    if sink in ("otel", "otlp"):
+        _emit_otel(event, payload)
         return
     # Unknown sink — be silent rather than raise; we treat sink names
     # as a contract owned by the caller, not a hard schema.
