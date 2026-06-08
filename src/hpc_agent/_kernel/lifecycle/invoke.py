@@ -972,16 +972,26 @@ def register_invoker(name: str, factory: Callable[..., WorkerInvoker]) -> None:
 def _auto_select_invoker() -> str:
     """Pick a worker invoker from the ambient credential state.
 
-    ``ANTHROPIC_API_KEY`` / cloud-provider creds present → the proven
-    ``--bare`` ``claude-cli`` path. Otherwise a Claude Code OAuth credentials
-    file on a supported OS → ``claude-cli-oauth``. Otherwise fall back to
-    ``claude-cli`` so its pre-spawn credential guard fires with an actionable
-    message rather than silently picking a path that cannot authenticate.
+    Claude credentials always win, unchanged: ``ANTHROPIC_API_KEY`` /
+    cloud-provider creds present → the proven ``--bare`` ``claude-cli`` path;
+    otherwise a Claude Code OAuth credentials file on a supported OS →
+    ``claude-cli-oauth``.
+
+    Only when NO Claude credential is present does selection fall through to the
+    other harnesses: a ``CODEX_API_KEY`` → ``codex-cli``, then a
+    ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY`` → ``gemini-cli``. The final fallback
+    is unchanged: ``claude-cli`` (``DEFAULT_INVOKER``) so its pre-spawn
+    credential guard fires with an actionable message rather than silently
+    picking a path that cannot authenticate.
     """
     if any(os.environ.get(var) for var in _WORKER_CREDENTIAL_ENV_VARS):
         return "claude-cli"
     if _oauth_credentials_available():
         return "claude-cli-oauth"
+    if os.environ.get(_CODEX_CREDENTIAL_ENV_VAR):
+        return "codex-cli"
+    if any(os.environ.get(var) for var in _GEMINI_CREDENTIAL_ENV_VARS):
+        return "gemini-cli"
     return DEFAULT_INVOKER
 
 

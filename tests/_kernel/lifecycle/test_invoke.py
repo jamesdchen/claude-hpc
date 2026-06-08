@@ -22,7 +22,12 @@ from hpc_agent._kernel.lifecycle.invoke import (
 
 def _clear_worker_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove every ambient credential signal so auto-selection is deterministic."""
-    for var in (*invoke_mod._WORKER_CREDENTIAL_ENV_VARS, "HPC_AGENT_INVOKER"):
+    for var in (
+        *invoke_mod._WORKER_CREDENTIAL_ENV_VARS,
+        invoke_mod._CODEX_CREDENTIAL_ENV_VAR,
+        *invoke_mod._GEMINI_CREDENTIAL_ENV_VARS,
+        "HPC_AGENT_INVOKER",
+    ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(invoke_mod, "_oauth_credentials_available", lambda: False)
 
@@ -849,3 +854,74 @@ def test_gemini_missing_credential_remediation_message_when_absent(
     msg = GeminiCliInvoker().missing_credential_remediation()
     assert msg is not None
     assert "GEMINI_API_KEY" in msg and "GOOGLE_API_KEY" in msg
+
+
+# ─── registry + multi-harness auto-selection ────────────────────────────────
+
+
+def test_codex_and_gemini_registered() -> None:
+    assert get_invoker("codex-cli").name == "codex-cli"
+    assert get_invoker("gemini-cli").name == "gemini-cli"
+
+
+def test_env_override_selects_codex_and_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HPC_AGENT_INVOKER", "codex-cli")
+    assert get_invoker().name == "codex-cli"
+    monkeypatch.setenv("HPC_AGENT_INVOKER", "gemini-cli")
+    assert get_invoker().name == "gemini-cli"
+
+
+def test_auto_select_falls_through_to_codex_when_only_codex_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_worker_credentials(monkeypatch)
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex")
+    assert get_invoker().name == "codex-cli"
+
+
+def test_auto_select_falls_through_to_gemini_when_only_gemini_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_worker_credentials(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    assert get_invoker().name == "gemini-cli"
+
+
+def test_auto_select_falls_through_to_gemini_when_only_google_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_worker_credentials(monkeypatch)
+    monkeypatch.setenv("GOOGLE_API_KEY", "v-key")
+    assert get_invoker().name == "gemini-cli"
+
+
+def test_codex_outranks_gemini_when_both_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_worker_credentials(monkeypatch)
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex")
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    assert get_invoker().name == "codex-cli"
+
+
+def test_claude_creds_still_win_over_codex_and_gemini(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: adding Codex/Gemini fall-through must NOT change Claude
+    # selection. Claude creds present → claude-cli even when Codex/Gemini keys
+    # are also set.
+    _clear_worker_credentials(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex")
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    assert get_invoker().name == "claude-cli"
+
+
+def test_claude_oauth_still_wins_over_codex_and_gemini(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No Claude API key, but a Claude OAuth creds file → claude-cli-oauth still
+    # beats Codex/Gemini keys (OAuth tier is checked before the fall-through).
+    _clear_worker_credentials(monkeypatch)
+    monkeypatch.setattr(invoke_mod, "_oauth_credentials_available", lambda: True)
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex")
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    assert get_invoker().name == "claude-cli-oauth"
