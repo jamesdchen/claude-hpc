@@ -236,11 +236,12 @@ class OpenAICompatModel:
         """POST *body* to ``/chat/completions`` and return the parsed envelope.
 
         Network / HTTP failure or a non-JSON body raises a typed
-        :class:`~hpc_agent.errors.SshUnreachable` — the codebase's retry-safe
-        *network* error class (a transient endpoint blip is the natural
-        recovery, and re-running the funnel resamples). Reusing it keeps the
-        ``error_code`` enum unchanged (``ssh_unreachable``); it is the fittest
-        transport-failure class already in the hierarchy.
+        :class:`~hpc_agent.errors.ModelEndpointError` — the retry-safe,
+        ``network``-category class for a raw model-call transport failure (a
+        transient endpoint blip is the natural recovery, and re-running the
+        funnel resamples). It is distinct from
+        :class:`~hpc_agent.errors.StructuredOutputError` (a *valid* completion
+        that failed the floor): this is a failure to obtain a completion at all.
         """
         data = json.dumps(body).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -258,7 +259,7 @@ class OpenAICompatModel:
                 detail = exc.read().decode("utf-8", errors="replace")[:500]
             except Exception:  # noqa: BLE001 - best-effort body for the message
                 detail = ""
-            raise errors.SshUnreachable(
+            raise errors.ModelEndpointError(
                 f"chat-model endpoint returned HTTP {exc.code} for "
                 f"{self._base_url}/chat/completions: {detail}",
                 remediation=(
@@ -268,7 +269,7 @@ class OpenAICompatModel:
                 ),
             ) from exc
         except urllib.error.URLError as exc:
-            raise errors.SshUnreachable(
+            raise errors.ModelEndpointError(
                 f"chat-model endpoint unreachable at "
                 f"{self._base_url}/chat/completions: {exc.reason}",
                 remediation=(
@@ -279,12 +280,12 @@ class OpenAICompatModel:
         try:
             envelope = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise errors.SshUnreachable(
+            raise errors.ModelEndpointError(
                 "chat-model endpoint returned a non-JSON body from "
                 f"{self._base_url}/chat/completions"
             ) from exc
         if not isinstance(envelope, dict):
-            raise errors.SshUnreachable(
+            raise errors.ModelEndpointError(
                 "chat-model endpoint returned a JSON value that is not an object "
                 f"from {self._base_url}/chat/completions"
             )
@@ -301,13 +302,13 @@ class OpenAICompatModel:
         """
         choices = envelope.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise errors.SshUnreachable(
+            raise errors.ModelEndpointError(
                 "chat-model response had no choices to read a completion from"
             )
         message = choices[0].get("message") if isinstance(choices[0], dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, str):
-            raise errors.SshUnreachable(
+            raise errors.ModelEndpointError(
                 "chat-model response choice carried no string message content"
             )
         return content

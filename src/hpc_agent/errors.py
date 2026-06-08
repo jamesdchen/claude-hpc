@@ -31,6 +31,7 @@ __all__ = [
     "SubmissionIncomplete",
     "SpawnWorkerDied",
     "StructuredOutputError",
+    "ModelEndpointError",
 ]
 
 
@@ -428,6 +429,35 @@ class StructuredOutputError(HpcError):
     error_code = "internal"
     retry_safe = True
     category = "internal"
+
+
+class ModelEndpointError(HpcError):
+    """A raw model-call transport / response failure at the ChatModel boundary.
+
+    Raised by the OpenAI-compatible adapter
+    (:mod:`hpc_agent._kernel.lifecycle.chat_models.openai_compat`) when the
+    configured ``HPC_AGENT_MODEL`` endpoint cannot be reached, returns a
+    non-2xx status, or returns a body that is not a usable chat-completions
+    envelope (non-JSON, or no message content to read). Distinct from
+    :class:`StructuredOutputError`, which is a *valid* completion that failed
+    the schema / ``post_validate`` floor — this is a failure to obtain a
+    completion at all, so it propagates out of
+    :func:`hpc_agent._kernel.lifecycle.structured.structured` uncaught (the
+    floor only repairs validation failures).
+
+    Retry-safe, ``network`` category: a transient endpoint blip or outage is
+    the typical cause, and re-running the funnel resamples.
+    """
+
+    error_code = "model_endpoint_error"
+    retry_safe = True
+    category = "network"
+    remediation = (
+        "Verify HPC_AGENT_MODEL_BASE_URL is reachable and HPC_AGENT_MODEL_NAME "
+        "/ the API key are correct for the endpoint. A 4xx is usually a bad key "
+        "or an unsupported response_format; a 5xx or connection error is a "
+        "transient outage — retry."
+    )
 
 
 def _registry_remediation_with_placeholders(kind: str, placeholders: dict[str, str]) -> str:

@@ -426,7 +426,7 @@ def test_http_error_raises_typed_hpc_error(monkeypatch: pytest.MonkeyPatch) -> N
     _capture_urlopen(monkeypatch, [err])
     with pytest.raises(errors.HpcError) as excinfo:
         _model().complete([ChatMessage(role="user", content="hi")])
-    assert excinfo.value.error_code == "ssh_unreachable"
+    assert excinfo.value.error_code == "model_endpoint_error"
     assert "401" in str(excinfo.value)
 
 
