@@ -30,6 +30,7 @@ __all__ = [
     "AlreadyInFlight",
     "SubmissionIncomplete",
     "SpawnWorkerDied",
+    "StructuredOutputError",
 ]
 
 
@@ -407,6 +408,26 @@ class SpawnWorkerDied(HpcError):
         if remediation is None:
             remediation = _registry_remediation("spawn_worker_died")
         super().__init__(message, remediation=remediation)
+
+
+class StructuredOutputError(HpcError):
+    """A raw model completion failed to yield a valid structured object.
+
+    Raised by :func:`hpc_agent._kernel.lifecycle.structured.structured`
+    after the parse-validate-repair budget is exhausted: every attempt
+    either emitted no JSON object, failed the target Pydantic model's
+    validation, or was rejected by the caller's ``post_validate`` hook.
+
+    Classed as an internal, retry-safe failure: a malformed completion
+    after the repair budget is the model boundary misbehaving (not the
+    caller's input), and re-running the funnel with a fresh sample is the
+    natural recovery — the same posture as :class:`SpawnWorkerDied` for
+    the spawned-worker floor.
+    """
+
+    error_code = "internal"
+    retry_safe = True
+    category = "internal"
 
 
 def _registry_remediation_with_placeholders(kind: str, placeholders: dict[str, str]) -> str:
