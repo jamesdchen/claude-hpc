@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.20 — 2026-06-08
+
+### Changed — extract the headless tick-loop as neutral substrate the campaign configures (#220)
+
+Internal refactor; no wire or behavior change. The generic loop that walks a campaign one `delegate` step per invocation had zero static coupling to `meta/campaign` but hardcoded two campaign-flavored bits inline: the `monitor`/`aggregate` → flow-verb map and the `claude -p` judgement path. Both are now injected seams — a `StepTable` (delegate-step → hpc-agent verb) and a `JudgementResolver` ((`spawn_request`, `experiment_dir`) → (`report`, `exit_code`)) — and the neutral mechanism (`load_context`, `plan_action`, the `cli`/`agent` dispatch, the new `drive()` loop body) moved to `src/hpc_agent/_kernel/lifecycle/drive.py`. The dependency now points `meta/campaign` → `_kernel/lifecycle/drive`, never the reverse; `drive` does not import `meta.campaign`. `meta/campaign/driver.py` is a thin shim that holds `CampaignLoopConfig` (the campaign step map + default resolver) and the campaign `main()`, and re-exports `plan_action` so the `hpc-campaign-driver` console script and existing importers are unchanged. Same "mechanism owns the protocol; the caller owns the policy" split `_kernel/decision/kernel.py` establishes one layer down. The `{delegate, plan}` envelope is byte-for-byte identical (verified via `hpc-campaign-driver --dry-run`); the `hpc-campaign-driver` entry point is preserved through the shim.
+
 ## 0.10.19 — 2026-06-07
 
 ### Fixed — canary no longer false-fails on a divined `expect_output` (output-side of #287)

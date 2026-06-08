@@ -238,6 +238,31 @@ loop needs to abandon a run, simply stop polling; the journal records
 mark themselves `abandoned` on reconcile when the scheduler no longer
 knows about the run.
 
+## Headless loop: caller owns policy, we own protocol
+
+The `hpc-campaign-driver` outer loop (advance one `delegate` step per
+invocation off `load-context`) is a *configuration* of a neutral
+tick-loop mechanism — `hpc_agent._kernel.lifecycle.drive`. The mechanism
+owns the **protocol**: read the `delegate` block, plan the next action,
+dispatch a deterministic `cli` verb or an `agent` judgement step, one
+step per invocation, state-on-disk between ticks. The caller owns the
+**policy**, injected through two seams:
+
+- **`StepTable`** (`Mapping[str, str]`) — which `hpc-agent` verb each
+  `delegate.step` maps to for `kind: "cli"` steps. Campaign supplies
+  `{"monitor": "monitor-flow", "aggregate": "aggregate-flow"}`; a
+  different driver can map any step to any verb. A step absent from the
+  table skips — the loop bakes in no step vocabulary of its own.
+- **`JudgementResolver`** (`(spawn_request, experiment_dir) -> (report,
+  exit_code)`) — how a `kind: "agent"` step is executed. The default
+  resolver shells `claude -p` via `run_workflow`; the seam lets an
+  alternate transport stand in without the loop knowing.
+
+This is the same "mechanism is neutral; the caller owns the rules" split
+the deterministic decision kernel uses one layer down. An integrator
+embedding the loop configures these two seams rather than forking the
+dispatch logic.
+
 ## Capabilities introspection
 
 ```bash
