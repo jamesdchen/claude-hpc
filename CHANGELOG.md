@@ -5,6 +5,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.20 — 2026-06-08
+
+### Changed — refuse the hand-authored `skip_rsync_deploy` agent form (#283, instance #2)
+
+`skip_rsync_deploy` was an agent-settable wire field on `SubmitFlowSpec`: an agent that set it `true` on a raw `submit-flow` spec ASSERTED "Phase 1 already deployed the same tree, nothing changed since," and a stale assertion silently launched the main array against whatever code the previous deploy shipped if the local tree had drifted (#185). That is the same class as `skip_preflight` (#275) and `--inline` (#155) — an agent-facing lever over a cluster-side safety step. The field is now off the wire (`extra="forbid"` refuses a hand-authored `skip_rsync_deploy`); the skip is operator/internal-only via `HPC_AGENT_SKIP_RSYNC_DEPLOY=1` or a Python-only `_skip_rsync_deploy` kwarg threaded by the trusted in-process caller (`submit_and_verify`'s post-canary main launch, where "Phase 1 just deployed the same tree" is a structural fact the code knows, not an assertion). `prepare-phase2-spec` drops the former `skip_rsync_deploy` flip (its wire output can no longer carry the field; the production agent flow uses in-process `submit-pipeline`/`submit-and-verify`, which skip the redundant deploy correctly). The `worker_prompts/submit.md` Phase-2 teaching is updated to state the skip is operator/internal-only and not a spec field.
+
+### Added — lint guards the preflight/deploy-bypass teaching class (#283)
+
+A new `tests/worker_prompts/test_prose_lints.py` lint refuses any worker-prompt example that sets a safety-bypass field (`skip_preflight`, `skip_rsync_deploy`) true. It matches the assignment form (`field: true` / `field=true`) while leaving the negative demotion prose ("there is no longer a `skip_preflight` field") legal — so a new bypass field added to a worker-prompt example fails CI the same way #275/#283 refused the field at the wire.
+
 ## 0.10.19 — 2026-06-07
 
 ### Fixed — canary no longer false-fails on a divined `expect_output` (output-side of #287)
