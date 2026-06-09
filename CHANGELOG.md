@@ -5,6 +5,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.27 — 2026-06-09
+
+> **Stacking note (#315).** This entry stacks on PR #315
+> (`next-issues-5matvo`, which lands the #240/#234 composite). Its base branch
+> is at an older version line than `main`, so this `0.10.27` is one patch above
+> the base's `0.10.26` and will **re-home** to the correct version at merge —
+> treat the number as provisional until #315 + this wiring land.
+
+### Added — resolve-and-recover composite is now wired into the live monitor tick (#240, #234)
+
+`hpc_agent.ops.resolve_and_recover_flow.maybe_resolve_and_recover` (the #240 live wiring of the #234 deterministic resolver) was built and tested but never called from any live site — it was inert. It is now invoked from the monitor poll loop's `FAILED` seam in `hpc_agent.ops.monitor_flow.monitor_flow`, mirroring the blessed #299 `maybe_auto_resume` hook that sits beside it. The two composites **partition** a FAILED tick without double-handling: auto-resume owns `preempted` clusters (and on a `"resume"` verdict `continue`s the loop before resolve-and-recover runs), while resolve-and-recover deliberately **skips** `preempted` (its `_DETERMINISTIC` set excludes it) and handles everything else. The wiring is **behavior-neutral until a run opts in**: `RunRecord.auto_recover_on_failure` defaults `False`, so for a non-opted-in run the live call computes the verdict-as-data and takes **no** side effect (no resubmit, no park) — it simply falls through to the existing `FAILED` surface. On a `decided_by="code"` verdict under cap (opt-in ON) the composite resubmits and the loop reloads the record and keeps polling, exactly as the auto-resume `"resume"` branch does; a `held` (judgement / over-cap) verdict enriches the `escalation_reason` via the escalation-as-data path (#234). Every consulted tick surfaces the per-cluster dispositions into the monitor tick's `actions` log under `kind="resolve_and_recover"`. Injection seams (`resubmit`, `failures_fetcher`) pass through to the composite's existing defaults — nothing was rewired. Control-plane only; no wire surface changed.
+
 ## 0.10.26 — 2026-06-09
 
 ### Added — submit-flow stamps run-constant `fixed_params` into `extra.spec_kwargs` so the #234 resolver's gpu_oom discriminator can fire (#240, #234, #195)
