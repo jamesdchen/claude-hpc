@@ -842,3 +842,26 @@ class TestMpiBlock:
         assert out["script"] == ".hpc/templates/cpu_array.sh"
         assert not any(k.startswith("HPC_MPI") for k in out["job_env"])
         assert "mpi" not in out.get("resources", {})
+
+
+class TestMpiSingleUnitGuard:
+    """#293 finding B: mpi + total_tasks>1 (array-of-MPI) is refused — the mpi
+    template runs as task 0, so an array would clobber output."""
+
+    def test_mpi_with_multi_task_refused(self) -> None:
+        with pytest.raises(ValueError, match="unit of work"):
+            BuildSubmitSpecInput.model_validate(
+                _required()
+                | {
+                    "backend": "slurm",
+                    "total_tasks": 4,
+                    "mpi": {"ranks": 8, "launcher": "srun"},
+                }
+            )
+
+    def test_mpi_with_single_task_accepted(self) -> None:
+        spec = BuildSubmitSpecInput.model_validate(
+            _required()
+            | {"backend": "slurm", "total_tasks": 1, "mpi": {"ranks": 8, "launcher": "srun"}}
+        )
+        assert spec.mpi is not None and spec.total_tasks == 1

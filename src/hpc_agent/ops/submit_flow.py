@@ -834,9 +834,10 @@ def _make_single_array_submission(
     backend._setup_log_dir()  # type: ignore[attr-defined]
     flags = backend.resource_flags(resources) + list(extra_flags or [])
     # #293: a single multi-rank MPI job is ONE job whose parallelism is the
-    # rank count, not a scheduler array. Submit it non-array (no --array/-t).
-    # An mpi block with total_tasks > 1 is the power-user array-of-MPI shape —
-    # each array element is itself multi-rank — so it keeps the array flag.
+    # rank count, not a scheduler array — submit it non-array (no --array/-t).
+    # build-submit-spec refuses an mpi block with total_tasks > 1 (array-of-MPI
+    # is deferred), so an mpi run always has total_tasks == 1 here; the
+    # ``and total_tasks == 1`` is defense-in-depth against a hand-rolled spec.
     mpi = getattr(resources, "mpi", None) if resources is not None else None
     single_mpi_job = mpi is not None and total_tasks == 1
     if single_mpi_job:

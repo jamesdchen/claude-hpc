@@ -31,7 +31,7 @@ set -eo pipefail
 cd "$PBS_O_WORKDIR"
 mkdir -p logs
 PBS_SEQ="${PBS_JOBID%%[!0-9]*}"
-exec >"logs/${PBS_JOBNAME}.o${PBS_SEQ}" 2>&1
+exec >"logs/${PBS_JOBNAME}.o${PBS_SEQ}.1" 2>&1
 
 # --- Defaults ---
 RESULT_DIR="${RESULT_DIR:-.}"

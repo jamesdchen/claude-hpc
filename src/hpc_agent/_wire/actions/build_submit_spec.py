@@ -85,6 +85,27 @@ class BuildSubmitSpecInput(BaseModel):
     service_env: dict[str, str] | None = None
 
     @model_validator(mode="after")
+    def _mpi_is_single_unit_of_work(self) -> BuildSubmitSpecInput:
+        """Refuse an ``mpi`` block with ``total_tasks > 1`` (array-of-MPI deferred).
+
+        The privileged MPI shape is ONE multi-rank job = one unit of work. The
+        ``mpi`` template hardcodes ``HPC_TASK_ID=0`` (no array-index
+        conversion), so submitting it as an array of N would run every element
+        as task 0 — silently clobbering output. Array-of-MPI (each element a
+        multi-rank solve) is explicitly out of scope for #293, so refuse the
+        incoherent combo at the boundary rather than mis-run it.
+        """
+        if self.mpi is not None and self.total_tasks > 1:
+            raise ValueError(
+                f"mpi block with total_tasks={self.total_tasks}: a multi-rank job "
+                "is ONE unit of work (total_tasks=1). Array-of-MPI (a fan-out of "
+                "independent multi-rank solves) is deferred (#293 out-of-scope) — "
+                "the mpi template runs as task 0, so an array would clobber output. "
+                "Set total_tasks=1, or drop the mpi block for an ordinary array."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _sge_mpi_requires_pe_name(self) -> BuildSubmitSpecInput:
         """SGE has no generic MPI launcher flag — it routes by parallel environment.
 

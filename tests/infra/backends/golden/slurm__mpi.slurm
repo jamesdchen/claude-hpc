@@ -20,10 +20,10 @@ set -eo pipefail
 #   $HPC_MPI_THREADS_PER_RANK — OpenMP threads per rank (default 1)
 # ==============================================================
 
-# --- SLURM directives (defaults; resource_flags overrides) ---
+# --- SLURM directives (defaults; the submit command overrides) ---
 #SBATCH --job-name=mpi_job
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
+#SBATCH --output=logs/%x_%j_1.out
+#SBATCH --error=logs/%x_%j_1.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=2
 #SBATCH --time=6:00:00

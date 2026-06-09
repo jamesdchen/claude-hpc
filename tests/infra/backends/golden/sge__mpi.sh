@@ -26,6 +26,9 @@ set -eo pipefail
 #$ -o logs/
 #$ -pe mpi 2
 
+mkdir -p logs
+exec >"logs/${JOB_NAME}.o${JOB_ID}.1" 2>&1
+
 # --- Defaults ---
 RESULT_DIR="${RESULT_DIR:-.}"
 REPO_DIR="${REPO_DIR:-.}"

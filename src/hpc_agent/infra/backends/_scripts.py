@@ -40,10 +40,13 @@ def _mpi_script(family: str) -> str:
     """
     if family == "slurm":
         directives = (
-            "# --- SLURM directives (defaults; resource_flags overrides) ---\n"
+            "# --- SLURM directives (defaults; the submit command overrides) ---\n"
             "#SBATCH --job-name=mpi_job\n"
-            "#SBATCH --output=logs/%x_%j.out\n"
-            "#SBATCH --error=logs/%x_%j.err\n"
+            # ``_1`` is task 0's ArrayIndex — keeps the standalone log name
+            # aligned with stderr_log_path(task 0) even though the framework's
+            # submit command sets --output/--error explicitly.
+            "#SBATCH --output=logs/%x_%j_1.out\n"
+            "#SBATCH --error=logs/%x_%j_1.err\n"
             "#SBATCH --nodes=1\n"
             "#SBATCH --ntasks=2\n"
             "#SBATCH --time=6:00:00\n"
@@ -58,7 +61,12 @@ def _mpi_script(family: str) -> str:
             "#$ -o logs/\n"
             "#$ -pe mpi 2\n"
         )
-        workdir = ""
+        # A single MPI job is task 0; pin its merged log to the task-0 name
+        # (<job_name>.o<job_id>.1) that stderr_log_path / err_log_disk_path
+        # resolve, so the canary + status log fetch finds it. SGE's native
+        # ``-o logs/`` names a non-array job ``<job_name>.o<job_id>`` (no index),
+        # so redirect explicitly — the ``.1`` is task 0's 1-based ArrayIndex.
+        workdir = '\nmkdir -p logs\nexec >"logs/${JOB_NAME}.o${JOB_ID}.1" 2>&1\n'
         label = "SGE"
     else:  # pbspro / torque — same qsub-family body, PBS work-dir + log redirect
         if family == "pbspro":
@@ -80,14 +88,16 @@ def _mpi_script(family: str) -> str:
                 "#PBS -o logs/\n"
             )
             label = "Torque/PBS"
-        # PBS jobs start in $HOME; cd back to the submit dir and pin a
-        # non-array log name (no array index for a single MPI job).
+        # PBS jobs start in $HOME; cd back to the submit dir and pin the log to
+        # the task-0 name (<job_name>.o<seq>.1) that stderr_log_path /
+        # err_log_disk_path resolve — the ``.1`` is task 0's 1-based ArrayIndex,
+        # so the canary + status log fetch finds the single MPI job's log.
         workdir = (
             "\n# PBS jobs start in $HOME, not the submit dir — cd to where qsub ran.\n"
             'cd "$PBS_O_WORKDIR"\n'
             "mkdir -p logs\n"
             'PBS_SEQ="${PBS_JOBID%%[!0-9]*}"\n'
-            'exec >"logs/${PBS_JOBNAME}.o${PBS_SEQ}" 2>&1\n'
+            'exec >"logs/${PBS_JOBNAME}.o${PBS_SEQ}.1" 2>&1\n'
         )
 
     return (

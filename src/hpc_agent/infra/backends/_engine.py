@@ -361,10 +361,14 @@ class ProfileBackend(HPCBackend):
         cmd += ["--job-name", job_name]
         if getattr(self, "account", ""):
             cmd += ["--account", self.account]
-        # Array jobs interpolate %A (array job id) + %a (array index); a single
-        # MPI job (#293) has neither, so it uses %j (job id) for a clean,
-        # non-empty log filename.
-        log_pattern = "%x_%A_%a" if array else "%x_%j"
+        # Array jobs interpolate %A (array job id) + %a (array index). A single
+        # MPI job (#293) is task 0, so it pins %j (job id) + the literal ``_1``
+        # — task 0's 1-based ArrayIndex — so the on-disk name MATCHES what the
+        # diagnostic layer resolves via ``stderr_log_path(task_id=0)`` /
+        # ``err_log_disk_path``. Without the ``_1`` the canary + status log
+        # fetch would look for ``<name>_<jobid>_1.err`` and miss the real log,
+        # silently blanking MPI failure classification.
+        log_pattern = "%x_%A_%a" if array else "%x_%j_1"
         cmd += [
             "--output",
             f"{self.log_dir}/{log_pattern}.out",

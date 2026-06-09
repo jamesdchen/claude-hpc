@@ -98,12 +98,13 @@ def test_pbspro_mpi_flags_emit_select_chunk():
 # --- non-array command path (single multi-rank job) ------------------------
 
 
-def test_slurm_single_mpi_job_omits_array_and_uses_jobid_logs():
+def test_slurm_single_mpi_job_omits_array_and_uses_task0_logs():
     cmd = _slurm()._build_command(None, "solve", {}, array=False)
     assert "--array" not in cmd
-    # %A_%a (array) gives way to %j (single job id) so the log name is non-empty.
-    assert "logs/%x_%j.out" in cmd
-    assert "logs/%x_%j.err" in cmd
+    # A single MPI job is task 0; its log carries task 0's 1-based ArrayIndex
+    # (``_1``) so it matches what stderr_log_path(task 0) resolves.
+    assert "logs/%x_%j_1.out" in cmd
+    assert "logs/%x_%j_1.err" in cmd
     assert cmd[-1] == "mpi.slurm"
 
 
@@ -111,6 +112,31 @@ def test_sge_single_mpi_job_omits_t_flag():
     cmd = _sge()._build_command(None, "solve", {}, array=False)
     assert "-t" not in cmd
     assert cmd[-1] == "mpi.sh"
+
+
+def test_single_mpi_job_log_matches_stderr_log_path_task0():
+    """Regression (#293): the single MPI job's log must land where the
+    diagnostic layer (verify-canary / status) looks for it — the task-0
+    path stderr_log_path resolves. A mismatch silently blanks MPI failure
+    classification, which the non-array `%j` naming originally did."""
+    remote = "/scratch/u/exp"
+    # SLURM: the command's --error pattern, with %x/%j filled, equals stderr_log_path(0).
+    b = SlurmBackend(script="mpi.slurm", log_dir=f"{remote}/logs")
+    cmd = b._build_command(None, "solve", {}, array=False)
+    err_pattern = cmd[cmd.index("--error") + 1]
+    rendered = err_pattern.replace("%x", "solve").replace("%j", "12345")
+    assert rendered == SlurmBackend.stderr_log_path(remote, "solve", "12345", 0)
+    # SGE / PBS pin the same task-0 suffix in the template's log redirect.
+    from hpc_agent.infra.backends.profile import (
+        PBSPRO_PROFILE,
+        SGE_PROFILE,
+        TORQUE_PROFILE,
+        render_script,
+    )
+
+    assert 'exec >"logs/${JOB_NAME}.o${JOB_ID}.1"' in render_script(SGE_PROFILE, kind="mpi")
+    for prof in (PBSPRO_PROFILE, TORQUE_PROFILE):
+        assert 'exec >"logs/${PBS_JOBNAME}.o${PBS_SEQ}.1"' in render_script(prof, kind="mpi")
 
 
 def test_array_path_unchanged_when_array_true():
