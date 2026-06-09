@@ -66,6 +66,16 @@ if TYPE_CHECKING:
             CliArg("--max-tasks", type=int, default=None),
             CliArg("--max-walltime-sec", type=int, default=None),
             CliArg("--max-core-hours", type=float, default=None),
+            CliArg(
+                "--circuit-breaker-failures",
+                type=int,
+                default=None,
+                help=(
+                    "Loop-safety halt: stop when this many recent iterations "
+                    "failed consecutively. Persisted into stop_criteria; "
+                    "read by campaign-advance. No framework default."
+                ),
+            ),
             CliArg("--strategy-name", type=str, default=None),
             CliArg(
                 "--strategy-params-json",
@@ -94,6 +104,7 @@ def campaign_init(
     max_tasks: int | None = None,
     max_walltime_sec: int | None = None,
     max_core_hours: float | None = None,
+    circuit_breaker_failures: int | None = None,
     strategy_name: str | None = None,
     strategy_params_json: str | None = None,
 ) -> dict[str, Any]:
@@ -126,6 +137,7 @@ def campaign_init(
             plateau_window,
             plateau_tolerance,
             plateau_mode,
+            circuit_breaker_failures,
         )
     ):
         stop_criteria = {}
@@ -143,6 +155,8 @@ def campaign_init(
             stop_criteria["plateau_tolerance"] = plateau_tolerance
         if plateau_mode is not None:
             stop_criteria["plateau_mode"] = plateau_mode
+        if circuit_breaker_failures is not None:
+            stop_criteria["circuit_breaker_failures"] = circuit_breaker_failures
 
     strategy: dict[str, Any] | None = None
     if strategy_name is not None:
