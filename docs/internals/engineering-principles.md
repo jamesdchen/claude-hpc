@@ -6,10 +6,11 @@ is the lint or test linked next to it, and CI — not this prose — is what hol
 the line. The prose exists for the parts a linter cannot decide, and to record
 *why* the enforcement looks the way it does.
 
-This page replaced the repo's `CLAUDE.md`. The deciding incident: of the three
-"current facts" that file asserted, two had silently rotted (see the drift
-log below) while every mechanized check stayed true. Lessons that can fire
-live in CI; only the irreducible judgment calls stay prose.
+This page replaced the repo's prose `CLAUDE.md` (now a one-line pointer
+here). The deciding incident: of the three "current facts" that file
+asserted, two had silently rotted (see the drift log below) while every
+mechanized check stayed true. Lessons that can fire live in CI; only the
+irreducible judgment calls stay prose.
 
 ## Verify a guard can actually fire before classifying it as "intentional"
 
