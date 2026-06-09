@@ -145,7 +145,7 @@
   },
   {
     "agent_facing": false,
-    "cli": "hpc-agent campaign budget [--experiment-dir <dir>] --campaign-id <campaign_id> [--max-jobs <max_jobs>] [--max-tasks <max_tasks>] [--max-walltime-sec <max_walltime_sec>]",
+    "cli": "hpc-agent campaign budget [--experiment-dir <dir>] --campaign-id <campaign_id> [--max-jobs <max_jobs>] [--max-tasks <max_tasks>] [--max-walltime-sec <max_walltime_sec>] [--max-core-hours <max_core_hours>]",
     "idempotent": true,
     "input_schema": null,
     "name": "campaign-budget",
