@@ -23,7 +23,8 @@ import hpc_agent.integration
 
 # ---------------------------------------------------------------------------
 # Snapshots — edit these only when you are intentionally changing the public
-# API. Each change must ship with a version bump and a CHANGELOG entry.
+# API. Each change must ship with a CHANGELOG entry (under ## [Unreleased]);
+# the version is bumped at release time, not per change.
 # ---------------------------------------------------------------------------
 
 EXPECTED_ALL: frozenset[str] = frozenset(

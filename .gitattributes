@@ -9,6 +9,12 @@
 *.yaml  text eol=lf
 *.yml   text eol=lf
 
+# Append-only logs: union-merge so parallel branches' added lines are kept
+# (both sides concatenated) instead of conflicting. CHANGELOG entries land
+# under [Unreleased]; order within the section doesn't matter and a release
+# reflows it — so a union merge is always safe, never a hard conflict.
+CHANGELOG.md merge=union
+
 # Binary files (explicit to avoid accidental normalization)
 *.png  binary
 *.jpg  binary

@@ -5,7 +5,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
-## 0.10.36 — 2026-06-09
+Entries land under **[Unreleased]** as work merges; the version is bumped —
+and `[Unreleased]` promoted to a dated `## X.Y.Z` section — only at release
+time. This keeps parallel branches from colliding on a version number.
+`scripts/lint_changelog_version.py` enforces that `pyproject.toml`, `uv.lock`,
+and the top released `## X.Y.Z` header stay in sync.
+
+## [Unreleased]
 
 ### Changed — split the per-harness decode-schema gate; pre-author the strict WorkerReport variant (#269)
 

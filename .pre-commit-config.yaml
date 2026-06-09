@@ -38,6 +38,13 @@ repos:
         pass_filenames: false
         files: '^(src/hpc_agent/execution/mapreduce/(dispatch|combiner)\.py|src/hpc_agent/state/runs\.py|scripts/lint_schema_versions\.py)$'
 
+      - id: lint-changelog-version
+        name: project version stays in sync (pyproject / uv.lock / CHANGELOG)
+        entry: python scripts/lint_changelog_version.py
+        language: system
+        pass_filenames: false
+        files: '^(pyproject\.toml|uv\.lock|CHANGELOG\.md|scripts/lint_changelog_version\.py)$'
+
       - id: build-primitive-frontmatter
         name: regenerate primitive frontmatter
         entry: python scripts/build_primitive_frontmatter.py --write
