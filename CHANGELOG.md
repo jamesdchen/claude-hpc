@@ -5,6 +5,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.44 — 2026-06-09
+
+### Added — PETSc solver adapter: checkpoint injection for library-owned loops (#294 follow-up)
+
+The checkpoint helpers assume the executor owns its iteration loop; a PETSc solve does not (``TSSolve``/``SNESSolve`` are C code), so there is no loop body to call ``should_checkpoint()`` from. New ``experiment_kit/solver_adapters/`` maps the checkpoint contract onto the hooks PETSc does expose — monitor callbacks and the ``PETSC_OPTIONS`` database — mirroring the two ``@register_run`` injection paths:
+
+- **petsc4py (direct instrumentation)**: ``make_checkpoint_monitor()`` builds a TS/SNES monitor whose body is the existing ``should_checkpoint()`` cadence (walltime_margin / interval) plus an atomic PETSc-binary solution dump — ``ts.setMonitor(make_checkpoint_monitor())`` is the whole instrumentation. Dumps land as ``checkpoint-<step>.petscbin`` under the stable ``HPC_CHECKPOINT_DIR`` (the ``.petscbin`` suffix keeps them invisible to the pickle helpers); ``latest_petsc_checkpoint()`` is their discovery counterpart.
+- **Opaque binaries (materialized wrapper)**: ``entry_point.solver`` (``{"kind": "petsc", "solver_object": "ts"|"snes", "resume_flag": ...}``) on a ``shell_command`` intent makes ``materialize_shell_wrapper`` render a checkpoint-instrumented wrapper that extends ``PETSC_OPTIONS`` with the per-step solution dump (``-ts_monitor_solution binary:<stable dir>/petsc-solution.bin``), caps the solve at 2 steps under ``HPC_CHECKPOINT_CANARY=1`` (``-ts_max_steps 2`` / ``-snes_max_it 2``), and — only when the app declared its restart flag — rotates the previous attempt's dump to ``petsc-restart.bin`` (``promote_restart()``) and appends ``<resume_flag> <path>`` to argv. The entry point stays opaque and untouched; resume is deliberately opt-in because loading a checkpoint is app-specific (there is no universal PETSc restart option).
+- **Detection**: ``detect_petsc_solver()`` AST-matches a petsc4py import + ``PETSc.TS()``/``PETSc.SNES()`` construction + ``.solve()`` call (same matcher style as the stencil axis matcher), recording whether the script calls ``setFromOptions()`` (the options-injection capability gate). ``detect-entry-point`` surfaces a hit as an optional per-candidate ``solver: "petsc"`` field so onboarding can offer the instrumented wrapper.
+- Honesty notes baked into the contract: the options-database path checkpoints per step (PETSc has no walltime awareness) — only the petsc4py monitor path gets walltime-margin semantics; ``PETSC_OPTIONS`` cannot carry whitespace paths (rejected loudly); the wire ``resume_flag`` is pattern-constrained to a CLI-flag shape (no argv injection).
+- Tests: adapter detection/options/rotation/monitor seams (``tests/experiment_kit/solver_adapters/test_petsc.py``), instrumented-wrapper materialization + end-to-end env/argv injection (``test_interview.py``), candidate flagging (``test_detect_entry_point.py``). ``interview.input.json`` regenerated; ``detect_entry_point.output.json`` (hand-authored) gains the optional ``solver`` field.
+
 ## 0.10.43 — 2026-06-09
 
 ### Added — `resolve-resources` auto-derives the SGE parallel environment (#293)
