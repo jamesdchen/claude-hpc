@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.27 — 2026-06-09
+
+### Changed — resolve-and-recover translates the resolver's fix to concrete overrides, and surfaces what it cannot apply (#240, #234)
+
+The #240 auto-fire composite passed the resolver's suggested-fix dict through to `resubmit_flow` as `overrides` verbatim — but `render_overrides_to_extra_flags` consumes only concrete scheduler knobs (`mem_mb` / `walltime_sec` / `gpus` / `cpus`), while the resolver emits a `{action, factor, knob}` shape, so a `decided_by="code"` verdict resubmitted the *identical* config (burning the cap re-running the failing run). The composite now translates the fix into concrete overrides (`ops.resolve_and_recover_flow._concrete_overrides`): `increase-mem*` / `increase-walltime` scale the run sidecar's current `mem_mb` / `walltime_sec` by the fix's `factor`; `retry-on-different-node` needs no override (a fresh dispatch IS the fix). A fix `resubmit_flow` structurally cannot enact — the parallelism/width fixes `increase-parallelism` / `reduce-width` change a *task kwarg* (`tp_size` / `batch_size`), not a scheduler flag, and a `factor` with no current resource to scale — is now **surfaced as a `decided_by="code"` escalation** (the deterministic recommendation, parked for manual action) rather than resubmitted-identical. Task-id coercion is hardened too: a non-integer task id escalates the whole cluster instead of raising `ValueError` mid-loop and aborting the unattended monitor tick. (Folds in the prior post-merge fixes: `temporal_context.phase` is `"unknown"` — a retry count is not a *progress* signal, the meaning the model and `resolve()` assign `phase` — and `build_failure_features` constructs via `model_validate` to satisfy the typed fields.)
+
 ## 0.10.26 — 2026-06-09
 
 ### Added — submit-flow stamps run-constant `fixed_params` into `extra.spec_kwargs` so the #234 resolver's gpu_oom discriminator can fire (#240, #234, #195)

@@ -2,9 +2,10 @@
 
 The resolver (:func:`resolve`) and the features glue are unit-tested in
 ``test_resolve.py`` / ``test_features_glue.py``. This file pins the *composite*
-that routes a per-cluster :class:`Resolution` into a resubmit (code verdict) or
-a parked escalation (judgement verdict): the failure fetch and ``resubmit_flow``
-are injected, so these tests assert the wiring without touching a cluster.
+that routes a per-cluster :class:`Resolution` into a resubmit (an applicable
+code verdict) or a parked escalation (a judgement verdict, or a code verdict
+``resubmit_flow`` cannot enact): the failure fetch and ``resubmit_flow`` are
+injected, so these tests assert the wiring without touching a cluster.
 """
 
 from __future__ import annotations
@@ -15,7 +16,11 @@ from typing import Any
 import pytest
 
 from hpc_agent import errors
-from hpc_agent.ops.resolve_and_recover_flow import maybe_resolve_and_recover
+from hpc_agent.ops.resolve_and_recover_flow import (
+    _coerce_task_ids,
+    _concrete_overrides,
+    maybe_resolve_and_recover,
+)
 from hpc_agent.state import run_record
 from hpc_agent.state.journal import is_held, load_run, upsert_run
 from hpc_agent.state.run_record import RunRecord
@@ -62,6 +67,29 @@ def _seed_record(experiment_dir: Path, **overrides: Any) -> RunRecord:
     return rec
 
 
+def _write_sidecar(experiment_dir: Path, *, resources: dict[str, Any] | None = None) -> None:
+    """Write a minimal run sidecar so the resolver/glue have a resource_spec.
+
+    The translatable fixes (increase-mem* / increase-walltime) scale the current
+    ``resources`` knob, so a code verdict only resubmits when the sidecar
+    supplies the relevant ``mem_mb`` / ``walltime_sec``.
+    """
+    from hpc_agent.state.runs import write_run_sidecar
+
+    write_run_sidecar(
+        experiment_dir,
+        run_id=_RUN_ID,
+        cmd_sha="0" * 64,
+        hpc_agent_version="0.10.26",
+        submitted_at="2026-06-06T12:00:00Z",
+        executor="python3 src/run.py",
+        result_dir_template="results/{seed}",
+        task_count=4,
+        tasks_py_sha="1" * 64,
+        resources=resources or None,
+    )
+
+
 def _fetcher(clusters: list[dict[str, Any]]):
     """Build a failures_fetcher stub returning *clusters* as the report."""
 
@@ -71,7 +99,7 @@ def _fetcher(clusters: list[dict[str, Any]]):
     return _fetch
 
 
-def _cluster(error_class: str, *, task_ids: list[int], fingerprint: str = "fp") -> dict[str, Any]:
+def _cluster(error_class: str, *, task_ids: list[Any], fingerprint: str = "fp") -> dict[str, Any]:
     return {
         "error_class": error_class,
         "category": error_class,
@@ -99,15 +127,62 @@ class _Recorder:
         return _Result()
 
 
-# ── code verdict → auto-resubmit with refined overrides ───────────────────────
+# ── _concrete_overrides: suggested-fix → concrete resubmit overrides ──────────
 
 
-def test_code_verdict_resubmits_with_refined_overrides(
+def test_concrete_overrides_scales_mem() -> None:
+    assert _concrete_overrides(
+        {"action": "increase-mem-per-gpu", "factor": 1.5}, {"mem_mb": 4000}
+    ) == {"mem_mb": 6000}
+    assert _concrete_overrides({"action": "increase-mem", "factor": 2.0}, {"mem_mb": 1000}) == {
+        "mem_mb": 2000
+    }
+
+
+def test_concrete_overrides_scales_walltime() -> None:
+    assert _concrete_overrides(
+        {"action": "increase-walltime", "factor": 1.5}, {"walltime_sec": 3600}
+    ) == {"walltime_sec": 5400}
+
+
+def test_concrete_overrides_retry_different_node_needs_no_change() -> None:
+    assert _concrete_overrides({"action": "retry-on-different-node"}, None) == {}
+
+
+def test_concrete_overrides_none_for_task_kwarg_fixes() -> None:
+    # increase-parallelism / reduce-width change a task kwarg, not a scheduler
+    # flag — resubmit_flow cannot enact them.
+    assert (
+        _concrete_overrides({"action": "increase-parallelism", "knob": "tp_size", "factor": 2}, {})
+        is None
+    )
+    assert _concrete_overrides({"action": "reduce-width", "factor": 0.5}, {}) is None
+
+
+def test_concrete_overrides_none_without_a_resource_to_scale() -> None:
+    # A factor fix with no current mem_mb/walltime_sec cannot be made concrete.
+    assert _concrete_overrides({"action": "increase-mem", "factor": 1.5}, {}) is None
+    assert _concrete_overrides({"action": "increase-walltime", "factor": 1.5}, None) is None
+
+
+def test_coerce_task_ids_rejects_non_int() -> None:
+    assert _coerce_task_ids([0, 1, 2]) == [0, 1, 2]
+    assert _coerce_task_ids(["3", 4]) == [3, 4]
+    assert _coerce_task_ids([0, "not-an-int"]) is None
+    assert _coerce_task_ids([True]) is None  # bool is not a task id
+
+
+# ── code verdict (applicable) → auto-resubmit with translated overrides ───────
+
+
+def test_code_verdict_resubmits_with_translated_mem_override(
     journal_home: Path, experiment: Path
 ) -> None:
-    """gpu_oom with no discriminating context → catalog fix increase-mem-per-gpu;
-    auto-act fires resubmit_flow with the refined overrides."""
+    """gpu_oom with no parallelism/width context → catalog fix
+    increase-mem-per-gpu; translated against the sidecar's current mem_mb and
+    auto-resubmitted with a concrete mem_mb override."""
     _seed_record(experiment)
+    _write_sidecar(experiment, resources={"mem_mb": 4000})
     rec = _Recorder(new_job_ids=["9100", "9101"])
     fetch = _fetcher([_cluster("gpu_oom", task_ids=[0, 1])])
 
@@ -116,14 +191,14 @@ def test_code_verdict_resubmits_with_refined_overrides(
     assert len(outcome.resubmitted) == 1
     c = outcome.resubmitted[0]
     assert c.decided_by == "code"
-    assert c.overrides == {"factor": 1.5}  # increase-mem-per-gpu params
+    assert c.overrides == {"mem_mb": 6000}  # 4000 * 1.5
     assert c.new_job_ids == ["9100", "9101"]
 
     assert len(rec.calls) == 1
     call = rec.calls[0]
     assert call["failed_task_ids"] == [0, 1]
     assert call["category"] == "gpu_oom"
-    assert call["overrides"] == {"factor": 1.5}
+    assert call["overrides"] == {"mem_mb": 6000}
     assert call["from_checkpoint"] is True
     assert call["submit_to_cluster"] is True
     assert call["script"] == ".hpc/templates/cpu_array.sh"
@@ -134,24 +209,56 @@ def test_code_verdict_resubmits_with_refined_overrides(
     assert outcome.auto_recover_count == 1
 
 
-def test_code_verdict_uses_sidecar_resource_spec_to_reshard(
+def test_walltime_verdict_translates_against_current_walltime(
     journal_home: Path, experiment: Path
 ) -> None:
-    """gpu_oom at tp_size=2 (from the sidecar) → increase-parallelism, not more
-    memory — the OOM@tp_size discriminator wired through the glue."""
     _seed_record(experiment)
+    _write_sidecar(experiment, resources={"walltime_sec": 3600})
+    rec = _Recorder()
+    fetch = _fetcher([_cluster("walltime", task_ids=[0])])
+
+    outcome = maybe_resolve_and_recover(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
+
+    assert len(outcome.resubmitted) == 1
+    assert rec.calls[0]["overrides"] == {"walltime_sec": 5400}  # 3600 * 1.5
+
+
+def test_node_failure_resubmits_with_empty_overrides(journal_home: Path, experiment: Path) -> None:
+    """retry-on-different-node needs no resource change — a fresh resubmit IS the
+    fix, so it auto-acts even without a sidecar."""
+    _seed_record(experiment)
+    rec = _Recorder()
+    fetch = _fetcher([_cluster("node_failure", task_ids=[0])])
+
+    outcome = maybe_resolve_and_recover(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
+
+    assert len(outcome.resubmitted) == 1
+    assert rec.calls[0]["overrides"] == {}
+
+
+# ── code verdict resubmit_flow can't enact → surfaced, not resubmitted ────────
+
+
+def test_reshard_verdict_is_surfaced_not_resubmitted(journal_home: Path, experiment: Path) -> None:
+    """gpu_oom at tp_size=2 → increase-parallelism. That changes a task kwarg,
+    which resubmit_flow cannot apply, so the deterministic fix is surfaced as a
+    decided_by="code" escalation (parked) rather than resubmitted-identical."""
+    _seed_record(experiment)
+    _write_sidecar(experiment, resources={"mem_mb": 4000})
     from hpc_agent.state.runs import write_run_sidecar
 
+    # Stamp tp_size into the spec_kwargs pocket the resolver discriminates on.
     write_run_sidecar(
         experiment,
         run_id=_RUN_ID,
         cmd_sha="0" * 64,
-        hpc_agent_version="0.10.20",
+        hpc_agent_version="0.10.26",
         submitted_at="2026-06-06T12:00:00Z",
         executor="python3 src/run.py",
         result_dir_template="results/{seed}",
         task_count=4,
         tasks_py_sha="1" * 64,
+        resources={"mem_mb": 4000},
         extra={"spec_kwargs": {"tp_size": 2}},
     )
     rec = _Recorder()
@@ -159,11 +266,50 @@ def test_code_verdict_uses_sidecar_resource_spec_to_reshard(
 
     outcome = maybe_resolve_and_recover(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
 
-    assert len(outcome.resubmitted) == 1
-    call = rec.calls[0]
-    # increase-parallelism params: {knob, factor}
-    assert call["overrides"]["knob"] == "tp_size"
-    assert "action" not in call["overrides"]
+    assert rec.calls == []  # the reshard cannot be auto-applied
+    assert len(outcome.held) == 1
+    held = outcome.held[0]
+    assert held.decided_by == "code"
+    assert held.escalation is not None
+    assert held.escalation.candidate_actions[0].action == "increase-parallelism"
+    assert "not auto-applicable" in held.reason
+    # The run is parked on the surfaced verdict.
+    assert is_held(load_run(experiment, _RUN_ID))
+
+
+def test_non_integer_task_id_escalates_without_crashing(
+    journal_home: Path, experiment: Path
+) -> None:
+    """A non-int task id must not crash the unattended loop with a ValueError —
+    the whole cluster is surfaced as a decided_by="code" escalation instead."""
+    _seed_record(experiment)
+    _write_sidecar(experiment, resources={"mem_mb": 4000})
+    rec = _Recorder()
+    fetch = _fetcher([_cluster("gpu_oom", task_ids=["not-an-int"])])
+
+    outcome = maybe_resolve_and_recover(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
+
+    assert rec.calls == []  # never resubmitted
+    assert len(outcome.held) == 1
+    assert outcome.held[0].decided_by == "code"
+    assert "non-integer task id" in outcome.held[0].reason
+    assert is_held(load_run(experiment, _RUN_ID))
+
+
+def test_applicable_fix_without_sidecar_resource_escalates(
+    journal_home: Path, experiment: Path
+) -> None:
+    """gpu_oom → increase-mem-per-gpu, but with no sidecar mem_mb to scale the
+    factor against, the fix can't be made concrete → surfaced, not resubmitted."""
+    _seed_record(experiment)  # no sidecar written
+    rec = _Recorder()
+    fetch = _fetcher([_cluster("gpu_oom", task_ids=[0])])
+
+    outcome = maybe_resolve_and_recover(experiment, _RUN_ID, resubmit=rec, failures_fetcher=fetch)
+
+    assert rec.calls == []
+    assert len(outcome.held) == 1
+    assert outcome.held[0].decided_by == "code"
 
 
 # ── judgement verdict → park + surface, run shows held ────────────────────────
@@ -244,6 +390,7 @@ def test_opt_in_off_surfaces_verdict_without_side_effect(
     journal_home: Path, experiment: Path
 ) -> None:
     _seed_record(experiment, auto_recover_on_failure=False)
+    _write_sidecar(experiment, resources={"mem_mb": 4000})
     rec = _Recorder()
     fetch = _fetcher(
         [
@@ -265,7 +412,7 @@ def test_opt_in_off_surfaces_verdict_without_side_effect(
     assert dispositions == {"verdict_only"}
     by_class = {c.error_class: c for c in outcome.clusters}
     assert by_class["gpu_oom"].decided_by == "code"
-    assert by_class["gpu_oom"].overrides == {"factor": 1.5}
+    assert by_class["gpu_oom"].overrides == {"mem_mb": 6000}  # translated, surfaced
     assert by_class["code_bug"].decided_by == "judgement"
     assert by_class["code_bug"].escalation is not None
 
@@ -275,12 +422,13 @@ def test_opt_in_off_surfaces_verdict_without_side_effect(
 
 def test_one_escalation_does_not_block_other_resubmit(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment, max_auto_recovers=5)
+    _write_sidecar(experiment, resources={"mem_mb": 4000, "walltime_sec": 3600})
     rec = _Recorder()
     fetch = _fetcher(
         [
             _cluster("code_bug", task_ids=[0], fingerprint="fp-bug"),  # judgement → park
-            _cluster("gpu_oom", task_ids=[1], fingerprint="fp-oom"),  # code → resubmit
-            _cluster("walltime", task_ids=[2], fingerprint="fp-wall"),  # code → resubmit
+            _cluster("gpu_oom", task_ids=[1], fingerprint="fp-oom"),  # code → resubmit (mem)
+            _cluster("walltime", task_ids=[2], fingerprint="fp-wall"),  # code → resubmit (walltime)
         ]
     )
 
@@ -300,6 +448,7 @@ def test_one_escalation_does_not_block_other_resubmit(journal_home: Path, experi
 
 def test_cap_reached_parks_code_verdict(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment, max_auto_recovers=1, auto_recover_count=1)
+    _write_sidecar(experiment, resources={"mem_mb": 4000})
     rec = _Recorder()
     fetch = _fetcher([_cluster("gpu_oom", task_ids=[0])])
 
@@ -316,6 +465,7 @@ def test_cap_reached_parks_code_verdict(journal_home: Path, experiment: Path) ->
 
 def test_deduped_replay_does_not_increment_count(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment)
+    _write_sidecar(experiment, resources={"mem_mb": 4000})
     rec = _Recorder(deduped=True)
     fetch = _fetcher([_cluster("gpu_oom", task_ids=[0])])
 
@@ -331,6 +481,7 @@ def test_deduped_replay_does_not_increment_count(journal_home: Path, experiment:
 
 def test_request_id_distinct_per_attempt(journal_home: Path, experiment: Path) -> None:
     _seed_record(experiment, max_auto_recovers=5)
+    _write_sidecar(experiment, resources={"mem_mb": 4000})
     rec = _Recorder()
     fetch = _fetcher([_cluster("gpu_oom", task_ids=[0])])
 
