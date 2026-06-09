@@ -147,7 +147,12 @@ def test_core_dependencies_exclude_heavy_libraries() -> None:
     ``solver`` extra here would still put the dependency in core's pyproject —
     a plugin ships its own.
     """
-    import tomllib
+    import pytest
+
+    # ``tomllib`` is stdlib from 3.11; the repo floor is 3.10. The contract
+    # checks a static file, so the 3.11+ CI matrix legs enforcing it is
+    # sufficient — skip (don't fail) on 3.10.
+    tomllib = pytest.importorskip("tomllib")
 
     from tests._paths import REPO_ROOT
 

@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.49 — 2026-06-09
+
+### Fixed — CI green on Python 3.10
+
+The 0.10.47 dependency-ban contract test imported `tomllib` unconditionally, failing the `test (3.10)` CI leg (`tomllib` is stdlib from 3.11; the repo floor is 3.10). The test now `pytest.importorskip`s it — the contract checks a static file, so the 3.11+ matrix legs enforcing it is sufficient.
+
 ## 0.10.48 — 2026-06-09
 
 ### Fixed — review findings on the 0.10.47 hardening
