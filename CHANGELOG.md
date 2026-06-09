@@ -5,6 +5,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.46 — 2026-06-09
+
+### Added — the library-knowledge boundary: principle, enforcement lint, and a corrected misattribution
+
+Codifies the standard that 0.10.44/0.10.45 were built to, applies it to the pre-existing code, and makes it enforceable rather than remembered:
+
+- **CLAUDE.md gains the four-question boundary test** for third-party-library knowledge in core: (1) substrate, not semantics; (2) core dispatches, never branches — library names only at declared assembly points; (3) import-safe per runtime surface (control plane / cluster env / standalone-shipped files have different budgets); (4) core CI verifies it without the library installed. Includes the growth trigger: a knowledge family's second member collapses inline branching into the family's registry/dispatcher.
+- **New `scripts/lint_library_knowledge.py`** (pre-commit + CI) enforces question 2: any import of a knowledge package (`experiment_kit/solver_adapters`, `experiment_kit/axis_matcher/matchers` — root or submodule, top-level or lazy) outside the package itself must be a declared assembly point in the lint's `KNOWLEDGE_PACKAGES` list; violations carry the remediation. List hygiene is enforced both ways: an assembly point that vanished or no longer imports its package also fails, so the list cannot rot into fiction. Current assembly points: `checkpoint_formats.py`, `wrap_entry_point.py`, `detect_entry_point.py` (solver adapters); `_classifier.py` (matchers).
+- **`infra/parsing.py`'s false rationale corrected at the source.** CLAUDE.md has long recorded that this module was misattributed as "cluster-side", yet the module docstring still claimed its helpers "ship to the cluster". Verified against `deploy_runtime` (ships only `dispatch.py`, `combiner.py`, `metrics_io.py`, and the shell templates) and the module's actual importers (all control-plane): the stdlib-only rule now stands on its true merits, and the CLAUDE.md example records the meta-lesson — a recorded lesson whose source still asserts the false claim leaves the trap armed.
+- Audit outcome for the existing tree under the new standard: the pandas/EMA/window/stencil matchers PASS all four questions (AST-only pattern knowledge, single `_classifier.py` dispatch point, fixture-tested with no pandas import anywhere in src or tests) — they are now lint-locked rather than precedent-justified. The solver adapters' two inline `"petsc"` branches are declared (not incidental) assembly points, with the registry collapse scheduled for adapter #2 per the CLAUDE.md trigger.
+- Tests: `tests/scripts/test_lint_library_knowledge.py` — real tree clean, undeclared/lazy imports fire with remediation, intra-package imports free, both stale-entry modes fire.
+
 ## 0.10.45 — 2026-06-09
 
 ### Added — format-aware checkpoint verification + resume (petsc_binary round-trips end to end)
