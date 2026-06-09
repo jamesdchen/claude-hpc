@@ -28,30 +28,36 @@ from pathlib import Path
 
 import hpc_agent
 
-# Root module names that must never be imported at module load by a
-# CLI-reachable hpc_agent module. Each is a multi-hundred-millisecond
-# import (native extensions, large package init) that submit/monitor-side
-# verbs do not need — they belong inside the function that uses them.
-# The solver/MPI roots are additionally the libraries whose *knowledge*
-# lives in core (solver adapters, axis matchers): core may know their
-# idioms, but importing them eagerly would also break the rule that core
-# CI runs without them (docs/internals/engineering-principles.md).
-_BANNED_ROOTS = frozenset(
-    {
-        "pandas",
-        "numpy",
-        "scipy",
-        "sklearn",
-        "pyarrow",
-        "torch",
-        "matplotlib",
-        "tensorflow",
-        "jax",
-        "polars",
-        "petsc4py",
-        "mpi4py",
-    }
-)
+# Libraries that must never be imported at module load by a CLI-reachable
+# hpc_agent module (each a multi-hundred-millisecond import — native
+# extensions, large package init — that submit/monitor-side verbs do not
+# need; they belong inside the function that uses them), NOR appear in
+# core's pyproject dependencies. The solver/MPI roots are additionally the
+# libraries whose *knowledge* lives in core (solver adapters, axis
+# matchers): core may know their idioms, but core CI must verify that
+# knowledge without the library installed
+# (docs/internals/engineering-principles.md).
+#
+# One table, two derived checks: keys are import roots (module-level import
+# ban), values are PyPI distribution names (pyproject dependency ban) —
+# adding a library here arms both, so a root/dist name mismatch (sklearn vs
+# scikit-learn) can't silently slip the dependency check.
+_BANNED_LIBRARIES: dict[str, str] = {
+    "pandas": "pandas",
+    "numpy": "numpy",
+    "scipy": "scipy",
+    "sklearn": "scikit-learn",
+    "pyarrow": "pyarrow",
+    "torch": "torch",
+    "matplotlib": "matplotlib",
+    "tensorflow": "tensorflow",
+    "jax": "jax",
+    "polars": "polars",
+    "petsc4py": "petsc4py",
+    "mpi4py": "mpi4py",
+}
+_BANNED_ROOTS = frozenset(_BANNED_LIBRARIES)
+_BANNED_DISTS = frozenset(_BANNED_LIBRARIES.values())
 
 _PKG_ROOT = Path(hpc_agent.__file__).resolve().parent
 # Scaffold templates are emitted into user projects, not imported by the
@@ -96,6 +102,13 @@ def _module_level_import_roots(tree: ast.Module) -> set[str]:
 
     _Visitor().visit(tree)
     return roots
+
+
+def _dist_name(requirement: str) -> str:
+    """PEP 503-normalized name part of a PEP 508 requirement string."""
+    name = re.match(r"[A-Za-z0-9._-]+", requirement.strip())
+    assert name is not None, f"unparseable requirement: {requirement!r}"
+    return re.sub(r"[-_.]+", "-", name.group()).lower()
 
 
 def _is_excluded(path: Path) -> bool:
@@ -145,16 +158,7 @@ def test_core_dependencies_exclude_heavy_libraries() -> None:
     for extra in project.get("optional-dependencies", {}).values():
         declared.extend(extra)
 
-    def dist_name(requirement: str) -> str:
-        # PEP 503 normalization of the name part of a PEP 508 requirement.
-        name = re.match(r"[A-Za-z0-9._-]+", requirement.strip())
-        assert name is not None, f"unparseable requirement: {requirement!r}"
-        return re.sub(r"[-_.]+", "-", name.group()).lower()
-
-    # Import roots and dist names coincide for every banned root except
-    # sklearn, whose distribution is scikit-learn.
-    banned_dists = (_BANNED_ROOTS - {"sklearn"}) | {"scikit-learn"}
-    offenders = sorted(d for d in map(dist_name, declared) if d in banned_dists)
+    offenders = sorted(d for d in map(_dist_name, declared) if d in _BANNED_DISTS)
     assert not offenders, (
         "Banned library in core pyproject dependencies — core encodes library "
         "*knowledge* via crafted fixtures and must verify it without the library "

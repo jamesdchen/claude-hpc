@@ -5,6 +5,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.48 — 2026-06-09
+
+### Fixed — review findings on the 0.10.47 hardening
+
+A seven-angle review of 0.10.47 surfaced one real parity gap and three accuracy/robustness nits, all fixed with firing tests:
+
+- **`scripts/lint_subject_imports.py` had both evasion holes that 0.10.47 closed in the knowledge lint** — it skipped all relative imports (the comment claimed climbs would be "caught elsewhere"; nothing catches them), and the `from hpc_agent.<role> import <subject>` alias form mapped to no subject at all. Both spellings are now resolved/expanded; alias-derived candidates are checked against the real subject directories so re-exported helpers don't false-positive.
+- **Growth trigger counts only public members**: a shared `_common.py` — the natural shape of the collapse refactor itself — no longer arms the trigger.
+- **One banned-libraries table**: import roots and PyPI dist names are now paired in `_BANNED_LIBRARIES`, so a future sklearn/scikit-learn-style name mismatch cannot silently slip the pyproject dependency check.
+- Enforcement map's Q3 row no longer over-credits `lint_schema_versions.py`/`_guard.py` (adjacent mechanisms, not static enforcers of that row); the new lint test imports `tests._paths.REPO_ROOT` instead of a depth-fragile parent climb.
+
 ## 0.10.47 — 2026-06-09
 
 ### Changed — CLAUDE.md retired: lessons solidified into infrastructure

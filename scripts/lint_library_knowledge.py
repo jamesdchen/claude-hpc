@@ -139,13 +139,21 @@ def _imports_package(module: str, package: str) -> bool:
 
 
 def _member_count(spec: KnowledgePackage, scan_root: Path) -> int:
-    """Implementation modules in the package: ``*.py`` minus ``__init__.py``,
-    plus subpackage dirs."""
+    """Family members in the package: public ``*.py`` modules plus public
+    subpackage dirs. Underscore-prefixed names are implementation details
+    (the shared ``_common.py`` a registry collapse naturally extracts), not
+    a second adapter — they must not arm the growth trigger."""
     pkg = scan_root / spec.package_dir
     if not pkg.is_dir():
         return 0
-    modules = [p for p in pkg.glob("*.py") if p.name != "__init__.py"]
-    subpackages = [p for p in pkg.iterdir() if p.is_dir() and (p / "__init__.py").is_file()]
+    modules = [
+        p for p in pkg.glob("*.py") if p.name != "__init__.py" and not p.name.startswith("_")
+    ]
+    subpackages = [
+        p
+        for p in pkg.iterdir()
+        if p.is_dir() and not p.name.startswith("_") and (p / "__init__.py").is_file()
+    ]
     return len(modules) + len(subpackages)
 
 
@@ -195,8 +203,8 @@ def lint_file(path: Path, scan_root: Path) -> list[tuple[int, str]]:
                 continue
             if (
                 rel != spec.registry
-                and _binds_member_module(module, package, spec, scan_root)
                 and _member_count(spec, scan_root) >= 2
+                and _binds_member_module(module, package, spec, scan_root)
                 and (lineno, package, "registry") not in seen
             ):
                 seen.add((lineno, package, "registry"))

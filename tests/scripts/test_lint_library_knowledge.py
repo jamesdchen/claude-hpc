@@ -22,7 +22,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from tests._paths import REPO_ROOT
+
 _SPEC = importlib.util.spec_from_file_location(
     "lint_library_knowledge", REPO_ROOT / "scripts" / "lint_library_knowledge.py"
 )
@@ -123,6 +124,14 @@ def test_growth_trigger_fires_on_second_member(tmp_path: Path, capsys) -> None:
     err = capsys.readouterr().err
     assert "wrap_entry_point.py" in err and "growth trigger" in err
     assert "experiment_kit/checkpoint_formats.py" in err  # names the registry
+
+
+def test_private_helpers_do_not_arm_growth_trigger(tmp_path: Path) -> None:
+    """A shared ``_common.py`` is an implementation detail — the natural
+    shape of the collapse refactor itself — not a second family member."""
+    root = _mini_tree(tmp_path)
+    (root / "experiment_kit" / "solver_adapters" / "_common.py").write_text("Z = 0\n")
+    assert lint.main(root) == 0  # wrap_entry_point still binds .petsc: legal at 1 member
 
 
 def test_growth_trigger_satisfied_by_root_api(tmp_path: Path) -> None:
