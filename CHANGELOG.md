@@ -5,6 +5,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.42 — 2026-06-09
+
+### Added — MPI failure signatures + multi-rank canary (#293 PR4)
+
+Fourth slice of the multi-rank workstream (#293) — the guardrails. PR2/PR3 made a multi-rank job submit and run; this PR makes its failure modes classifiable and proves the launch with a cheap canary before the full allocation queues.
+
+- **Three multi-rank failure signatures** added to `failure_signatures.CATALOG`, each with a concrete remediation: `mpi_launcher_missing` (srun/mpirun/aprun not on PATH → load the MPI module / pick a provided launcher), `mpi_pe_invalid` (SGE rejected the parallel environment → pick a `kind=mpi` PE from inspect-cluster), `mpi_init_failed` (the MPI runtime couldn't start the ranks — *not enough slots*, `MPI_Init`/`MPI_ABORT`, ORTE/PMIx wire-up → lower ranks or fix the library/topology). Threaded through the full vocabulary chain so resubmit accepts them: the `FailureCategory` StrEnum, the `FailureCategoryResubmittable` wire Literal (and its regenerated `resubmit.input.json`), and `CLASSIFIER_CATEGORIES`. Priority 95 so a launch failure that also dumps a Python traceback still classifies structurally.
+- **The MPI canary runs the smallest meaningful job** — `ranks=2` on one node (`ranks_per_node=2`), launcher/threads/walltime preserved — via `_mpi_canary_resources`, which `model_copy`-shrinks the spec rather than mutating it and overrides `HPC_MPI_RANKS` so the in-job launcher spawns 2 ranks too. This validates the launcher resolves and the MPI library loads before the full multi-node allocation queues; a non-MPI submit is untouched (returns the resources unchanged).
+- The #293 coherence guards (`ranks_per_node` must divide `ranks`; SGE requires `pe_name`) landed with PR2's wire model; this PR completes the guard surface with runtime classification + the pre-flight canary.
+- Tests: MPI classify cases (launcher/PE/slots/init, plus the traceback-precedence case) in `test_failure_signatures.py` (catalog size 15→18), and `_mpi_canary_resources` downsizing / non-MPI no-op / None-handling in `test_canary_gate.py`.
+
 ## 0.10.41 — 2026-06-09
 
 ### Added — multi-rank executor convention + dispatcher launcher (#293 PR3)
