@@ -21,6 +21,7 @@ class _CampaignBudget(BaseModel):
     max_jobs: int | None = Field(default=None, ge=0)
     max_tasks: int | None = Field(default=None, ge=0)
     max_walltime_sec: int | None = Field(default=None, ge=0)
+    max_core_hours: float | None = Field(default=None, ge=0)
 
 
 class _StopCriteria(BaseModel):

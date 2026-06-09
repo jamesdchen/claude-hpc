@@ -122,6 +122,19 @@
           ],
           "default": null,
           "title": "Max Walltime Sec"
+        },
+        "max_core_hours": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Core Hours"
         }
       },
       "title": "_CampaignBudget",

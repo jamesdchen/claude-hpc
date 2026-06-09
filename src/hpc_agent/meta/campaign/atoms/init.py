@@ -65,6 +65,7 @@ if TYPE_CHECKING:
             CliArg("--max-jobs", type=int, default=None),
             CliArg("--max-tasks", type=int, default=None),
             CliArg("--max-walltime-sec", type=int, default=None),
+            CliArg("--max-core-hours", type=float, default=None),
             CliArg("--strategy-name", type=str, default=None),
             CliArg(
                 "--strategy-params-json",
@@ -92,6 +93,7 @@ def campaign_init(
     max_jobs: int | None = None,
     max_tasks: int | None = None,
     max_walltime_sec: int | None = None,
+    max_core_hours: float | None = None,
     strategy_name: str | None = None,
     strategy_params_json: str | None = None,
 ) -> dict[str, Any]:
@@ -105,11 +107,12 @@ def campaign_init(
     from hpc_agent.meta.campaign.manifest import manifest_path, write_manifest
 
     budget: dict[str, Any] | None = None
-    if any(v is not None for v in (max_jobs, max_tasks, max_walltime_sec)):
+    if any(v is not None for v in (max_jobs, max_tasks, max_walltime_sec, max_core_hours)):
         budget = {
             "max_jobs": max_jobs,
             "max_tasks": max_tasks,
             "max_walltime_sec": max_walltime_sec,
+            "max_core_hours": max_core_hours,
         }
 
     stop_criteria: dict[str, Any] | None = None

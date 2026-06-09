@@ -149,3 +149,51 @@ def test_cpu_only_task_no_gpu_hours(tmp_path: Path) -> None:
     out = campaign_budget(experiment_dir=tmp_path, campaign_id="camp_a")
     assert out["spent"]["gpu_hours"] == 0.0
     assert out["spent"]["walltime_sec"] == 3600
+
+
+# ─── Commit 2: max_core_hours cap (durable surface) ─────────────────────────
+
+
+def test_max_core_hours_cap_fires(tmp_path: Path) -> None:
+    # 7200s elapsed × 2 cores = 4 core-hours.
+    _seed_run(tmp_path, run_id="run_0000", task_count=1)
+    _seed_sample(tmp_path, run_id="run_0000", task_id=0, elapsed_sec=7200, cpu_seconds_used=14400)
+    out = campaign_budget(experiment_dir=tmp_path, campaign_id="camp_a", max_core_hours=3.0)
+    assert out["spent"]["core_hours"] == 4.0
+    assert out["exhausted"] is True
+    assert "max_core_hours" in out["reason"]
+
+    under = campaign_budget(experiment_dir=tmp_path, campaign_id="camp_a", max_core_hours=10.0)
+    assert under["exhausted"] is False
+    assert under["remaining"]["max_core_hours"] == 6.0
+
+
+def test_advance_stops_over_budget_on_core_hours(tmp_path: Path) -> None:
+    from hpc_agent.meta.campaign.atoms.advance import campaign_advance
+
+    _seed_run(tmp_path, run_id="run_0000", task_count=1)
+    _seed_sample(tmp_path, run_id="run_0000", task_id=0, elapsed_sec=3600, cpu_seconds_used=7200)
+    out = campaign_advance(experiment_dir=tmp_path, campaign_id="camp_a", max_core_hours=1.0)
+    assert out["decision"] == "stop_over_budget"
+    assert "max_core_hours" in out["reason"]
+
+
+def test_max_core_hours_defaults_from_manifest(tmp_path: Path) -> None:
+    from hpc_agent.meta.campaign.manifest import write_manifest
+
+    _seed_run(tmp_path, run_id="run_0000", task_count=1)
+    _seed_sample(tmp_path, run_id="run_0000", task_id=0, elapsed_sec=3600, cpu_seconds_used=7200)
+    write_manifest(tmp_path, campaign_id="camp_a", budget={"max_core_hours": 1.0})
+    out = campaign_budget(experiment_dir=tmp_path, campaign_id="camp_a")
+    assert out["budget"]["max_core_hours"] == 1.0
+    assert out["exhausted"] is True
+
+
+def test_init_persists_max_core_hours(tmp_path: Path) -> None:
+    from hpc_agent.meta.campaign.atoms.init import campaign_init
+    from hpc_agent.meta.campaign.manifest import read_manifest
+
+    campaign_init(experiment_dir=tmp_path, campaign_id="camp_z", max_core_hours=250.0)
+    manifest = read_manifest(tmp_path, "camp_z")
+    assert manifest is not None
+    assert manifest["budget"]["max_core_hours"] == 250.0

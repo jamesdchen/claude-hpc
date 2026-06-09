@@ -56,6 +56,7 @@ if TYPE_CHECKING:
             CliArg("--max-jobs", type=int, default=None),
             CliArg("--max-tasks", type=int, default=None),
             CliArg("--max-walltime-sec", type=int, default=None),
+            CliArg("--max-core-hours", type=float, default=None),
         ),
         group="campaign",
     ),
@@ -74,6 +75,7 @@ def campaign_advance(
     max_jobs: int | None = None,
     max_tasks: int | None = None,
     max_walltime_sec: int | None = None,
+    max_core_hours: float | None = None,
 ) -> dict[str, Any]:
     """Decide the next campaign action from history + budget.
 
@@ -99,6 +101,7 @@ def campaign_advance(
         max_jobs=max_jobs,
         max_tasks=max_tasks,
         max_walltime_sec=max_walltime_sec,
+        max_core_hours=max_core_hours,
     )
     converged = campaign_converged(
         experiment_dir=experiment_dir,
