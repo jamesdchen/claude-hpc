@@ -5,7 +5,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
-## 0.10.37 — 2026-06-09
+## 0.10.38 — 2026-06-09
 
 ### Added — a deterministic, LLM-free campaign judgement resolver (#220 Phase 1)
 
@@ -17,7 +17,7 @@ The headless campaign driver advances a judgement (`kind="agent"`) step through 
 - **The synthesized `WorkerReport` is contract-valid:** it round-trips through `parse_worker_report`, reporting only `code`-decided points (no `why` required) — the same validation the LLM path's reports pass.
 - Tests: a new end-to-end suite (`tests/meta/campaign/test_deterministic_resolver_e2e.py`) drives the resolver over a seeded strategy-driven campaign and asserts the `continue`→next-submit path (cluster I/O stubbed, zero LLM spawn, cursor advanced), the unclassifiable-path and cold-submit residue cases (non-zero exit, escalation surfaced, no blind submit), the decided-stop clean terminal, and the report round-trip.
 
-## 0.10.36 — 2026-06-09
+## 0.10.37 — 2026-06-09
 
 ### Added — surface the resolve-and-recover opt-in through the submit spec (#240, #234)
 
@@ -27,6 +27,13 @@ The headless campaign driver advances a judgement (`kind="agent"`) step through 
 - **`submit_flow` threads `spec.auto_recover_on_failure` / `spec.max_auto_recovers` into `submit_and_record`,** which persists them onto the journal `RunRecord` on both the fresh-submit and the journal-wiped reconstruction paths (so a cross-machine resubmit keeps the opt-in alive instead of silently reverting to default-OFF), exactly as the auto-resume keystone is carried.
 - **No new behavior for existing runs:** a spec that does not set the opt-in writes `False`, and the monitor's resolve-and-recover hook stays computed-and-surfaced-only (no resubmit, no park) — the #283 posture is unchanged.
 - Tests: a new end-to-end suite (`tests/ops/test_resolve_and_recover_opt_in_e2e.py`) drives the opt-in through the *real* submit plumbing into the persisted record and then through the *real* composite (only the failure fetch + `resubmit_flow` injected) to an actual code-verdict resubmit with the translated mem override; plus the default-OFF path proven side-effect-free through the same plumbing. This closes the gap the composite tests (which seed the record directly) and the monitor tests (which fake the composite) left open.
+## 0.10.36 — 2026-06-09
+
+### Changed — split the per-harness decode-schema gate; pre-author the strict WorkerReport variant (#269)
+
+The decode-time output-schema accelerator was gated by a single env var, `HPC_AGENT_WORKER_JSON_SCHEMA`, shared by both the Claude (`--json-schema`) and Codex (`--output-schema`) workers. That coupling is a latent hazard for the #269 flip: turning the accelerator on by default is gated on a **live validation run, and that validation is per-harness** (whether the decode-schema composes with the agent loop and whether the CLI accepts the schema shape are separate empirical questions for each CLI). A shared gate would flip an unvalidated harness on as a side effect of validating the other. The gate is now split: `HPC_AGENT_WORKER_JSON_SCHEMA` governs Claude only; a new `HPC_AGENT_CODEX_OUTPUT_SCHEMA` governs Codex. Both remain **off by default** — no production behavior changes today; this lets #269 flip each harness independently once its own live run confirms.
+
+The split also fixes a documented latent bug. Codex's `--output-schema` requires an **API-strict** schema (`additionalProperties:false` + all-required), but the shared path bound the lenient `worker.output.json` floor schema (a standing `TODO(#269/#304)` in `CodexCliInvoker._output_schema_args`). The Codex gate now binds a new checked-in `worker.strict.output.json`, **generated from the `WorkerReport` Pydantic model** by `scripts/build_schemas.py` (a new `DERIVED_REGISTRY` of schema→schema transforms, kept out of `SCHEMA_REGISTRY` because a strict schema doesn't accept a model's own minimal dump). The strictifier is the single canonical `to_strict_schema`, extracted to `hpc_agent._kernel.contract.strict_schema` and now shared by both the build script and the `openai-compat` runtime accelerator (`#304`) — one transform, not two that can diverge. Claude continues to bind the lenient `worker.output.json` (whether claude's mode needs strict is the open #269 question, unanswerable offline). `result` stays free-form in the strict variant (`additionalProperties: true`) — inherent to the model's free-form payload field; the floor validates it regardless. A drift test pins `worker.strict.output.json` to its generator, a strictness-invariant test pins the all-required/no-extras shape, and a gate-independence test pins that neither env var enables the other harness. `env-vars.md` documents both gates.
 
 ## 0.10.35 — 2026-06-09
 

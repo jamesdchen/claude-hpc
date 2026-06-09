@@ -67,7 +67,7 @@ campaign -> drive (``drive.py`` MUST NOT import campaign). It is the campaign
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hpc_agent._kernel.extension.spawn_prompt import (
     WorkerDecision,
@@ -79,6 +79,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hpc_agent._kernel.lifecycle.drive import JudgementResolver
+    from hpc_agent._wire._shared import BackendName
     from hpc_agent.meta.campaign.driver import CampaignLoopConfig
 
 __all__ = [
@@ -103,20 +104,35 @@ _EXIT_OK = 0
 _EXIT_RESIDUE = 3
 
 
+def _dispatch_primitive(name: str, /, *args: Any, **kwargs: Any) -> Any:
+    """Invoke an ``ops`` primitive by its registry name.
+
+    ``meta.campaign`` must not import ``ops`` internals directly — the
+    subject-import boundary (``scripts/lint_subject_imports.py``) keeps subjects
+    composing only through the shared ``infra``/``state``/``_kernel`` substrate.
+    The resolver therefore dispatches the ops primitives it chains *by name*
+    through the kernel registry — the same by-name dispatch the headless loop
+    uses for CLI verbs, run in-process. ``register_primitives`` is idempotent.
+    """
+    from hpc_agent._kernel.registry.primitive import get_registry, register_primitives
+
+    register_primitives()
+    return get_registry()[name].func(*args, **kwargs)
+
+
 def _default_submit_fn(experiment_dir: Path, submit_spec: dict[str, Any]) -> dict[str, Any]:
     """Submit a built spec through the real ``submit-flow`` pipeline.
 
     The production seam: validate the ``resolve-submit-inputs`` ``submit_spec``
-    dict into a :class:`SubmitFlowSpec` and run ``submit_flow`` (rsync + deploy
+    dict into a :class:`SubmitFlowSpec` and run ``submit-flow`` (rsync + deploy
     + canary + qsub + record). Tests inject a stub in its place so no SSH /
     scheduler is touched.
     """
     from hpc_agent._wire.workflows.submit_flow import SubmitFlowSpec
-    from hpc_agent.ops.submit_flow import submit_flow
 
     spec = SubmitFlowSpec.model_validate(submit_spec)
-    result = submit_flow(experiment_dir, spec=spec)
-    return result.to_envelope_data()
+    result = _dispatch_primitive("submit-flow", experiment_dir, spec=spec)
+    return cast("dict[str, Any]", result.to_envelope_data())
 
 
 class DeterministicCampaignResolver:
@@ -256,8 +272,6 @@ class DeterministicCampaignResolver:
         prior sidecar exists to rebuild from, this is the cold-start interview
         the headless resolver cannot run -> residue.
         """
-        from hpc_agent.ops.resolve_submit_inputs import resolve_submit_inputs
-
         context = self._reconstruct_submit_context(experiment_dir, campaign_id=campaign_id)
         if context is None:
             return self._residue(
@@ -273,7 +287,7 @@ class DeterministicCampaignResolver:
             )
 
         spec, run_name = context
-        resolved = resolve_submit_inputs(experiment_dir, spec=spec)
+        resolved = _dispatch_primitive("resolve-submit-inputs", experiment_dir, spec=spec)
         if resolved.needs_decision:
             return self._residue(
                 workflow,
@@ -452,19 +466,24 @@ class DeterministicCampaignResolver:
         return str(target) if target else None
 
     @staticmethod
-    def _backend_for(record: Any, sidecar: dict[str, Any]) -> str:
+    def _backend_for(record: Any, sidecar: dict[str, Any]) -> BackendName:
         """Pick the scheduler backend the prior run used.
 
         Neither the journal record nor the sidecar config snapshot records the
         backend directly; resolve it from the cluster config the same way
-        submit-flow does, falling back to slurm.
+        submit-flow does, falling back to slurm. An unrecognized scheduler
+        string falls back to slurm rather than shipping a backend the submit
+        spec's ``BackendName`` literal would reject downstream.
         """
         from hpc_agent.infra.clusters import load_clusters_config
 
         cluster = record.cluster or sidecar.get("cluster")
         cfg = load_clusters_config().get(cluster, {}) if cluster else {}
         backend = cfg.get("scheduler") if isinstance(cfg, dict) else None
-        return str(backend) if backend else "slurm"
+        resolved = str(backend) if backend else "slurm"
+        if resolved not in ("sge", "slurm", "pbspro", "torque"):
+            resolved = "slurm"
+        return cast("BackendName", resolved)
 
     # -- report synthesis --------------------------------------------------
 
