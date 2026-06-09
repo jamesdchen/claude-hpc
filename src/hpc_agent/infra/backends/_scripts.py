@@ -83,7 +83,7 @@ def _mpi_script(family: str) -> str:
         # PBS jobs start in $HOME; cd back to the submit dir and pin a
         # non-array log name (no array index for a single MPI job).
         workdir = (
-            '\n# PBS jobs start in $HOME, not the submit dir — cd to where qsub ran.\n'
+            "\n# PBS jobs start in $HOME, not the submit dir — cd to where qsub ran.\n"
             'cd "$PBS_O_WORKDIR"\n'
             "mkdir -p logs\n"
             'PBS_SEQ="${PBS_JOBID%%[!0-9]*}"\n'
@@ -113,10 +113,7 @@ def _mpi_script(family: str) -> str:
         "#   $HPC_MPI_LAUNCHER         — srun | mpirun | aprun (default srun)\n"
         "#   $HPC_MPI_THREADS_PER_RANK — OpenMP threads per rank (default 1)\n"
         "# ==============================================================\n"
-        "\n"
-        + directives
-        + workdir
-        + "\n# --- Defaults ---\n"
+        "\n" + directives + workdir + "\n# --- Defaults ---\n"
         'RESULT_DIR="${RESULT_DIR:-.}"\n'
         'REPO_DIR="${REPO_DIR:-.}"\n'
         "\n"
@@ -133,7 +130,7 @@ def _mpi_script(family: str) -> str:
         'echo "============================================"\n'
         "\n"
         "# --- Shared preamble (modules + conda + PYTHONPATH + uv sync) ---\n"
-        '# See hpc_agent/execution/mapreduce/templates/common/hpc_preamble.sh — deployed\n'
+        "# See hpc_agent/execution/mapreduce/templates/common/hpc_preamble.sh — deployed\n"
         "# alongside this template at .hpc/templates/common/hpc_preamble.sh by deploy_runtime.\n"
         'source "$REPO_DIR/.hpc/templates/common/hpc_preamble.sh"\n'
         "\n"

@@ -207,9 +207,7 @@ def _decorator_aliases(tree: ast.Module) -> tuple[set[str], set[str]]:
     return bare, modules
 
 
-def _decorator_flags(
-    dec: ast.expr, bare: set[str], modules: set[str]
-) -> tuple[bool, bool] | None:
+def _decorator_flags(dec: ast.expr, bare: set[str], modules: set[str]) -> tuple[bool, bool] | None:
     """Return ``(gpu, mpi)`` if *dec* is a ``register_run`` decorator, else ``None``.
 
     Reads the ``@register_run(gpu=..., mpi=...)`` keyword constants; a bare
