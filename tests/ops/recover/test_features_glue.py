@@ -99,22 +99,26 @@ def test_resource_spec_none_when_empty() -> None:
 # ── temporal_context.phase ───────────────────────────────────────────────────
 
 
-def test_phase_first_attempt_when_no_prior_retries() -> None:
+def test_phase_unknown_without_a_progress_signal() -> None:
+    # The recover seam has no progress signal; phase must NOT be asserted from
+    # the retry count. "unknown" is resolve()'s conservative not-first_attempt read.
     f = build_failure_features(_cluster(), record=_record(), sidecar=None)
-    assert f.temporal_context.phase == "first_attempt"
+    assert f.temporal_context.phase == "unknown"
 
 
-def test_phase_after_progress_when_a_task_has_prior_attempts() -> None:
+def test_phase_stays_unknown_even_when_a_cluster_task_was_retried() -> None:
+    # A retry is not progress: a retried task may still have failed before any
+    # unit of work succeeded. phase stays "unknown" (the retry count lands in
+    # attempts_this_episode, not in phase).
     rec = _record(retries={"0": {"attempts": 1, "category": "gpu_oom", "overrides": {}}})
     f = build_failure_features(_cluster(task_ids=[0, 1]), record=rec, sidecar=None)
-    assert f.temporal_context.phase == "after_progress"
+    assert f.temporal_context.phase == "unknown"
 
 
-def test_phase_first_attempt_when_only_other_tasks_retried() -> None:
-    """A prior attempt on a task NOT in this cluster must not flip the phase."""
+def test_phase_unknown_regardless_of_unrelated_task_retries() -> None:
     rec = _record(retries={"7": {"attempts": 2, "category": "walltime", "overrides": {}}})
     f = build_failure_features(_cluster(task_ids=[0, 1]), record=rec, sidecar=None)
-    assert f.temporal_context.phase == "first_attempt"
+    assert f.temporal_context.phase == "unknown"
 
 
 # ── attempts_this_episode ────────────────────────────────────────────────────

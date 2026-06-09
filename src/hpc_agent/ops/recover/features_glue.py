@@ -28,9 +28,17 @@ choice is auditable):
   **as-written** (no int normalization): ``resolve._degree`` already coerces
   int-like strings, so passthrough is the safe, lossless choice and avoids this
   glue silently rewriting an audit value.
-* **temporal_context.phase** is ``"first_attempt"`` when none of the cluster's
-  tasks carry a prior attempt in ``record.retries``, else ``"after_progress"``
-  (any prior recovery attempt this episode means work has already been retried).
+* **temporal_context.phase** is ``"unknown"``. The recover seam has no
+  *progress* signal, and ``phase`` is defined as one (``first_attempt`` =
+  failed before any unit of work succeeded; ``after_progress`` = some work
+  succeeded first) — which a retry count is NOT (a first-attempt task can OOM
+  after processing most of its data; a structural failure can have been retried
+  already). ``resolve()`` branches the reshard/walltime call on ``first_attempt``,
+  so deriving the phase from ``retries`` would mis-key the exact discrimination
+  #234 exists for; ``"unknown"`` is ``resolve()``'s conservative
+  (not-``first_attempt``) read. The retry count is carried in
+  ``attempts_this_episode`` instead. Deriving a real progress signal from the
+  #294 checkpoint / partial-output machinery is a follow-up.
 * **attempts_this_episode.count** is the max prior ``attempts`` among the
   cluster's tasks; **.strategies** is the de-duplicated, order-preserving list
   of every prior ``category`` and override-derived action recorded in
@@ -142,8 +150,8 @@ def build_failure_features(
       ``FailureCategory`` ``cluster_failures_by_fingerprint`` derived from the
       one classifier).
     * ``resource_spec`` — :func:`_resource_spec_from_sidecar`.
-    * ``temporal_context.phase`` — ``"first_attempt"`` unless any of the
-      cluster's tasks already has a prior attempt this episode.
+    * ``temporal_context.phase`` — ``"unknown"`` (no progress signal at this
+      seam; a retry count is not progress — see the module docstring).
     * ``attempts_this_episode`` — the max prior attempt count + the prior
       strategies, so the exhaustion fall-through can fire.
     """
@@ -151,14 +159,24 @@ def build_failure_features(
     resource_spec = _resource_spec_from_sidecar(sidecar)
     max_attempts, strategies = _retry_facts(record, task_ids)
 
-    phase = "first_attempt" if max_attempts == 0 else "after_progress"
-
-    return FailureFeatures(
-        error_class=cluster.get("error_class"),
-        resource_spec=resource_spec or None,
-        temporal_context={"phase": phase},
-        attempts_this_episode={
-            "count": max_attempts,
-            "strategies": strategies or None,
-        },
+    # phase="unknown": a retry count is not a progress signal (see the module
+    # docstring) and resolve() reads "unknown" as not-first_attempt. The
+    # retry count lands in attempts_this_episode below, not here.
+    #
+    # model_validate (not the FailureFeatures(...) ctor) so the nested dicts are
+    # coerced into the typed _TemporalContext / _AttemptsThisEpisode submodels —
+    # the same construction style as ops.recover.service.service_failure_features.
+    # Bound to a typed local (not returned inline) so warn_return_any does not
+    # trip on model_validate's Any return.
+    features: FailureFeatures = FailureFeatures.model_validate(
+        {
+            "error_class": cluster.get("error_class"),
+            "resource_spec": resource_spec or None,
+            "temporal_context": {"phase": "unknown"},
+            "attempts_this_episode": {
+                "count": max_attempts,
+                "strategies": strategies or None,
+            },
+        }
     )
+    return features
