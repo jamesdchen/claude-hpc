@@ -5,6 +5,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.36 — 2026-06-09
+
+### Added — surface the resolve-and-recover opt-in through the submit spec (#240, #234)
+
+0.10.35 wired `maybe_resolve_and_recover` into the monitor's `FAILED` tick but left it "behavior-neutral until a run opts in" — and there was no way to opt in. The gate it reads, `RunRecord.auto_recover_on_failure`, had **no producer**: neither `SubmitFlowSpec` nor the `submit_and_record` sink carried the field, so it could only ever be its default `False` and the freshly-wired hook could never fire. This adds the missing producer so the seam is reachable, mirroring the blessed #299 `auto_resume_on_kill` keystone end to end:
+
+- **`SubmitFlowSpec` gains `auto_recover_on_failure` (default `False`) + `max_auto_recovers` (default 2).** Same default-OFF zero-blast-radius posture as `auto_resume_on_kill`, and independent of it — `auto_resume_on_kill` stays preempt-only; enabling the general deterministic resolver is a deliberate separate choice. The five `*.input.json` schemas that embed the submit spec are regenerated.
+- **`submit_flow` threads `spec.auto_recover_on_failure` / `spec.max_auto_recovers` into `submit_and_record`,** which persists them onto the journal `RunRecord` on both the fresh-submit and the journal-wiped reconstruction paths (so a cross-machine resubmit keeps the opt-in alive instead of silently reverting to default-OFF), exactly as the auto-resume keystone is carried.
+- **No new behavior for existing runs:** a spec that does not set the opt-in writes `False`, and the monitor's resolve-and-recover hook stays computed-and-surfaced-only (no resubmit, no park) — the #283 posture is unchanged.
+- Tests: a new end-to-end suite (`tests/ops/test_resolve_and_recover_opt_in_e2e.py`) drives the opt-in through the *real* submit plumbing into the persisted record and then through the *real* composite (only the failure fetch + `resubmit_flow` injected) to an actual code-verdict resubmit with the translated mem override; plus the default-OFF path proven side-effect-free through the same plumbing. This closes the gap the composite tests (which seed the record directly) and the monitor tests (which fake the composite) left open.
+
 ## 0.10.35 — 2026-06-09
 
 ### Added — wire the resolve-and-recover composite into the live monitor tick (#240, #234)
