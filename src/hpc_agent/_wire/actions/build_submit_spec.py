@@ -15,6 +15,7 @@ from hpc_agent._wire.actions.write_run_sidecar import (
     _CONSTANT_PER_RUN_PLACEHOLDERS,
     _result_dir_per_task_placeholders,
 )
+from hpc_agent._wire.workflows.submit_flow import MpiSpec
 
 
 class BuildSubmitSpecInput(BaseModel):
@@ -58,6 +59,10 @@ class BuildSubmitSpecInput(BaseModel):
     walltime_sec: int | None = Field(default=None, gt=0)
     mem_mb: int | None = Field(default=None, gt=0)
     cpus: int | None = Field(default=None, ge=1)
+    # Multi-rank (MPI) job shape (#293). Reuses the SubmitResources.MpiSpec
+    # model verbatim; the builder selects the ``mpi`` template, emits the
+    # block onto ``resources.mpi``, and enforces the SGE pe_name guard below.
+    mpi: MpiSpec | None = None
     canary: bool | None = None
     partial_ok: bool | None = None
     # ``skip_preflight`` removed (#275): build-submit-spec no longer emits it
@@ -78,6 +83,27 @@ class BuildSubmitSpecInput(BaseModel):
     # threads each entry into every task's env as ``HPC_SERVICE_<KEY>``. The
     # framework does not stand the service up — it only consumes the address.
     service_env: dict[str, str] | None = None
+
+    @model_validator(mode="after")
+    def _sge_mpi_requires_pe_name(self) -> BuildSubmitSpecInput:
+        """SGE has no generic MPI launcher flag — it routes by parallel environment.
+
+        Where SLURM derives the layout from ``--ntasks``/``--nodes`` and PBS
+        from ``select=``, SGE *must* be told which parallel environment to run
+        in (``-pe <pe_name> <ranks>``). Without a ``pe_name`` the backend would
+        emit no slot request and the job would land on a single slot — N ranks
+        oversubscribing one core. Refuse at the wire boundary; the resolver
+        fills ``pe_name`` from inspect-cluster's ``parallel_environments``
+        (the entries with ``kind="mpi"``).
+        """
+        if self.mpi is not None and self.backend == "sge" and not self.mpi.pe_name:
+            raise ValueError(
+                "backend='sge' with an mpi block requires mpi.pe_name — SGE "
+                "routes multi-rank jobs through a parallel environment "
+                "(`qsub -pe <pe_name> <ranks>`). Pick a PE with kind='mpi' from "
+                "inspect-cluster's parallel_environments (e.g. 'mpi', 'orte')."
+            )
+        return self
 
     @model_validator(mode="after")
     def _per_task_result_dir_isolation(self) -> BuildSubmitSpecInput:

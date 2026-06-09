@@ -816,9 +816,20 @@ def _make_single_array_submission(
     """
     backend._setup_log_dir()  # type: ignore[attr-defined]
     flags = backend.resource_flags(resources) + list(extra_flags or [])
-    cmd = backend._build_command(  # type: ignore[attr-defined]
-        f"1-{total_tasks}", job_name, job_env, extra_flags=flags
-    )
+    # #293: a single multi-rank MPI job is ONE job whose parallelism is the
+    # rank count, not a scheduler array. Submit it non-array (no --array/-t).
+    # An mpi block with total_tasks > 1 is the power-user array-of-MPI shape —
+    # each array element is itself multi-rank — so it keeps the array flag.
+    mpi = getattr(resources, "mpi", None) if resources is not None else None
+    single_mpi_job = mpi is not None and total_tasks == 1
+    if single_mpi_job:
+        cmd = backend._build_command(  # type: ignore[attr-defined]
+            None, job_name, job_env, extra_flags=flags, array=False
+        )
+    else:
+        cmd = backend._build_command(  # type: ignore[attr-defined]
+            f"1-{total_tasks}", job_name, job_env, extra_flags=flags
+        )
     result = backend._execute_command(cmd, job_env, cwd)  # type: ignore[attr-defined]
     if result.returncode != 0:
         stderr_msg = result.stderr.strip() if result.stderr else "(no stderr)"

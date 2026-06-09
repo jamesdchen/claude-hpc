@@ -5,6 +5,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.40 — 2026-06-09
+
+### Added — MPI / multi-rank submit spec, resource flags, and single-job template (#293 PR2)
+
+Second slice of the multi-rank workstream (#293). PR1 already taught `inspect-cluster` to enumerate `parallel_environments` (SGE PEs / SLURM partitions / PBS queues, tagged `kind=mpi|smp|other`); this PR lets a submit actually *request* a multi-rank job, where N ranks across M nodes are ONE unit of work rather than a fan-out of single-process tasks.
+
+- **New optional `mpi` block on the submit spec.** `SubmitResources.mpi` (`MpiSpec`) carries `{ranks, ranks_per_node?, threads_per_rank, launcher (srun|mpirun|aprun), pe_name?}`. The same model is reused verbatim on `build-submit-spec`'s input. A wire validator refuses a `ranks_per_node` that does not evenly divide `ranks` (no integral node count — the #293 coherence guard), and `build-submit-spec` refuses an SGE mpi block without a `pe_name` (SGE routes multi-rank work through a parallel environment, not a generic flag).
+- **`resource_flags` grows an MPI slot grammar**, reusing the existing per-family walltime/mem emitters so the two paths can't drift: SLURM `--nodes/--ntasks/--ntasks-per-node/--cpus-per-task`, SGE `-pe <pe_name> <ranks>`, PBS `select=<nodes>:ncpus=…:mpiprocs=…:ompthreads=…`. The single-node cpu/mem/cpus path is unchanged.
+- **A single multi-rank job is submitted non-array.** `_build_command` gained an `array=False` path (no `--array`/`-t`, SLURM logs switch `%A_%a`→`%j`); a submit with an `mpi` block and `total_tasks == 1` takes it. An `mpi` block with `total_tasks > 1` stays the array-of-MPI power-user shape.
+- **New `mpi` job template** per family (`render_script(kind="mpi")`, shipped as `.hpc/templates/mpi.{sh,slurm,pbs}`), built from one shared builder rather than four literals. It reuses the existing `hpc_preamble.sh` + `hpc_run_with_retry` unchanged — the only MPI-specific step folds the launcher + `$HPC_MPI_RANKS` into `$EXECUTOR`, so bounded retry / terminal-failure markers work identically. `build-submit-spec` selects it (over cpu/gpu array, independent of `is_gpu`) and stamps `HPC_MPI_RANKS` / `HPC_MPI_LAUNCHER` / `HPC_MPI_THREADS_PER_RANK`.
+- Tests: `tests/infra/backends/test_mpi.py` (per-family resource flags, non-array command path, `MpiSpec` guards), MPI golden fixtures in `test_render_script_golden.py`, and `TestMpiBlock` in `test_submit_spec.py` (template selection, env stamping, resources emission, SGE pe_name guard). Deploy-manifest counts updated for the third template.
+
 ## 0.10.39 — 2026-06-09
 
 ### Added — budget-halt acknowledgement + campaign-level per-task resubmit cap (#224)
