@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.22 — 2026-06-08
+
+### Added — submit-flow stamps run-constant `fixed_params` into `extra.spec_kwargs` so the #234 resolver's gpu_oom discriminator can fire (#240, #234, #195)
+
+The context-keyed resolver (#234) routes a `gpu_oom` to the *right* fix by reading parallelism/width knobs (`tp_size` / `batch_size` / `n` / …) out of the sidecar's free-form `extra.spec_kwargs` pocket (via `ops.recover.features_glue._resource_spec_from_sidecar`), but nothing populated that pocket on real runs — so the discriminator could never fire and every `gpu_oom` fell back to the flat `increase-mem-per-gpu`. submit-flow's `_ensure_run_sidecar` now reads the run's declared run-constant task kwargs and stamps them as `extra={"spec_kwargs": …}` on the synthesized per-run sidecar. The source is the persisted interview artifact `interview.json` at the experiment/campaign workdir root, key `entry_point.fixed_params` (the #195 non-axis params the interview bakes into every task's `resolve()` kwargs); `record_interview` persists the intent verbatim, so `fixed_params` round-trips there directly. **Soundness:** only the declared `fixed_params` are stamped — a per-task *swept* axis value is never run-constant and could route a wrong fix, so the reader deliberately reads only `fixed_params` and never the `task_generator` axes. The read is defensive (absent / unreadable / no-`entry_point` / no-`fixed_params` ⇒ a clean no-op, never an error), so a hand-written `tasks.py` run — which legitimately has no `fixed_params` — keeps working and simply ships no `spec_kwargs` (an accepted, documented limitation: such runs do not get the parallelism/width discriminator). The canary sidecar mirror (`_mirror_canary_sidecar`) copies the main sidecar's `extra` so canary failures discriminate too. **Control-plane only** — no wire surface changed (`SubmitFlowSpec` is untouched; this is an internal read at sidecar-write time), and the cluster-side dispatcher is not touched.
+
 ## 0.10.21 — 2026-06-08
 
 ### Added — resolve-and-recover auto-fire wires the #234 resolver into the recover path (#240, #234)
