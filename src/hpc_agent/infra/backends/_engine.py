@@ -214,7 +214,7 @@ class ProfileBackend(HPCBackend):
         return flags
 
     def _mpi_resource_flags(
-        self, mpi: object, *, walltime_sec: int | None, mem_mb: int | None
+        self, mpi: Any, *, walltime_sec: int | None, mem_mb: int | None
     ) -> list[str]:
         """Scheduler flags for a multi-rank job (#293).
 

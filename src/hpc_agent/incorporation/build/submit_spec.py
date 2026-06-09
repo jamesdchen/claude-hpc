@@ -371,7 +371,7 @@ def build_submit_spec(
     }
     if spec.result_dir_template is not None:
         out["result_dir_template"] = spec.result_dir_template
-    resources = {
+    resources: dict[str, Any] = {
         k: v
         for k, v in (
             ("walltime_sec", spec.walltime_sec),
