@@ -9,11 +9,13 @@ Design rules
 
 - **stdlib-only** — small text parsers have no business pulling in
   third-party deps. (An earlier framing claimed this module "ships to the
-  cluster"; verified false — ``deploy_runtime`` ships only ``dispatch.py``,
-  ``combiner.py``, ``metrics_io.py``, and the shell templates, and every
-  importer of this module — ``infra/inspect/*``, ``infra/backends/query``,
-  ``infra/gpu``, ``infra/constraints`` — is control-plane. The stdlib-only
-  rule stands on its own merits, not on a deployment constraint.)
+  cluster"; verified false — ``deploy_runtime`` ships only what
+  ``transport._build_deploy_items`` enumerates (``dispatch.py``,
+  ``combiner.py``, ``metrics_io.py``, ``executor_cli.py``, and the rendered
+  shell templates plus preambles), and every importer of this module —
+  ``infra/inspect/*``, ``infra/backends/query``, ``infra/gpu``,
+  ``infra/constraints`` — is control-plane. The stdlib-only rule stands on
+  its own merits, not on a deployment constraint.)
 - **permissive** — every parser degrades to ``None`` / ``0`` rather than
   raising on garbage input. Schedulers vary across versions; we surface
   a partial answer instead of refusing to parse.

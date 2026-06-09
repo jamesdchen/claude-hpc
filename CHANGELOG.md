@@ -5,6 +5,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.47 — 2026-06-09
+
+### Changed — CLAUDE.md retired: lessons solidified into infrastructure
+
+The repo's `CLAUDE.md` asserted three present-tense facts; an audit found two had silently rotted (`_FAILURE_CATEGORY_PATTERNS` was long gone — collapsed into `CLASSIFIER_CATEGORIES` — and the deploy-ship list omitted `executor_cli.py`), while every mechanized check from the same era still held. Conclusion applied: lessons that can fire live in CI; only irreducible judgment stays prose — and not in an auto-loaded file that restates checkable facts.
+
+- **`scripts/lint_library_knowledge.py` hardened** — three gaps closed, each with a firing test:
+  - the `from parent import package` alias form (`from hpc_agent.experiment_kit import solver_adapters`) bound the knowledge package invisibly to the lint, which only examined the `from` clause;
+  - relative imports were skipped wholesale on the false premise that they "stay inside their own package" — `from ..experiment_kit.solver_adapters import petsc` climbs parents; they are now resolved against the importing file's package;
+  - the **growth trigger is enforced, not remembered**: each knowledge package declares its registry assembly point; the moment the family has ≥ 2 member modules, any *other* assembly point still binding a member module by name fails with the collapse remediation. Inert at one member (today), fires the day adapter #2 lands.
+- **Question 4 enforced** (`tests/contract/test_no_heavy_toplevel_imports.py`): `petsc4py`/`mpi4py` join the banned module-level roots, and a new contract test asserts no banned library ever enters `pyproject.toml` dependencies or extras — core encodes library *knowledge* via crafted fixtures and must verify it without the library installed.
+- **Irreducible prose** (the "verify a guard can fire" heuristic, question 1, the case history) moved to `docs/internals/engineering-principles.md` with an enforcement map naming the lint/test holding each line, corrected facts (the standalone-ship list now cites its source of truth, `transport._build_deploy_items`, and includes `executor_cli.py` — also fixed in `infra/parsing.py`'s docstring), and a drift log recording why prose alone failed.
+- `CLAUDE.md` references in `scripts/lint_skills.py` and `tests/contract/test_lint_skills.py` re-pointed at the docs.
+
 ## 0.10.46 — 2026-06-09
 
 ### Added — the library-knowledge boundary: principle, enforcement lint, and a corrected misattribution
