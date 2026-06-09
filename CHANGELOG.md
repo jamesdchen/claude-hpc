@@ -5,6 +5,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.37 — 2026-06-09
+
+### Added — a deterministic, LLM-free campaign judgement resolver (#220 Phase 1)
+
+The headless campaign driver advances a judgement (`kind="agent"`) step through an injected `JudgementResolver`; the default (`default_judgement_resolver`) spawns a fresh-context LLM worker (`claude -p` via `run_workflow`). #220's goal is to decouple the driver from Claude so any agent — or no agent — can drive it. This lands Phase 1: a **`DeterministicCampaignResolver`** that executes the campaign `decide` / cold-`submit` judgement steps **in code** by chaining the existing deterministic primitives, with **zero worker/LLM spawn** on the common `decided_by="code"` path.
+
+- **New, injectable artifact — the default resolver is untouched (that's Phase 2).** A caller opts in by injecting it into `CampaignLoopConfig(resolver=...)`; the new `deterministic_campaign_config()` helper builds that config (default monitor/aggregate step table intact). It lives in `meta.campaign` because the dependency points campaign → drive (`drive.py` must not import campaign), mirroring how `driver.py` already supplies the loop's policy.
+- **The chain (verified against the on-disk primitives, not assumed).** For `decide`: `classify-campaign-path` (manual grid vs strategy) → `campaign-advance` (the deterministic stop/continue ladder) → on `continue`, reconstruct the next iteration's submit context from the prior run's journal record (`ssh_target`/cluster/profile/remote_path) + sidecar config snapshot (executor/result_dir_template/env-activation/resources/runtime), run `resolve-submit-inputs` to build + validate the submit-flow spec and write the per-run sidecar, submit via an injected cluster-I/O seam, then `advance_cursor`. The `prepare-followup-specs` hypothesis in the issue was wrong (it pre-stages *monitor/aggregate* specs at submit time, not the next-iteration submit); the actual bridge is `resolve-submit-inputs` → submit.
+- **Residue policy: halt-and-park, never guess (#231/#234/#240 posture).** When a backing primitive escalates — `classify-campaign-path` returns `unclassifiable` (`decided_by="judgement"`), `resolve-submit-inputs` returns `needs_decision` (live prior run / scaffold interview), or a cold submit has no prior run to rebuild from — the resolver surfaces the escalation as data in the synthesized `WorkerReport` and returns a non-zero exit so the neutral loop stops cleanly rather than blind-submitting. A non-`continue` `campaign-advance` decision (`stop_*`/`wait_in_flight`) is a *decided* clean terminal (exit 0), not residue.
+- **The synthesized `WorkerReport` is contract-valid:** it round-trips through `parse_worker_report`, reporting only `code`-decided points (no `why` required) — the same validation the LLM path's reports pass.
+- Tests: a new end-to-end suite (`tests/meta/campaign/test_deterministic_resolver_e2e.py`) drives the resolver over a seeded strategy-driven campaign and asserts the `continue`→next-submit path (cluster I/O stubbed, zero LLM spawn, cursor advanced), the unclassifiable-path and cold-submit residue cases (non-zero exit, escalation surfaced, no blind submit), the decided-stop clean terminal, and the report round-trip.
+
 ## 0.10.36 — 2026-06-09
 
 ### Added — surface the resolve-and-recover opt-in through the submit spec (#240, #234)
