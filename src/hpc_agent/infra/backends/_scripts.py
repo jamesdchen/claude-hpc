@@ -24,15 +24,18 @@ def _mpi_script(family: str) -> str:
     Unlike the ``*_CPU`` / ``*_GPU`` array bodies above, an MPI job is ONE
     unit of work spanning N ranks — there is no scheduler array index, so the
     body sets ``HPC_TASK_ID=0`` directly and reuses the shared preamble +
-    ``hpc_run_with_retry`` machinery unchanged. The only MPI-specific step is
-    folding the launcher (``srun`` / ``mpirun`` / ``aprun``) and the rank
-    count into ``$EXECUTOR`` before the retry helper runs it; the per-family
-    resource directives below are defaults that the submit-side
-    ``resource_flags`` (``--ntasks`` / ``-pe`` / ``select=``) overrides.
+    ``hpc_run_with_retry`` machinery unchanged. The launcher itself
+    (``srun`` / ``mpirun`` / ``aprun``) is applied by the dispatcher, which
+    prefixes the *per-task* command so its bookkeeping stays a single process
+    while the compute fans out to N ranks (see
+    ``hpc_agent.execution.mapreduce.dispatch._mpi_launch_prefix``). The
+    template therefore just runs the dispatcher once; the per-family resource
+    directives below are defaults the submit-side ``resource_flags``
+    (``--ntasks`` / ``-pe`` / ``select=``) overrides.
 
     A builder rather than four literal constants because the bodies differ
-    only in their directive block and PBS work-dir/log redirect — the launch
-    + run tail is identical, so duplicating it four times would be the kind of
+    only in their directive block and PBS work-dir/log redirect — the run
+    tail is identical, so duplicating it four times would be the kind of
     drift-prone copy the array templates already suffer.
     """
     if family == "slurm":
@@ -140,26 +143,17 @@ def _mpi_script(family: str) -> str:
         'export OMP_NUM_THREADS="${HPC_MPI_THREADS_PER_RANK:-${OMP_NUM_THREADS:-1}}"\n'
         'export MKL_NUM_THREADS="$OMP_NUM_THREADS"\n'
         "\n"
-        "# --- Wrap the executor in the MPI launcher ---\n"
-        "# Fold the launcher + rank count into $EXECUTOR so the existing\n"
-        "# hpc_run_with_retry (bounded retry + terminal-failure marker) runs the\n"
-        "# multi-rank command exactly as it runs a single-process one.\n"
-        '_mpi_ranks="${HPC_MPI_RANKS:-2}"\n'
-        'case "${HPC_MPI_LAUNCHER:-srun}" in\n'
-        '  srun)   EXECUTOR="srun --ntasks=${_mpi_ranks} ${EXECUTOR}" ;;\n'
-        '  mpirun) EXECUTOR="mpirun -np ${_mpi_ranks} ${EXECUTOR}" ;;\n'
-        '  aprun)  EXECUTOR="aprun -n ${_mpi_ranks} ${EXECUTOR}" ;;\n'
-        '  *) echo "[template] unknown HPC_MPI_LAUNCHER=${HPC_MPI_LAUNCHER}; expected srun|mpirun|aprun" >&2; exit 2 ;;\n'
-        "esac\n"
-        "export EXECUTOR\n"
-        "\n"
         "# --- Prepare Output ---\n"
         'mkdir -p "$RESULT_DIR"\n'
         'echo "Executor:     $EXECUTOR"\n'
         'echo "============================================"\n'
         "\n"
         "# --- Execute ---\n"
-        "export TASK_ID HPC_TASK_ID HPC_RUN_ID HPC_CAMPAIGN_ID RESULT_DIR HPC_MPI_RANKS\n"
+        "# Run the dispatcher once; it prefixes the per-task command with the\n"
+        "# launcher (HPC_MPI_LAUNCHER + HPC_MPI_RANKS) so a single bookkeeping\n"
+        "# process fans the compute out to N ranks. hpc_run_with_retry keeps the\n"
+        "# bounded retry + terminal-failure marker, identical to the array path.\n"
+        "export TASK_ID HPC_TASK_ID HPC_RUN_ID HPC_CAMPAIGN_ID RESULT_DIR HPC_MPI_RANKS HPC_MPI_LAUNCHER\n"
         "hpc_run_with_retry\n"
         "\n"
         'echo "Job finished."\n'

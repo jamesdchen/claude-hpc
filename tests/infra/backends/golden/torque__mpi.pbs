@@ -59,26 +59,17 @@ source "$REPO_DIR/.hpc/templates/common/hpc_preamble.sh"
 export OMP_NUM_THREADS="${HPC_MPI_THREADS_PER_RANK:-${OMP_NUM_THREADS:-1}}"
 export MKL_NUM_THREADS="$OMP_NUM_THREADS"
 
-# --- Wrap the executor in the MPI launcher ---
-# Fold the launcher + rank count into $EXECUTOR so the existing
-# hpc_run_with_retry (bounded retry + terminal-failure marker) runs the
-# multi-rank command exactly as it runs a single-process one.
-_mpi_ranks="${HPC_MPI_RANKS:-2}"
-case "${HPC_MPI_LAUNCHER:-srun}" in
-  srun)   EXECUTOR="srun --ntasks=${_mpi_ranks} ${EXECUTOR}" ;;
-  mpirun) EXECUTOR="mpirun -np ${_mpi_ranks} ${EXECUTOR}" ;;
-  aprun)  EXECUTOR="aprun -n ${_mpi_ranks} ${EXECUTOR}" ;;
-  *) echo "[template] unknown HPC_MPI_LAUNCHER=${HPC_MPI_LAUNCHER}; expected srun|mpirun|aprun" >&2; exit 2 ;;
-esac
-export EXECUTOR
-
 # --- Prepare Output ---
 mkdir -p "$RESULT_DIR"
 echo "Executor:     $EXECUTOR"
 echo "============================================"
 
 # --- Execute ---
-export TASK_ID HPC_TASK_ID HPC_RUN_ID HPC_CAMPAIGN_ID RESULT_DIR HPC_MPI_RANKS
+# Run the dispatcher once; it prefixes the per-task command with the
+# launcher (HPC_MPI_LAUNCHER + HPC_MPI_RANKS) so a single bookkeeping
+# process fans the compute out to N ranks. hpc_run_with_retry keeps the
+# bounded retry + terminal-failure marker, identical to the array path.
+export TASK_ID HPC_TASK_ID HPC_RUN_ID HPC_CAMPAIGN_ID RESULT_DIR HPC_MPI_RANKS HPC_MPI_LAUNCHER
 hpc_run_with_retry
 
 echo "Job finished."
