@@ -10,7 +10,7 @@ yields the **consumed** compute for a campaign:
 * ``walltime_sec``  — sum of per-task ``elapsed_sec``
 * ``core_hours``    — sum of ``elapsed_sec × effective_cores`` / 3600, where
   effective cores come from the same ``cpu_seconds_used / elapsed_sec``
-  estimate the planner uses (:func:`runtime_prior._cores_used_from_sample`);
+  estimate the planner uses (:func:`runtime_prior.cores_used_from_sample`);
   when a sample lacks ``cpu_seconds_used`` it contributes its walltime but
   NOT core-hours, and the run is flagged as partial-coverage for cores.
 * ``gpu_hours``     — sum of ``elapsed_sec`` for samples whose ``gpu_type``
@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from hpc_agent.state.runtime_prior import _cores_used_from_sample, read_samples
+from hpc_agent.state.runtime_prior import cores_used_from_sample, read_samples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -134,7 +134,7 @@ def consumed_compute_for_campaign(
             tasks_counted += 1
             total_walltime += elapsed
 
-            cores = _cores_used_from_sample(s, elapsed)
+            cores = cores_used_from_sample(s, elapsed)
             if cores is None:
                 tasks_missing_core += 1
             else:
@@ -143,8 +143,16 @@ def consumed_compute_for_campaign(
             if _is_gpu_type(s.get("gpu_type")):
                 total_gpu_hours += elapsed / 3600.0
 
-    runs_without_samples = [rid for rid in all_run_ids if rid not in runs_with_samples]
-    partial = bool(runs_without_samples) or tasks_missing_core > 0
+    # The two uncounted-run buckets are disjoint: ``runs_without_profile_cluster``
+    # is the legacy-sidecar bucket (no join key), so a run already recorded there
+    # is NOT repeated in ``runs_without_samples`` (which is "had a join key but no
+    # samples"). Keeping them disjoint lets a consumer sum the two without
+    # double-counting a single uncounted run.
+    _without_pc = set(runs_without_pc)
+    runs_without_samples = [
+        rid for rid in all_run_ids if rid not in runs_with_samples and rid not in _without_pc
+    ]
+    partial = bool(runs_without_samples) or bool(runs_without_pc) or tasks_missing_core > 0
 
     return {
         "walltime_sec": int(total_walltime),

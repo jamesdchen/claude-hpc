@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.31 — 2026-06-09
+
+### Fixed — campaign compute-spend coverage accounting (#224 follow-up)
+
+Two minor fixes to `consumed_compute_for_campaign` from review. (1) The two uncounted-run coverage buckets are now disjoint: a legacy sidecar with no `(profile, cluster)` join key was listed in **both** `runs_without_profile_cluster` and `runs_without_samples`, so a consumer summing the two double-counted it — `runs_without_samples` now excludes the legacy bucket, and `partial` independently accounts for `runs_without_profile_cluster` so an all-legacy campaign is still flagged partial (it previously could have read `partial: false`). (2) De-privatized the cross-package reach into `runtime_prior._cores_used_from_sample`: the effective-core estimate is now the public `runtime_prior.cores_used_from_sample` (in `__all__`), so the spend accounting consumes a supported surface instead of a private helper. No change to the spend numbers themselves.
+
 ## 0.10.30 — 2026-06-09
 
 ### Added — budget governor: real compute accounting for unattended campaigns (#224)
