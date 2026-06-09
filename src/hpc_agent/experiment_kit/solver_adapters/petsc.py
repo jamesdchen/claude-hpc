@@ -50,6 +50,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import struct
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,9 @@ __all__ = [
     "promote_restart",
     "petsc_checkpoint_path",
     "latest_petsc_checkpoint",
+    "latest_petsc_artifact",
+    "checkpoint_iteration_petsc",
+    "verify_petsc_binary",
     "make_checkpoint_monitor",
 ]
 
@@ -314,6 +318,123 @@ def latest_petsc_checkpoint(result_dir: str | os.PathLike[str] | None = None) ->
         if best is None or step > best[0]:
             best = (step, p)
     return best[1] if best else None
+
+
+def latest_petsc_artifact(
+    result_dir: str | os.PathLike[str] | None = None,
+) -> tuple[Path, int | None] | None:
+    """The newest PETSc checkpoint artifact across both instrumentation paths.
+
+    Returns ``(path, step)`` — ``step`` is None for wrapper-path dumps, whose
+    filenames carry no step index. Preference order: the highest-step
+    ``checkpoint-<n>.petscbin`` (monitor path), else a non-empty
+    ``petsc-solution.bin``, else a non-empty ``petsc-restart.bin`` (wrapper
+    path). The two paths come from different instrumentation modes and do not
+    normally coexist in one task dir.
+    """
+    stepped = latest_petsc_checkpoint(result_dir)
+    if stepped is not None:
+        it = checkpoint_iteration_petsc(stepped)
+        return stepped, it
+    d = checkpoint_dir(result_dir)
+    for name in (_WRAPPER_SOLUTION, _WRAPPER_RESTART):
+        p = d / name
+        try:
+            if p.is_file() and p.stat().st_size > 0:
+                return p, None
+        except OSError:
+            continue
+    return None
+
+
+def checkpoint_iteration_petsc(path: str | os.PathLike[str]) -> int | None:
+    """The step encoded in a ``checkpoint-<n>.petscbin`` filename, or None."""
+    m = _PETSC_CHECKPOINT_RE.match(Path(path).name)
+    return int(m.group(1)) if m else None
+
+
+# The 4-byte big-endian class id PETSc stamps at the start of every binary
+# Vec dump (VEC_FILE_CLASSID). A solution checkpoint — single dump or an
+# appended ``-ts_monitor_solution`` stream — is a sequence of
+# ``[classid:int32][nrows:int32][nrows * scalar]`` blocks.
+_PETSC_VEC_CLASSID = 1211214
+
+# Bytes per scalar by PETSc build flavor: double (the default), single,
+# double-complex. The verifier tries each — a file is structurally sound
+# under whichever flavor wrote it.
+_PETSC_SCALAR_SIZES = (8, 4, 16)
+
+
+def verify_petsc_binary(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Structurally verify a PETSc binary Vec dump; never imports petsc4py.
+
+    The honest contract: without PETSc we cannot *load* the Vec, but we can
+    verify the dump is well-formed — the Vec class id, a sane row count, and
+    block sizes that walk the file. That distinguishes "the monitor wrote a
+    real PETSc dump" from "an empty/garbage/foreign file", which is what the
+    checkpoint canary needs to know before the main array launches. Hence
+    ``level: "structural"`` in the verdict (the pickle path reports
+    ``"loadable"`` — it actually deserializes).
+
+    A trailing partial block after at least one complete block is still
+    ``ok`` (a preemption kill mid-append; the complete prefix is what a
+    restart reads), with the truncation noted in ``detail``.
+    """
+    try:
+        data = Path(path).read_bytes()
+    except OSError as exc:
+        return {"status": "unloadable", "level": "structural", "detail": f"unreadable: {exc}"}
+    if len(data) < 8:
+        return {
+            "status": "unloadable",
+            "level": "structural",
+            "detail": f"{len(data)} bytes — shorter than one Vec header",
+        }
+
+    best_partial: tuple[int, int] | None = None  # (complete_blocks, scalar_size)
+    for scalar_size in _PETSC_SCALAR_SIZES:
+        complete = 0
+        offset = 0
+        while offset + 8 <= len(data):
+            classid, nrows = struct.unpack_from(">ii", data, offset)
+            if classid != _PETSC_VEC_CLASSID or nrows < 1:
+                break
+            block_end = offset + 8 + nrows * scalar_size
+            if block_end > len(data):
+                break  # partial trailing block (killed mid-append)
+            complete += 1
+            offset = block_end
+        if complete >= 1 and offset == len(data):
+            return {
+                "status": "ok",
+                "level": "structural",
+                "detail": (
+                    f"{complete} complete Vec block(s), {scalar_size}-byte scalars, "
+                    "no trailing garbage"
+                ),
+            }
+        if complete >= 1 and (best_partial is None or complete > best_partial[0]):
+            best_partial = (complete, scalar_size)
+
+    if best_partial is not None:
+        complete, scalar_size = best_partial
+        return {
+            "status": "ok",
+            "level": "structural",
+            "detail": (
+                f"{complete} complete Vec block(s) ({scalar_size}-byte scalars) followed "
+                "by a truncated block — consistent with a preemption kill mid-append; "
+                "the complete prefix is restorable"
+            ),
+        }
+    return {
+        "status": "unloadable",
+        "level": "structural",
+        "detail": (
+            f"no PETSc Vec block found (first 8 bytes do not carry "
+            f"VEC_FILE_CLASSID={_PETSC_VEC_CLASSID} + a positive row count)"
+        ),
+    }
 
 
 def _binary_viewer(path: Path) -> Any:

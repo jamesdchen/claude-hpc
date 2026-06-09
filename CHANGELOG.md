@@ -5,6 +5,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.45 — 2026-06-09
+
+### Added — format-aware checkpoint verification + resume (petsc_binary round-trips end to end)
+
+0.10.44's PETSc adapter introduced a second on-disk checkpoint format; the canary verifier and the dispatcher's resume-point finder were still pickle-only, so a petsc run's checkpoints were invisible to both. This closes that gap with a format seam:
+
+- **New `experiment_kit/checkpoint_formats.py`** — the format-agnostic contract (`CheckpointFormat`: discover newest artifact + verify one) and the assembly of known formats. `describe_latest_checkpoint()` finds the newest artifact across formats (mtime, ties to format order) and returns the probe verdict: `{status, path, format, level, ...}`. The `pickle` entry preserves the historical probe semantics verbatim (newest file reported; loading walks newest→oldest, so one corrupt file doesn't fail the verdict; `level: "loadable"`, `next_iteration` present). The `petsc_binary` entry delegates to the adapter. Boundary: this assembly list is the ONE core location that names adapter formats; everything PETSc-specific stays in `solver_adapters/petsc.py`.
+- **Adapter-owned structural verifier** — `verify_petsc_binary()` walks the PETSc binary Vec block structure (`VEC_FILE_CLASSID` + row count + per-flavor scalar sizes: double/single/complex) without importing petsc4py. Honesty contract: `level: "structural"` — it proves "a well-formed PETSc dump", not a reload (which would need the solver library the probe env may lack). A truncated trailing block after ≥1 complete block is still `ok` (preemption kill mid-append; the complete prefix is restorable). `latest_petsc_artifact()` discovers across both instrumentation paths (stepped monitor dumps, then wrapper `petsc-solution.bin`/`petsc-restart.bin`).
+- **`verify-canary --verify-checkpoint` is format-aware** — the remote probe snippet now calls `describe_latest_checkpoint` (with a verbatim pickle-only fallback under `except ImportError`, so a new control plane still verifies runs on an older cluster-env hpc-agent), and the ok/unloadable verdicts surface the format and proof level (`resumes at iteration N` for pickle; `verified structurally: <detail>` for petsc_binary).
+- **Cluster-side dispatcher resume widened** — `_hpc_dispatch.py`'s stdlib `_latest_checkpoint` now also scans `checkpoint-<n>.petscbin`, so a resumed petsc4py executor gets a concrete `HPC_RESUME_FROM` on `resubmit --from-checkpoint`. Equal-iteration ties resolve to pickle deterministically (listdir order is arbitrary; pre-petsc behavior preserved). Wrapper-path dumps are deliberately NOT scanned — the instrumented wrapper rotates and consumes those itself and never reads `HPC_RESUME_FROM`.
+- Tests: the format seam (`test_checkpoint_formats.py`: per-format verdicts, mtime tie-break, JSON-serializable output, stable format names), structural-verifier rules (multi-block, truncated tail, scalar flavors, garbage rejection), dispatcher petscbin scan + tie determinism, and petsc-format canary verdicts.
+
 ## 0.10.44 — 2026-06-09
 
 ### Added — PETSc solver adapter: checkpoint injection for library-owned loops (#294 follow-up)
