@@ -508,6 +508,9 @@ def test_worker_output_schema_on_returns_minified_schema(
     assert schema is not None
     assert "WorkerReport" in schema and '"decisions"' in schema
     assert "\n" not in schema  # minified for argv
+    # Claude binds the LENIENT worker.output.json, not the strict variant — the
+    # deliberate #269 asymmetry (claude's strictness requirement is unconfirmed).
+    assert '"additionalProperties":false' not in schema
 
 
 def test_off_value_disables_schema(monkeypatch: pytest.MonkeyPatch) -> None:
