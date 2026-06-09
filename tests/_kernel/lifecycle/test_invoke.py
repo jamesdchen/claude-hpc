@@ -704,6 +704,24 @@ def test_codex_missing_credential_remediation_message_when_absent(
     assert "OPENAI_API_KEY" in msg
 
 
+def test_codex_scoped_key_authenticates_child_via_openai_api_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Codex authenticates from OPENAI_API_KEY (or a stored ChatGPT login), NOT
+    # CODEX_API_KEY — which is only an hpc-agent-side name. The driver must map
+    # the scoped CODEX_API_KEY onto the child's OPENAI_API_KEY, and it must WIN
+    # over any ambient OPENAI_API_KEY / stored login the guard exists to bypass
+    # (#3286). Otherwise the guard passes but Codex never sees the scoped key.
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex-scoped")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-ambient-would-shadow")
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _codex_capture_run(seen))
+    CodexCliInvoker().invoke(RenderedPrompt("P", "S"), cwd=tmp_path)
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env["OPENAI_API_KEY"] == "sk-codex-scoped"
+
+
 # ─── Gemini CLI invoker ─────────────────────────────────────────────────────
 
 

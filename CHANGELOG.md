@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.32 — 2026-06-09
+
+### Fixed — Codex worker authenticates with the scoped key (#305)
+
+The `codex-cli` worker invoker gated its pre-spawn guard and auto-selection on `CODEX_API_KEY`, but Codex itself does not read that variable — it authenticates from `OPENAI_API_KEY` or a stored ChatGPT login in `~/.codex/auth.json`. The driver passed the environment through unchanged, so a worker selected on `CODEX_API_KEY` (the documented primary path) never conveyed that key to Codex: it silently fell back to an ambient `OPENAI_API_KEY` or the stored ChatGPT login — exactly the shadow hazard ([codex #3286](https://github.com/openai/codex/issues/3286)) the scoped key exists to avoid. The guard would pass while the worker authenticated with the wrong credential (or none). The invoker now maps `CODEX_API_KEY` onto the child's `OPENAI_API_KEY`, overriding any ambient value so the scoped key both authenticates the worker and out-ranks a stored login. The Gemini and Claude paths and the fence/sandbox/argv posture are unchanged.
+
 ## 0.10.31 — 2026-06-09
 
 ### Fixed — campaign compute-spend coverage accounting (#224 follow-up)

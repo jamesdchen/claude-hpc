@@ -114,8 +114,10 @@ _MISSING_CREDENTIAL_REMEDIATION = (
 # Codex worker auth. ``CODEX_API_KEY`` is scoped to the invocation and is
 # preferred over ambient ``OPENAI_API_KEY``: a stored ChatGPT login in
 # ``~/.codex/auth.json`` can shadow ``OPENAI_API_KEY`` (#3286), so relying on
-# the ambient key is fragile. The driver requires ``CODEX_API_KEY`` and passes
-# it explicitly into the child's environment.
+# the ambient key is fragile. The driver requires ``CODEX_API_KEY`` and maps it
+# onto ``OPENAI_API_KEY`` in the child's environment (the var Codex actually
+# reads), so the scoped key authenticates the worker and out-ranks any ambient
+# key or stored ChatGPT login.
 _CODEX_CREDENTIAL_ENV_VAR = "CODEX_API_KEY"
 _CODEX_MISSING_CREDENTIAL_REMEDIATION = (
     "worker authentication unavailable: the headless `codex exec` worker needs "
@@ -715,6 +717,17 @@ class CodexCliInvoker:
         # not surface a cache-creation/cache-read split at the CLI layer, so
         # cache_stats stays None regardless.
         env = {**os.environ}
+        # Codex authenticates from ``OPENAI_API_KEY`` (or a stored ChatGPT login
+        # in ``~/.codex/auth.json``) — it does NOT read ``CODEX_API_KEY``, which
+        # is an hpc-agent-side name for the invocation-scoped key. Map it onto
+        # ``OPENAI_API_KEY`` in the child so the scoped key actually authenticates
+        # the worker AND out-ranks any ambient ``OPENAI_API_KEY`` / stored
+        # ChatGPT login that would otherwise shadow it (#3286). Without this the
+        # auth guard passes (``CODEX_API_KEY`` present) yet Codex silently falls
+        # back to the very credential the guard exists to bypass.
+        codex_key = os.environ.get(_CODEX_CREDENTIAL_ENV_VAR)
+        if codex_key:
+            env["OPENAI_API_KEY"] = codex_key
         with tempfile.TemporaryDirectory(prefix="hpc-agent-codex-") as work_dir:
             rules_file = Path(work_dir) / "cluster_ops.rules"
             rules_file.write_text(_codex_execpolicy_rules(), encoding="utf-8")
