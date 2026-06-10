@@ -1,4 +1,4 @@
-# Proposal: the experiment-agnostic DAG kernel
+# Design: the experiment-agnostic DAG kernel
 
 Status: **landed through wiring step 4** (0.10.51). Recursive identity
 (`compose_node_sha` in `state.run_sha`, property suite
@@ -31,10 +31,10 @@ two failure modes:
    artifact lineage, journal-authoritative terminal lifecycle, canonical
    content-hash identity — get re-invented instead of generalized.
 
-This proposal records the residue: apply the boundary test to inter-run
+This page records the residue: apply the boundary test to inter-run
 dependency and keep exactly what survives. The answer is four pieces,
 three of which exist in linear (campaign) form. One — recursive
-identity — existed in no form, and is the prototype this proposal lands,
+identity — existed in no form, and landed first,
 because without it the other three are unsafe to build: memoized resume
 over a run graph that keys nodes by bare `cmd_sha` silently reuses a
 stale child when an ancestor's params change.
@@ -43,10 +43,10 @@ stale child when an ancestor's params change.
 
 | Piece | Core knows | Status |
 |---|---|---|
-| Partial order | node = a submit spec; edge = "before". Pure graph structure. | missing — campaign order is linear (`prior_records` index) |
-| Readiness | "every parent reached an authoritative terminal lifecycle" (journal, not the filesystem `complete` flag) | exists per-run (`mark-run-terminal`, `monitor-flow` wait-terminal); missing the ∀-parents quantifier |
-| Lineage | hand a node its parents' `run_id`s + `result_dirs` as opaque paths | exists linearly (`prior_records()["result_dirs"]`); list → set-of-parents adds no semantics |
-| Recursive identity | `node_sha = H(canonical({node: cmd_sha, parents: sorted(set(parent node_shas))}))` | **landed** — `compose_node_sha`, unwired |
+| Partial order | node = a submit spec; edge = "before" (`parents` on `SubmitFlowSpec`). Pure graph structure. | edge declaration landed; graph *walking* stays caller-side (step 5) |
+| Readiness | "every parent reached an authoritative terminal lifecycle" (journal, not the filesystem `complete` flag) | landed — `validate-parents-ready`, the ∀-parents quantifier over `mark-run-terminal`-style per-run lifecycle |
+| Lineage | hand a node its parents' `run_id`s + `result_dirs` as opaque paths | landed — `parent_records()`, the explicit-set sibling of `prior_records()` |
+| Recursive identity | `node_sha = H(canonical({node: cmd_sha, parents: sorted(set(parent node_shas))}))` | landed — `compose_node_sha`, wired through `resolve_node_sha` → sidecar → dedup |
 
 Everything outside the table is irreducibly caller-owned and must stay
 out of core:
@@ -75,8 +75,7 @@ key-sorting, no parameter meaning; Q3: stdlib-only; Q4: testable with
 synthetic digests).
 
 `compose_node_sha(cmd_sha, parent_node_shas)` is the Merkle step. Pinned
-properties (the property suite is the contract while the function is
-unwired):
+properties (`tests/state/test_node_sha_properties.py`):
 
 - **0-parent degeneracy**: `compose_node_sha(c, []) == c`. Every
   existing run is a 0-parent node; today's dedup keys, sidecars, and
@@ -141,7 +140,7 @@ structure, there a linear iteration order, here an ancestry.
 - No retry/backfill policy at the graph level (mirrors the campaign
   loop's deliberate no-auto-retry stance).
 - No early-kill interaction (#228 unchanged).
-- Nothing in this proposal privileges any experiment vocabulary — a PR
+- Nothing in this design privileges any experiment vocabulary — a PR
   adding a typed inter-stage payload fails review by Q1 regardless of
   what this doc says.
 
@@ -159,7 +158,7 @@ structure, there a linear iteration order, here an ancestry.
 ## Related
 
 - [`campaign-seam.md`](../design/campaign-seam.md) — the exclusion this
-  proposal scopes; seam pieces 1–3 (trial_token, iteration salt,
+  page scopes; seam pieces 1–3 (trial_token, iteration salt,
   `prior_records`)
 - [`engineering-principles.md`](../internals/engineering-principles.md) —
   the boundary test applied throughout

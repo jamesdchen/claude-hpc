@@ -669,7 +669,7 @@ def _ensure_run_sidecar(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
         resources=resources or None,
         parent_run_ids=spec.parents or None,
         # Derived from the parents' on-disk sidecars (recursive identity,
-        # docs/proposals/dag-kernel.md). SpecInvalid on a missing parent or a
+        # docs/design/dag-kernel.md). SpecInvalid on a missing parent or a
         # non-64-hex cmd_sha — a parented run needs full parameter identity.
         node_sha=resolve_node_sha(
             experiment_dir, cmd_sha=cmd_sha, parent_run_ids=spec.parents or None

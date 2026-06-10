@@ -451,7 +451,7 @@ def resolve_node_sha(
     """Compose this run's DAG-node identity from its parents' sidecars.
 
     The submit-side half of the recursive-identity invariant
-    (``docs/proposals/dag-kernel.md``): a run that declares
+    (``docs/design/dag-kernel.md``): a run that declares
     *parent_run_ids* gets identity
     ``compose_node_sha(cmd_sha, [parent identities...])``, where each
     parent's identity is its sidecar's recorded ``node_sha`` — or its
@@ -579,7 +579,7 @@ def find_run_by_cmd_sha(
     by the journal ``run_id`` path, not here.
 
     *node_sha* is the DAG-lineage identity lever
-    (``docs/proposals/dag-kernel.md``). Both sides of the comparison use
+    (``docs/design/dag-kernel.md``). Both sides of the comparison use
     the run's EFFECTIVE identity — its recorded ``node_sha`` when it
     declared parents, its bare ``cmd_sha`` otherwise (the 0-parent
     degeneracy makes these the same thing for parentless runs):

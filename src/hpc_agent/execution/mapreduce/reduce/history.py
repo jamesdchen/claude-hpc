@@ -239,7 +239,7 @@ def parent_records(
     """Per-parent records for an explicitly-declared dependency set.
 
     The lineage accessor of the DAG kernel
-    (``docs/proposals/dag-kernel.md``): where :func:`prior_records` walks
+    (``docs/design/dag-kernel.md``): where :func:`prior_records` walks
     a campaign's iterations (an implicit linear order), this resolves the
     exact runs a child declared as ``parents`` on its submit spec —
     typically read by the child's ``tasks.py`` at module load to locate

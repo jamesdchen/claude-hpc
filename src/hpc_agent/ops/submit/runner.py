@@ -178,7 +178,7 @@ def submit_and_record(
         sidecar_path = find_run_by_cmd_sha(
             experiment_dir,
             cmd_sha,
-            # DAG lineage (docs/proposals/dag-kernel.md): when the caller
+            # DAG lineage (docs/design/dag-kernel.md): when the caller
             # composed a node_sha (params + ancestry), the lookup keys on
             # the effective identity so a parented submit never dedups
             # against a run computed from different/changed parents. None

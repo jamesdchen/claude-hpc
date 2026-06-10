@@ -102,7 +102,7 @@ def compose_node_sha(cmd_sha: str, parent_node_shas: list[str]) -> str:
     """Compose a run's parameter identity with its parents' identities.
 
     The recursive-identity invariant for inter-run dependency (the
-    ``docs/proposals/dag-kernel.md`` prototype): when run B consumes run
+    ``docs/design/dag-kernel.md`` prototype): when run B consumes run
     A's outputs, B's dedup identity must change whenever A's does —
     otherwise a re-submit of B dedups against a result computed from a
     *different* A, silently. ``compose_node_sha`` is the Merkle step that
@@ -123,10 +123,12 @@ def compose_node_sha(cmd_sha: str, parent_node_shas: list[str]) -> str:
 
     Like :func:`compute_cmd_sha`, this is parameter identity, not code
     identity (#207): the parent digests fold in the parents' *params*,
-    never their executor bytes. NOT yet wired into
-    ``find_run_by_cmd_sha`` / sidecars — submits remain keyed by bare
-    ``cmd_sha`` until the kernel proposal lands a ``parents`` field on the
-    submit spec.
+    never their executor bytes. Wired in via
+    :func:`hpc_agent.state.runs.resolve_node_sha` (submit-side derivation
+    from parents' sidecars) and the ``node_sha`` lever on
+    :func:`hpc_agent.state.runs.find_run_by_cmd_sha` (effective-identity
+    dedup); a submit that declares no ``parents`` never reaches the
+    composed branch.
 
     Raises :class:`ValueError` if *cmd_sha* or any parent is not a 64-char
     lowercase hex digest — these strings are produced by this module's own

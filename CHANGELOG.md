@@ -5,11 +5,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.52 — 2026-06-10
+
+### Changed — DAG kernel doc promoted from proposal to design record
+
+With the kernel's code live (0.10.51), `docs/proposals/dag-kernel.md` was stale paper — a "proposal" for shipped behavior. Promoted to [`docs/design/dag-kernel.md`](docs/design/dag-kernel.md) with an implemented status, following the `campaign-seam.md` precedent (implemented designs live in `docs/design/`, proposals are for unshipped work). Every reference repointed (docstrings, primitive doc, tests, regenerated schema descriptions, earlier CHANGELOG links), and two stale in-doc claims fixed: the kernel table and `compose_node_sha`'s docstring still described the identity function as "unwired" — it is wired through `resolve_node_sha` → sidecar → dedup since 0.10.51.
+
 ## 0.10.51 — 2026-06-10
 
 ### Added — DAG kernel wired in: lineage, identity, readiness (steps 1–4)
 
-The `docs/proposals/dag-kernel.md` wiring plan, landed up to the caller-side topology step. A run may now declare `parents` (run_ids whose outputs it consumes) on `SubmitFlowSpec`; the four pieces that follow are all experiment-agnostic (paths and lifecycle, never content):
+The `docs/design/dag-kernel.md` wiring plan, landed up to the caller-side topology step. A run may now declare `parents` (run_ids whose outputs it consumes) on `SubmitFlowSpec`; the four pieces that follow are all experiment-agnostic (paths and lifecycle, never content):
 
 - **Identity** — at sidecar-write, `state.runs.resolve_node_sha` reads each parent's recorded identity (its `node_sha`, else bare `cmd_sha`) and composes this run's `node_sha` via `compose_node_sha`. `node_sha` + `parent_run_ids` persist as additive v2 sidecar fields. Identity is *derived* from on-disk sidecars, never caller-asserted (a supplied `node_sha` could decouple a child from its real ancestry); a missing parent or a non-64-hex digest raises `SpecInvalid`.
 - **Dedup** — `find_run_by_cmd_sha` gained a `node_sha` arg and matches on the *effective* identity (`node_sha or cmd_sha`) on both sides. A parented re-submit dedups only against the same params AND ancestry, so a stale child computed from a since-changed parent is never replayed; a bare query skips parented sidecars. `node_sha=None` (every pre-DAG caller) is byte-for-byte the historical bare-`cmd_sha` path. Threaded through `submit_flow` → `submit_and_record` behind the same opt-in gate as the #207 code-drift lever.
@@ -22,7 +28,7 @@ The 0-parent degeneracy means a submit that declares no `parents` is unchanged: 
 
 ### Added — DAG-kernel proposal + recursive-identity prototype
 
-[`docs/proposals/dag-kernel.md`](docs/proposals/dag-kernel.md) scopes what survives the four-question boundary test for inter-run dependency (revisiting `campaign-seam.md`'s "true DAG pipelines" exclusion as a spec, not a feature): partial order over opaque submit specs, parent-quantified readiness, set-valued lineage, recursive identity. Edge meaning, conditional topology (`total() == 0` stays the agnostic veto), and stage vocabulary remain caller-owned.
+[`docs/design/dag-kernel.md`](docs/design/dag-kernel.md) scopes what survives the four-question boundary test for inter-run dependency (revisiting `campaign-seam.md`'s "true DAG pipelines" exclusion as a spec, not a feature): partial order over opaque submit specs, parent-quantified readiness, set-valued lineage, recursive identity. Edge meaning, conditional topology (`total() == 0` stays the agnostic veto), and stage vocabulary remain caller-owned.
 
 Of the four, only recursive identity existed in no form, and the other three are unsafe to wire without it: bare-`cmd_sha` dedup over a run graph replays a stale child after an ancestor's params change. Landed as `state.run_sha.compose_node_sha` — the Merkle step over canonical JSON, with 0-parent degeneracy (`node_sha == cmd_sha`, so no existing run's identity changes), set semantics for parents, and ancestor propagation, pinned by a Hypothesis property suite (`tests/state/test_node_sha_properties.py`). **Deliberately unwired**: submits still key dedup on bare `cmd_sha` until the proposal's `parents` field lands on the submit spec.
 

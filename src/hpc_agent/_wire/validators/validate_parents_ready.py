@@ -1,7 +1,7 @@
 """Wire model for the ``validate-parents-ready`` atom.
 
 The readiness piece of the DAG kernel
-(``docs/proposals/dag-kernel.md``): a run that declares ``parents`` on
+(``docs/design/dag-kernel.md``): a run that declares ``parents`` on
 its submit spec consumes those runs' outputs, so submitting before
 every parent reached terminal-success reads partial or absent results
 — silently, since the child's tasks materialize from whatever the

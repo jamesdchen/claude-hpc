@@ -1,7 +1,7 @@
 """Property-based tests for ``compose_node_sha``.
 
 The function is the recursive-identity step of the DAG-kernel proposal
-(``docs/proposals/dag-kernel.md``): a run that consumes another run's
+(``docs/design/dag-kernel.md``): a run that consumes another run's
 outputs must change identity whenever its ancestor does, or memoized
 resume over a run graph silently reuses stale subgraphs. The properties
 pinned here are the entire contract — the function is not yet wired into

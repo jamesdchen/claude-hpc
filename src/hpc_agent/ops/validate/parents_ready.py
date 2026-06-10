@@ -1,6 +1,6 @@
 """``validate-parents-ready`` primitive — pre-submit DAG readiness check.
 
-The readiness piece of the DAG kernel (``docs/proposals/dag-kernel.md``):
+The readiness piece of the DAG kernel (``docs/design/dag-kernel.md``):
 "every parent reached an authoritative terminal lifecycle" — the
 ∀-parents quantifier over the per-run machinery that already exists
 (sidecars for existence, the journal for lifecycle). A child submitted

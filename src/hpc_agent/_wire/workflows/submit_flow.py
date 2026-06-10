@@ -299,7 +299,7 @@ class SubmitFlowSpec(BaseModel):
         min_length=1,
         description=(
             "Run_ids whose outputs this run consumes (DAG lineage, "
-            "docs/proposals/dag-kernel.md). Each must have a local sidecar "
+            "docs/design/dag-kernel.md). Each must have a local sidecar "
             "under .hpc/runs/. The framework records them as "
             "parent_run_ids on this run's sidecar and derives node_sha = "
             "compose_node_sha(cmd_sha, parent identities) so dedup keys on "

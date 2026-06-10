@@ -1,4 +1,4 @@
-"""Wiring tests for DAG-node identity (``docs/proposals/dag-kernel.md``).
+"""Wiring tests for DAG-node identity (``docs/design/dag-kernel.md``).
 
 ``compose_node_sha``'s algebra is pinned by
 ``test_node_sha_properties.py``; this file pins the wiring around it:

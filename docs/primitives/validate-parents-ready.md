@@ -12,7 +12,7 @@ backed_by:
 # validate-parents-ready
 
 Pre-submit DAG readiness check (the readiness piece of
-[`docs/proposals/dag-kernel.md`](../proposals/dag-kernel.md)): every run_id the
+[`docs/design/dag-kernel.md`](../design/dag-kernel.md)): every run_id the
 about-to-submit spec declares in `parents` must have reached terminal-success
 (`complete` in the journal). A child submitted earlier materializes its tasks
 from partial or absent parent outputs — silently, because the child's
