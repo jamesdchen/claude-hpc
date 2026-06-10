@@ -5,6 +5,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.58 — 2026-06-10
+
+### Changed — `--json-schema` worker output constraint is the default for Claude workers (#269)
+
+The decode-time output constraint shipped opt-in because two questions were unanswerable offline (no worker credentials in the build sandbox). A live `claude -p` validation run (2026-06-10, Claude CLI 2.1.170) answered both, on the first attempt, twice:
+
+- **Composition** — `--json-schema` constrains only the worker's *final* message: the worker executed a deterministic 3-step tool sequence (write file / read back / write transform — observable side effects on disk) and then emitted the schema-shaped report, with a token round-trip binding the constrained decode to work actually done in the loop.
+- **Schema acceptance** — the CLI accepted the **lenient** `worker.output.json` (`additionalProperties: true`, no `required`) directly; the pre-authored strict variant was never needed for Claude (it remains Codex's shape, where `--output-schema` documents the strict requirement).
+
+The harness is committed as `scripts/validate_worker_json_schema.py`: it exercises the production spawn path (`_run_claude_worker` argv assembly, temp-file + stdin prompt transport, JSON result-envelope unwrap) with the production schema loader, gives the worker a multi-step task with observable side effects, and verifies exit code, both side-effect files, schema validity of the final message (`WorkerReport.model_validate`), and the token round-trip — rerunnable for future CLI upgrades (`--mode bare|ambient` for API-key vs environment-managed auth).
+
+The flip itself, per the #269 spec: `_worker_output_schema()` treats unset as **enabled** (`_decode_schema_enabled` gained a per-gate `default`), keeping `HPC_AGENT_WORKER_JSON_SCHEMA=0` as the documented off-switch back to the plain transport. `parse_worker_report`'s cross-field floor is unchanged — structural complement, not substitute. Per the per-harness discipline the gate split exists for, **Codex's `HPC_AGENT_CODEX_OUTPUT_SCHEMA` stays off by default** — it has had no live run; that residual half stays tracked in #269. Exact-argv tests now pin `--output-format json --json-schema <minified schema>` on the default Claude spawn (both the `--bare` and OAuth paths); the plain-transport test pins the off-switch; the #169 large-prompt argv guard exempts only the fixed ~2KB schema constant. `docs/reference/env-vars.md` updated to match.
+
 ## 0.10.57 — 2026-06-10
 
 ### Added — the DAG walker's mechanical halves: readiness gate in submit-pipeline + dag-frontier

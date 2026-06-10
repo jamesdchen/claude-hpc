@@ -396,23 +396,33 @@ def _extract_cache_stats(envelope: dict[str, object]) -> dict[str, int] | None:
 # unvalidated harness on as a side effect of validating another.
 #
 #   * Claude ``--json-schema`` → ``HPC_AGENT_WORKER_JSON_SCHEMA``. Emits the
-#     *lenient* ``worker.output.json``: whether claude's mode requires a strict
-#     schema is the open #269 question, unanswerable offline, so the lenient
-#     shape stays until the live ``claude -p --json-schema`` run confirms.
+#     *lenient* ``worker.output.json``. **ON by default** since the #269 live
+#     validation run (2026-06-10, ``scripts/validate_worker_json_schema.py``):
+#     ``--json-schema`` composes with the multi-step agent tool loop (only the
+#     final message is decode-constrained) and the CLI accepts the lenient
+#     shape (``additionalProperties: true``, no ``required``). Set
+#     ``HPC_AGENT_WORKER_JSON_SCHEMA=0`` to fall back to the plain transport.
 #   * Codex ``--output-schema`` → ``HPC_AGENT_CODEX_OUTPUT_SCHEMA``. Emits the
 #     *API-strict* ``worker.strict.output.json``: Codex's ``--output-schema``
 #     documents that it requires the strict shape (``additionalProperties:false``
 #     + all-required), so binding the lenient floor schema was a latent bug.
-#
-# Both are OFF by default; the plain text transport is otherwise untouched.
-# Making either the default once live-validated is tracked in issue #269.
+#     Still OFF by default — the validation is per-harness and Codex has had no
+#     live run; making it the default stays tracked in issue #269.
 _WORKER_JSON_SCHEMA_ENV = "HPC_AGENT_WORKER_JSON_SCHEMA"
 _CODEX_OUTPUT_SCHEMA_ENV = "HPC_AGENT_CODEX_OUTPUT_SCHEMA"
 
 
-def _decode_schema_enabled(env_var: str) -> bool:
-    """Whether the decode-schema gate named by *env_var* is turned on."""
-    return os.environ.get(env_var, "").strip().lower() in {"1", "true", "yes", "on"}
+def _decode_schema_enabled(env_var: str, *, default: bool = False) -> bool:
+    """Whether the decode-schema gate named by *env_var* is turned on.
+
+    Unset (or blank) means *default*; any explicit value is parsed strictly —
+    only ``1``/``true``/``yes``/``on`` enable, everything else (``0``, ``false``,
+    …) disables, so the documented off-switch works on a default-on gate.
+    """
+    value = os.environ.get(env_var, "").strip()
+    if not value:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
 
 
 def _load_schema_resource(resource: str) -> str | None:
@@ -434,9 +444,10 @@ def _load_schema_resource(resource: str) -> str | None:
 def _worker_output_schema() -> str | None:
     """The lenient WorkerReport schema (minified) for Claude ``--json-schema``.
 
-    ``None`` when ``HPC_AGENT_WORKER_JSON_SCHEMA`` is off (the default).
+    On by default (live-validated, #269); ``None`` when
+    ``HPC_AGENT_WORKER_JSON_SCHEMA=0`` opts back into the plain transport.
     """
-    if not _decode_schema_enabled(_WORKER_JSON_SCHEMA_ENV):
+    if not _decode_schema_enabled(_WORKER_JSON_SCHEMA_ENV, default=True):
         return None
     return _load_schema_resource("worker.output.json")
 
