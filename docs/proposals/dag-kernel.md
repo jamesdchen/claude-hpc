@@ -1,11 +1,17 @@
 # Proposal: the experiment-agnostic DAG kernel
 
-Status: identity prototype landed (`compose_node_sha` in
-`hpc_agent.state.run_sha` + property suite
-`tests/state/test_node_sha_properties.py`). Topology, readiness, and
-lineage wiring deferred — specified below, not implemented. Nothing is
-wired into submit/dedup yet; landing this prototype changes no existing
-run's identity (0-parent degeneracy, see "Recursive identity").
+Status: **landed through wiring step 4** (0.10.51). Recursive identity
+(`compose_node_sha` in `state.run_sha`, property suite
+`tests/state/test_node_sha_properties.py`) and its submit-side wiring —
+`parents` on the submit spec → `resolve_node_sha` derives `node_sha`
+from the parents' sidecars → `node_sha`/`parent_run_ids` persist on the
+v2 sidecar → `find_run_by_cmd_sha` keys dedup on the effective identity —
+plus the readiness validator (`validate-parents-ready`) and the lineage
+accessor (`parent_records`) are implemented and tested. Step 5 (topology
+execution) stays caller-side by design, not deferred work. The 0-parent
+degeneracy keeps every parentless submit byte-for-byte unchanged:
+identity is its bare `cmd_sha`, the new sidecar keys are omitted, and the
+dedup query is the historical one.
 
 ## Problem
 
@@ -88,29 +94,42 @@ doc first sketched) is in hindsight a special case of the same need:
 identity must distinguish runs by their position in a dependency
 structure, there a linear iteration order, here an ancestry.
 
-## Wiring plan (deferred, in dependency order)
+## Wiring plan (steps 1–4 landed, in dependency order)
 
-1. `parents: [run_id, ...]` optional field on the submit spec; resolve
-   each parent's recorded node_sha (sidecar), compute this node's via
-   `compose_node_sha`, persist `node_sha` + `parent_run_ids` on the
-   sidecar (v2 schema is additive-friendly).
-2. `find_run_by_cmd_sha` grows a node-aware lookup: dedup keys on
-   `node_sha` when parents are declared, bare `cmd_sha` otherwise
-   (degeneracy makes these identical for 0-parent submits).
-3. Readiness as a `validate`-verb primitive: given `parents`, read the
-   journal lifecycle for each; ok iff all terminal-success. Composed by
-   `submit-pipeline` the way `validate-campaign` is — independently
-   skippable when no parents are declared.
-4. Lineage injection: parents' `result_dirs` exposed to `tasks.py` the
-   way `HPC_CAMPAIGN_ID` + `prior_records` are today (an env var naming
-   the parent run_ids; a `parent_records(experiment_dir, run_ids)`
-   accessor — a filter of existing sidecar reads, no SSH).
-5. Topology stays caller-side. The agent surface (or an external
-   orchestrator) walks the graph and fires submits as readiness allows —
-   consistent with the campaign driver's on-disk-state-only design. A
-   framework-side graph *runner* is out of scope until repeated
-   mechanical agent walks justify a composite, per the
-   `submit-pipeline`/`campaign-run` precedent.
+1. **Landed.** `parents: [run_id] | None` on `SubmitFlowSpec` (and
+   `parent_run_ids` on `WriteRunSidecarInput`). At sidecar-write,
+   `state.runs.resolve_node_sha` reads each parent's recorded identity
+   (its `node_sha`, else bare `cmd_sha`) and composes this run's
+   `node_sha` via `compose_node_sha`; `node_sha` + `parent_run_ids`
+   persist as additive v2 sidecar fields. Identity is always *derived*
+   from on-disk sidecars, never caller-asserted — a supplied `node_sha`
+   could decouple a child from its real ancestry.
+2. **Landed.** `find_run_by_cmd_sha` gained a `node_sha` arg and matches
+   on the *effective* identity (`node_sha or cmd_sha`) on both sides: a
+   parented query dedups only against the same params AND ancestry; a
+   bare query skips parented sidecars. `node_sha=None` (every pre-DAG
+   caller) is the historical bare-`cmd_sha` path. Threaded from
+   `submit_flow` → `submit_and_record` behind the same opt-in gate as
+   the #207 code-drift lever.
+3. **Landed.** `validate-parents-ready` (`ops.validate.parents_ready`):
+   the ∀-parents quantifier over sidecar presence + journal lifecycle;
+   ok iff every parent is `complete`. A pure-local `validate`-verb
+   primitive, composed before a parented submit the way
+   `validate-stochastic-marker` sits before a campaign submit —
+   independently skippable when no parents are declared.
+4. **Landed.** `parent_records(experiment_dir, parent_run_ids)` in
+   `reduce.history` — same record shape as `prior_records` but resolved
+   from an explicit dependency set (ordered, deduped, fails loud on a
+   missing parent). The child's `tasks.py` reads it at module load for
+   its inputs; callers forward the run_ids cluster-side via `job_env`
+   (`HPC_PARENT_RUN_IDS`), same convention as `HPC_CAMPAIGN_ID`.
+5. **Caller-side by design (not landed, not deferred work).** Topology
+   walking — deciding which node is runnable and firing its submit — is
+   the agent surface's job (or an external orchestrator's), consistent
+   with the campaign driver's on-disk-state-only design. A framework-side
+   graph *runner* is out of scope until repeated mechanical agent walks
+   justify a composite, per the `submit-pipeline`/`campaign-run`
+   precedent.
 
 ## Non-goals
 

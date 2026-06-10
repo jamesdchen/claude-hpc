@@ -5,6 +5,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.51 — 2026-06-10
+
+### Added — DAG kernel wired in: lineage, identity, readiness (steps 1–4)
+
+The `docs/proposals/dag-kernel.md` wiring plan, landed up to the caller-side topology step. A run may now declare `parents` (run_ids whose outputs it consumes) on `SubmitFlowSpec`; the four pieces that follow are all experiment-agnostic (paths and lifecycle, never content):
+
+- **Identity** — at sidecar-write, `state.runs.resolve_node_sha` reads each parent's recorded identity (its `node_sha`, else bare `cmd_sha`) and composes this run's `node_sha` via `compose_node_sha`. `node_sha` + `parent_run_ids` persist as additive v2 sidecar fields. Identity is *derived* from on-disk sidecars, never caller-asserted (a supplied `node_sha` could decouple a child from its real ancestry); a missing parent or a non-64-hex digest raises `SpecInvalid`.
+- **Dedup** — `find_run_by_cmd_sha` gained a `node_sha` arg and matches on the *effective* identity (`node_sha or cmd_sha`) on both sides. A parented re-submit dedups only against the same params AND ancestry, so a stale child computed from a since-changed parent is never replayed; a bare query skips parented sidecars. `node_sha=None` (every pre-DAG caller) is byte-for-byte the historical bare-`cmd_sha` path. Threaded through `submit_flow` → `submit_and_record` behind the same opt-in gate as the #207 code-drift lever.
+- **Readiness** — `validate-parents-ready` (`ops.validate.parents_ready`): the ∀-parents quantifier over sidecar presence + journal lifecycle, ok iff every parent is `complete`. Pure-local `validate` primitive, composed before a parented submit like `validate-stochastic-marker` before a campaign submit; one finding per not-ready parent (`parent_run_missing` / `parent_not_terminal` / `parent_failed`) and a full `parent_states` frontier.
+- **Lineage** — `parent_records(experiment_dir, parent_run_ids)` in `reduce.history`: `prior_records`'s record shape resolved from an explicit dependency set (ordered, deduped, fails loud on a missing parent), for a child's `tasks.py` to locate its inputs at module load.
+
+The 0-parent degeneracy means a submit that declares no `parents` is unchanged: identity is its bare `cmd_sha`, the new sidecar keys are omitted, the dedup query is the historical one. Step 5 (walking the graph and firing submits) stays caller-side by design — the agent surface or an external orchestrator, per the campaign-driver precedent. Tests: `tests/state/test_node_sha_wiring.py`, `tests/state/test_parent_records.py`, `tests/ops/validate/test_validate_parents_ready.py`.
+
 ## 0.10.50 — 2026-06-10
 
 ### Added — DAG-kernel proposal + recursive-identity prototype
