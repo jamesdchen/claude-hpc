@@ -5,8 +5,8 @@ module can stay focused on path helpers, sidecar I/O, and lifecycle
 (find / prune / update). The two functions here are pure: given a
 loaded ``tasks_module`` (or a path), they hash and return.
 
-Re-exported from :mod:`hpc_agent.state.runs` for backwards compatibility
-with existing callers (``from hpc_agent.state.runs import compute_cmd_sha``).
+Callers import these directly from this module (see the pointer comment
+in :mod:`hpc_agent.state.runs`).
 """
 
 from __future__ import annotations

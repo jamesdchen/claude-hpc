@@ -82,9 +82,11 @@ unwired):
   *params*' digests, never executor bytes — the same #207 boundary as
   `cmd_sha`, including the `invalidate_on_code_change` opt-in story.
 
-The campaign-iteration dedup salt (seam piece 2) is in hindsight a
-degenerate case: salting identity with position-in-a-linear-order. The
-general form salts with the identity of what the node depends on.
+The campaign-iteration dedup fix (seam piece 2 — landed as the
+same-campaign *rejection* in `find_run_by_cmd_sha`, not the salt the seam
+doc first sketched) is in hindsight a special case of the same need:
+identity must distinguish runs by their position in a dependency
+structure, there a linear iteration order, here an ancestry.
 
 ## Wiring plan (deferred, in dependency order)
 

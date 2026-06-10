@@ -5,6 +5,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.50 — 2026-06-10
+
+### Added — DAG-kernel proposal + recursive-identity prototype
+
+[`docs/proposals/dag-kernel.md`](docs/proposals/dag-kernel.md) scopes what survives the four-question boundary test for inter-run dependency (revisiting `campaign-seam.md`'s "true DAG pipelines" exclusion as a spec, not a feature): partial order over opaque submit specs, parent-quantified readiness, set-valued lineage, recursive identity. Edge meaning, conditional topology (`total() == 0` stays the agnostic veto), and stage vocabulary remain caller-owned.
+
+Of the four, only recursive identity existed in no form, and the other three are unsafe to wire without it: bare-`cmd_sha` dedup over a run graph replays a stale child after an ancestor's params change. Landed as `state.run_sha.compose_node_sha` — the Merkle step over canonical JSON, with 0-parent degeneracy (`node_sha == cmd_sha`, so no existing run's identity changes), set semantics for parents, and ancestor propagation, pinned by a Hypothesis property suite (`tests/state/test_node_sha_properties.py`). **Deliberately unwired**: submits still key dedup on bare `cmd_sha` until the proposal's `parents` field lands on the submit spec.
+
+Drive-by: `run_sha`'s module docstring claimed `compute_cmd_sha` was re-exported from `state.runs` — it isn't (`runs.py`'s pointer comment says to import from `run_sha` directly); the stale sentence is gone.
+
 ## 0.10.49 — 2026-06-09
 
 ### Fixed — CI green on Python 3.10
