@@ -155,11 +155,27 @@ def _canary_skip_threshold(spec: SubmitFlowSpec) -> int:
     return int(getattr(spec, "canary_skip_threshold", 4))
 
 
+_ALWAYS_CANARY_ENV = "HPC_AGENT_ALWAYS_CANARY"
+
+
+def _always_canary() -> bool:
+    """Operator always-canary override (#283), env-only by design.
+
+    The #155/#275 motto in the strengthening direction: the agent-supplied
+    ``canary=false`` opt-out stays documented, but an operator can pin a canary
+    on every submit — winning over the opt-out AND both auto-skips — without
+    any agent-reachable field existing for the override.
+    """
+    return os.environ.get(_ALWAYS_CANARY_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _should_run_canary(spec: SubmitFlowSpec) -> bool:
     """Decide whether to fire a canary for *spec* (#263 + #249).
 
     Order:
 
+    * ``HPC_AGENT_ALWAYS_CANARY`` (operator env, #283) → ALWAYS canary — wins
+      over the agent-supplied ``canary=false`` opt-out and both auto-skips.
     * ``canary=false`` → no canary (the caller's explicit opt-out).
     * ``canary_only=true`` → ALWAYS canary — the two-phase gate is an explicit
       request to validate before main; neither optimization applies.
@@ -172,6 +188,8 @@ def _should_run_canary(spec: SubmitFlowSpec) -> bool:
 
     Otherwise → canary.
     """
+    if _always_canary():
+        return True
     if not spec.canary:
         return False
     if spec.canary_only or getattr(spec, "force_canary", False):
