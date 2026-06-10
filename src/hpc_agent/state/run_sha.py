@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
-__all__ = ["RESERVED_TASK_KEYS", "compute_cmd_sha", "compute_tasks_py_sha"]
+__all__ = ["RESERVED_TASK_KEYS", "compose_node_sha", "compute_cmd_sha", "compute_tasks_py_sha"]
 
 # Per-task keys that ``resolve(i)`` may return but that are EXCLUDED from
 # the cmd_sha hash. These carry strategy bookkeeping — an opaque
@@ -92,3 +93,54 @@ def compute_cmd_sha(tasks_module: Any) -> str:
 def compute_tasks_py_sha(tasks_py_path: Path) -> str:
     """Return SHA-256 of ``tasks.py``'s bytes — diagnostic only."""
     return hashlib.sha256(Path(tasks_py_path).read_bytes()).hexdigest()
+
+
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def compose_node_sha(cmd_sha: str, parent_node_shas: list[str]) -> str:
+    """Compose a run's parameter identity with its parents' identities.
+
+    The recursive-identity invariant for inter-run dependency (the
+    ``docs/proposals/dag-kernel.md`` prototype): when run B consumes run
+    A's outputs, B's dedup identity must change whenever A's does —
+    otherwise a re-submit of B dedups against a result computed from a
+    *different* A, silently. ``compose_node_sha`` is the Merkle step that
+    makes identity compose::
+
+        node_sha = H(canonical({"node": cmd_sha, "parents": sorted(set(parents))}))
+
+    Properties (pinned in ``tests/state/test_node_sha_properties.py``):
+
+    * **Zero parents degenerates to ``cmd_sha`` verbatim.** Every existing
+      run is a 0-parent node whose identity is unchanged — today's
+      dedup/journal keys need no migration.
+    * **Parents are a set.** Order-invariant, duplicate-insensitive: an
+      edge declares "depends on", not a sequence.
+    * **Ancestor changes propagate.** A changed grandparent changes the
+      parent's node_sha and therefore this node's — stale-subgraph reuse
+      cannot pass a node_sha equality check.
+
+    Like :func:`compute_cmd_sha`, this is parameter identity, not code
+    identity (#207): the parent digests fold in the parents' *params*,
+    never their executor bytes. NOT yet wired into
+    ``find_run_by_cmd_sha`` / sidecars — submits remain keyed by bare
+    ``cmd_sha`` until the kernel proposal lands a ``parents`` field on the
+    submit spec.
+
+    Raises :class:`ValueError` if *cmd_sha* or any parent is not a 64-char
+    lowercase hex digest — these strings are produced by this module's own
+    hash functions, so a malformed one is a caller bug worth failing loud on.
+    """
+    if not _SHA256_HEX.match(cmd_sha):
+        raise ValueError(f"compose_node_sha: cmd_sha is not a sha256 hex digest: {cmd_sha!r}")
+    parents = sorted(set(parent_node_shas))
+    for p in parents:
+        if not _SHA256_HEX.match(p):
+            raise ValueError(f"compose_node_sha: parent node_sha is not a sha256 hex digest: {p!r}")
+    if not parents:
+        return cmd_sha
+    envelope = json.dumps(
+        {"node": cmd_sha, "parents": parents}, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(envelope.encode()).hexdigest()
