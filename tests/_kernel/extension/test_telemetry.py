@@ -131,8 +131,9 @@ def test_otel_sink_without_sdk_raises_config_invalid(
     clear, actionable error rather than a silent no-op."""
     import builtins
 
-    # Reset the tracer cache so the import path is exercised.
+    # Reset the tracer + instrument caches so the import path is exercised.
     monkeypatch.setattr(telemetry, "_OTEL_TRACER", None, raising=False)
+    monkeypatch.setattr(telemetry, "_OTEL_METRICS", None, raising=False)
 
     real_import = builtins.__import__
 
@@ -168,6 +169,28 @@ def test_otel_attr_value_coercion() -> None:
     assert isinstance(mixed, str)
 
 
+class _FakeCounter:
+    def __init__(self) -> None:
+        self.adds: list[tuple[int, dict]] = []
+
+    def add(self, amount: int, attributes: dict) -> None:
+        self.adds.append((amount, dict(attributes)))
+
+
+class _FakeHistogram:
+    def __init__(self) -> None:
+        self.points: list[tuple[float, dict]] = []
+
+    def record(self, value: float, attributes: dict) -> None:
+        self.points.append((value, dict(attributes)))
+
+
+def _fake_instruments(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeCounter, _FakeHistogram]:
+    counter, histogram = _FakeCounter(), _FakeHistogram()
+    monkeypatch.setattr(telemetry, "_otel_instruments", lambda: (counter, histogram))
+    return counter, histogram
+
+
 def test_otel_sink_emits_span_with_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     """With a tracer available, every payload field becomes an
     ``hpc.<key>`` span attribute, including the structured reason and
@@ -191,6 +214,7 @@ def test_otel_sink_emits_span_with_attributes(monkeypatch: pytest.MonkeyPatch) -
             return _Ctx()
 
     monkeypatch.setattr(telemetry, "_otel_tracer", lambda: _FakeTracer())
+    _fake_instruments(monkeypatch)
 
     telemetry.record(
         "campaign_decision",
@@ -209,3 +233,80 @@ def test_otel_sink_emits_span_with_attributes(monkeypatch: pytest.MonkeyPatch) -
         "kind": "proceed",
         "canary_pass": True,
     }
+
+
+# --- otel metrics (#313) -------------------------------------------------
+
+
+def _silence_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _NoopCtx:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> bool:
+            return False
+
+        def set_attribute(self, key: str, value: object) -> None:
+            pass
+
+    class _NoopTracer:
+        def start_as_current_span(self, name: str) -> _NoopCtx:
+            return _NoopCtx()
+
+    monkeypatch.setattr(telemetry, "_otel_tracer", lambda: _NoopTracer())
+
+
+def test_otel_metrics_counter_per_event_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every record() increments hpc.events by 1, dimensioned by the
+    event name — the per-event-kind counters of #313, off the same
+    single producer with no new call sites."""
+    _silence_span(monkeypatch)
+    counter, _ = _fake_instruments(monkeypatch)
+
+    telemetry.record("submit", {"run_id": "r1"}, sink="otel")
+    telemetry.record("canary_result", {"run_id": "r1", "ok": True}, sink="otel")
+
+    assert [(n, a["hpc.event"]) for n, a in counter.adds] == [
+        (1, "submit"),
+        (1, "canary_result"),
+    ]
+    # Bounded enum-like payload keys are promoted to dimensions.
+    assert counter.adds[1][1]["hpc.ok"] is True
+
+
+def test_otel_metrics_exclude_high_cardinality_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """trial_token / run_id / fingerprints must never become metric
+    dimensions — they belong on spans (#313's cardinality rule)."""
+    _silence_span(monkeypatch)
+    counter, histogram = _fake_instruments(monkeypatch)
+
+    telemetry.record(
+        "resubmit",
+        {"run_id": "r1", "trial_token": "tok-abc", "fingerprint": "f" * 40, "n_failed": 3},
+        sink="otel",
+    )
+
+    (_, attrs) = counter.adds[0]
+    assert set(attrs) == {"hpc.event"}
+    for _, h_attrs in histogram.points:
+        assert "hpc.trial_token" not in h_attrs
+        assert "hpc.run_id" not in h_attrs
+
+
+def test_otel_metrics_numeric_fields_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Numeric payload fields land in the hpc.event.value histogram
+    keyed by event + field; bools and strings do not."""
+    _silence_span(monkeypatch)
+    _, histogram = _fake_instruments(monkeypatch)
+
+    telemetry.record(
+        "tick",
+        {"run_id": "r1", "pending": 7, "elapsed_sec": 1.5, "ok": True, "state": "RUNNING"},
+        sink="otel",
+    )
+
+    points = {(a["hpc.field"], v) for v, a in histogram.points}
+    assert points == {("pending", 7), ("elapsed_sec", 1.5)}
+    assert all(a["hpc.event"] == "tick" for _, a in histogram.points)

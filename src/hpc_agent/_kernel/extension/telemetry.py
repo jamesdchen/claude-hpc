@@ -34,15 +34,24 @@ Sinks
   span whose name is *event* and whose attributes are the flattened
   *payload* (so a submit / state-transition / resubmit / canary /
   campaign-decision record — including its structured ``reason`` and
-  ``trial_token`` — shows up in Grafana or any OTLP backend). The
-  OpenTelemetry SDK is an **optional** dependency: importing this module
-  never pulls it in, and the import is deferred to the point the sink is
-  actually selected. If the SDK is not installed, selecting this sink
-  raises :class:`hpc_agent.errors.ConfigInvalid` with a pip hint rather
-  than failing silently — the operator explicitly asked for OTLP export,
-  so a clear error beats a silent no-op. Configure the exporter endpoint
-  via the standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` /
-  ``OTEL_EXPORTER_OTLP_*`` env vars the SDK already reads.
+  ``trial_token`` — shows up in Grafana or any OTLP backend), **plus
+  OTel metrics off the same producer** (#313): the ``hpc.events``
+  counter (one increment per record, dimensioned by ``hpc.event`` and a
+  small allowlist of bounded enum-like payload keys) and the
+  ``hpc.event.value`` histogram (every numeric payload field, dimensioned
+  by ``hpc.event`` + ``hpc.field``) — so a long unattended campaign is
+  watchable as live counters/rates, not just a span firehose.
+  High-cardinality identifiers (``trial_token``, ``run_id``, job ids,
+  fingerprints) deliberately never become metric dimensions; they stay
+  span attributes. The OpenTelemetry SDK is an **optional** dependency:
+  importing this module never pulls it in, and the import is deferred to
+  the point the sink is actually selected. If the SDK is not installed,
+  selecting this sink raises :class:`hpc_agent.errors.ConfigInvalid`
+  with a pip hint rather than failing silently — the operator explicitly
+  asked for OTLP export, so a clear error beats a silent no-op.
+  Configure the exporter endpoint via the standard
+  ``OTEL_EXPORTER_OTLP_ENDPOINT`` / ``OTEL_EXPORTER_OTLP_*`` env vars
+  the SDK already reads.
 * ``"none"`` — silently drop. The default when ``HPC_TELEMETRY_SINK``
   is unset.
 
@@ -169,7 +178,7 @@ def _otel_tracer() -> Any:
 
 
 def _emit_otel(event: str, payload: dict[str, Any]) -> None:
-    """Emit one event as a short-lived OpenTelemetry span.
+    """Emit one event as a short-lived OpenTelemetry span + metrics (#313).
 
     The span name is *event*; every *payload* field becomes a
     ``hpc.<key>`` attribute (coerced via :func:`_otel_attr_value`).
@@ -185,6 +194,101 @@ def _emit_otel(event: str, payload: dict[str, Any]) -> None:
     ):
         for key, value in payload.items():
             span.set_attribute(f"hpc.{key}", _otel_attr_value(value))
+    _emit_otel_metrics(event, payload)
+
+
+# Cached OTel metric instruments, built on first ``otel``-sink emit and
+# reused thereafter (mirrors ``_OTEL_TRACER``). The tuple is
+# ``(event_counter, numeric_histogram)``.
+_OTEL_METRICS: tuple[Any, Any] | None = None
+
+# Payload keys promoted to metric dimensions (#313). Bounded enum-like
+# fields only — a metric label set must stay low-cardinality, so
+# high-cardinality identifiers (trial_token, run_id, job ids, failure
+# fingerprints) deliberately never appear here; they remain span
+# attributes where cardinality is free.
+_METRIC_LABEL_KEYS = ("decision", "error_class", "disposition", "lifecycle_state", "ok")
+
+
+def _otel_instruments() -> tuple[Any, Any]:
+    """Return the cached ``(counter, histogram)`` pair, building on first use.
+
+    Same deferred-import + fail-fast discipline as :func:`_otel_tracer`:
+    merely importing this module never requires the OTel SDK, and a
+    missing SDK raises :class:`hpc_agent.errors.ConfigInvalid` with the
+    install hint. An embedding host's already-installed global meter
+    provider is respected; otherwise an OTLP-exporting provider is set up
+    (the metric exporter lives in the same optional packages as the span
+    exporter, so ``hpc-agent[otel]`` covers both).
+    """
+    global _OTEL_METRICS
+    if _OTEL_METRICS is not None:
+        return _OTEL_METRICS
+    try:
+        from opentelemetry import metrics
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+            OTLPMetricExporter,
+        )
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk.resources import Resource
+    except ImportError as exc:
+        raise errors.ConfigInvalid(
+            "HPC_TELEMETRY_SINK='otel' needs the OpenTelemetry SDK. "
+            "Install the optional extra: pip install 'hpc-agent[otel]' "
+            "(or: pip install opentelemetry-sdk "
+            "opentelemetry-exporter-otlp-proto-http). Point it at a "
+            "collector with OTEL_EXPORTER_OTLP_ENDPOINT."
+        ) from exc
+
+    provider = metrics.get_meter_provider()
+    if not isinstance(provider, MeterProvider):
+        provider = MeterProvider(
+            resource=Resource.create({"service.name": "hpc-agent"}),
+            metric_readers=[PeriodicExportingMetricReader(OTLPMetricExporter())],
+        )
+        metrics.set_meter_provider(provider)
+
+    meter = metrics.get_meter("hpc_agent.telemetry")
+    _OTEL_METRICS = (
+        meter.create_counter(
+            "hpc.events",
+            unit="1",
+            description="telemetry.record() events by kind "
+            "(submit / state-transition / resubmit / canary-result / campaign-decision / ...)",
+        ),
+        meter.create_histogram(
+            "hpc.event.value",
+            description="numeric telemetry payload fields, dimensioned by "
+            "hpc.event + hpc.field (units are the field's own)",
+        ),
+    )
+    return _OTEL_METRICS
+
+
+def _emit_otel_metrics(event: str, payload: dict[str, Any]) -> None:
+    """The metrics half of the ``otel`` sink (#313), same single producer.
+
+    One ``hpc.events`` increment per record — dimensioned by the event
+    name plus any :data:`_METRIC_LABEL_KEYS` present in *payload* — and
+    one ``hpc.event.value`` histogram point per numeric payload field
+    (the natural gauges: pending counts, failure counts, durations).
+    Recording failures are swallowed like span-export failures; the
+    missing-SDK case fails fast in :func:`_otel_instruments`.
+    """
+    counter, histogram = _otel_instruments()
+    attrs: dict[str, Any] = {"hpc.event": event}
+    for key in _METRIC_LABEL_KEYS:
+        value = payload.get(key)
+        if isinstance(value, bool | str):
+            attrs[f"hpc.{key}"] = value
+    with contextlib.suppress(Exception):
+        counter.add(1, attrs)
+    for key, value in payload.items():
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        with contextlib.suppress(Exception):
+            histogram.record(value, {"hpc.event": event, "hpc.field": key})
 
 
 def record(
