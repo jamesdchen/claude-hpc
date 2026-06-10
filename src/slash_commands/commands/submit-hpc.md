@@ -29,7 +29,7 @@ This is a *speculative* dispatch: it builds the spec and starts the deploy from 
 
 While the background dispatch runs, do the work that needs no worker output:
 
-- **Read the submit policy, then canvass only the unanswered runtime questions** — `Read` `.hpc/submit_policy.json` first (see *Submit policy* under the canvass); any of `overwrite_prior_run`, `on_task_generator_mismatch`, `k_in_flight` it answers is folded in silently, never re-asked. Canvass the rest (the dialogs under *Runtime-behaviour canvass*). These are the questions the worker would otherwise surface one-by-one *after* it fails or hits a `needs_decision`; pulling them forward overlaps the user's thinking time with the deploy. (`data_axis` is not canvassed speculatively — an unclassifiable axis comes back from the dispatch as `needs_resolution` and is walked on the cascade path.)
+- **Read the submit policy, then canvass only the unanswered runtime questions** — `Read` `.hpc/submit_policy.json` first (see *Submit policy* under the canvass); any of `on_task_generator_mismatch`, `k_in_flight` (and a fresh-signature `data_axis`) it answers is folded in silently, never re-asked. Canvass the rest (the dialogs under *Runtime-behaviour canvass*; `overwrite_prior_run` is always asked fresh — it's about a specific run's state). These are the questions the worker would otherwise surface one-by-one *after* it fails or hits a `needs_decision`; pulling them forward overlaps the user's thinking time with the deploy. (`data_axis` is not canvassed speculatively — an unclassifiable axis comes back from the dispatch as `needs_resolution` and is walked on the cascade path.)
 - **Validate local config** (no worker dependency — use `Read`/`Grep`, never shell): `clusters.yaml` coherence (the modules block; `conda_source` present when `conda_env` is set — the #281 shape, caught laptop-side before the deploy rather than at the cluster preamble); `.hpc/axes.yaml` freshness against the current `@register_run` signature; a working-tree dirtiness check.
 - **Surface recent history** for context: the last few journal entries for this `cmd_sha` family, or the prior `metrics.json` summary on a continuation run.
 
@@ -202,7 +202,6 @@ Shape (all keys optional):
 
 ```json
 {
-  "overwrite_prior_run": "keep" | "overwrite",
   "on_task_generator_mismatch": "fail" | "refresh",
   "k_in_flight": <int>,
   "data_axis": {"run_signature_sha": "<sha>", "kind": "<kind>"}
@@ -210,6 +209,8 @@ Shape (all keys optional):
 ```
 
 `data_axis` is keyed by `run_signature_sha`: it short-circuits the dialog only while the entry-point signature is unchanged. On signature drift the recorded entry is stale — re-ask, then overwrite.
+
+`overwrite_prior_run` is deliberately **never** persisted: it answers a question about one specific prior run's state, not an experiment-wide preference. A sticky `keep` would silently route every future submit of the same config away from resubmitting; a sticky `overwrite` would silently reclaim runs the user never looked at. Ask it fresh each time it fires.
 
 ### Dialog: `overwrite_prior_run`
 

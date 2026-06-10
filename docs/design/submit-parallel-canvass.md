@@ -73,13 +73,17 @@ a different kind.
 
 ## Ask once: the persisted submit policy
 
-Each explicit canvass answer is persisted to
+Explicit answers to the *experiment-wide* canvass questions
+(`on_task_generator_mismatch`, `k_in_flight`, the resolved `data_axis` keyed
+by `run_signature_sha`) are persisted to
 `<experiment_dir>/.hpc/submit_policy.json` (see the *Submit policy* section of
 `submit-hpc.md`). The slash reads it before canvassing and skips any question
-it answers, so the dialogs above fire once per experiment, not once per
-submit — a repeat submit with a saturated policy asks nothing. Only explicit
-answers are recorded (a default accepted by silence stays re-askable), and a
-restated value in `$ARGUMENTS` overwrites the recorded one.
+it answers, so those dialogs fire once per experiment, not once per submit — a
+repeat submit with a saturated policy asks nothing. Only explicit answers are
+recorded (a default accepted by silence stays re-askable), and a restated
+value in `$ARGUMENTS` overwrites the recorded one. `overwrite_prior_run` is
+deliberately not persisted: it answers for one specific prior run's state, so
+a sticky answer would silently mis-route future submits.
 
 On a conflict the slash cancels the background task and re-invokes the skill
 (foreground) with the corrected, now-fully-resolved spec. **The cancel is
