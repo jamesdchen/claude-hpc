@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.53 — 2026-06-10
+
+### Fixed — Windows CI: parent_records test asserted POSIX path separators
+
+`test_records_in_declared_order_with_lineage` checked `result_dirs` with a string `endswith("results/<run_id>/task_0")`; on the windows leg the resolved dirs carry backslashes and the assert failed (PR #323, both CI runs). The assert now compares `Path` objects against the expected `tmp_path`-rooted path — exact and OS-agnostic. The other DAG-kernel test files carry no separator-sensitive asserts (audited).
+
 ## 0.10.52 — 2026-06-10
 
 ### Changed — DAG kernel doc promoted from proposal to design record

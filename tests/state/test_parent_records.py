@@ -46,7 +46,9 @@ def test_records_in_declared_order_with_lineage(tmp_path: Path) -> None:
     for r in records:
         assert r["complete"] is True
         assert len(r["result_dirs"]) == 1
-        assert r["result_dirs"][0].endswith(f"results/{r['run_id']}/task_0")
+        # Path equality, not string suffix — result_dirs are OS-native
+        # strings (backslashes on Windows).
+        assert Path(r["result_dirs"][0]) == tmp_path / "results" / r["run_id"] / "task_0"
         assert isinstance(r["metrics"], dict)
         assert r["trial_tokens"] == [r["run_id"]]
 
