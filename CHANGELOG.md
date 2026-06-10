@@ -16,6 +16,8 @@ Two pieces of caller-side topology walking ([`docs/design/dag-kernel.md`](docs/d
 
 The advance tick and the full graph runner stay caller-side per the earn-it rule (zero recorded walks; mid-graph failure policy and concurrency are unsettled judgment).
 
+Drive-by: `test_node_sha_properties.py`'s header still claimed `compose_node_sha` was "not yet wired into `find_run_by_cmd_sha` / sidecars" — false since 0.10.51; it now points at `test_node_sha_wiring.py` as the wiring contract.
+
 ## 0.10.56 — 2026-06-10
 
 ### Changed — submit canvass asks once: persisted submit policy + no speculative `data_axis`
