@@ -761,6 +761,43 @@ class TestSidecarGuarantee:
             runtime=None,
         )
 
+    def test_records_data_sha_on_synthesized_sidecar(
+        self, tmp_path: Any, _journal_home: Any
+    ) -> None:
+        # #312: a spec that declares input_datasets gets data_sha captured at
+        # sidecar-write time with no manual step, symmetric with env_hash.
+        from hpc_agent.ops import submit_flow as sf_module
+        from hpc_agent.ops.submit_flow import submit_flow_batch
+        from hpc_agent.state.run_sha import compute_data_sha
+        from hpc_agent.state.runs import read_run_sidecar
+
+        dataset = tmp_path / "data" / "train.csv"
+        dataset.parent.mkdir(parents=True, exist_ok=True)
+        dataset.write_text("a,b\n1,2\n", encoding="utf-8")
+
+        spec = _spec("rData", input_datasets=["data/train.csv"])
+        p1, p2, p3 = _mock_prelude_and_submit(sf_module)
+        with p1, p2, p3:
+            submit_flow_batch(tmp_path, spec=_batch([spec]))
+        sc = read_run_sidecar(tmp_path, "rData")
+        assert sc["data_sha"] == compute_data_sha(["data/train.csv"], base_dir=tmp_path)
+        assert sc["data_sha"] is not None
+
+    def test_data_sha_stays_null_when_no_dataset_declared(
+        self, tmp_path: Any, _journal_home: Any
+    ) -> None:
+        # Undeclared → null ("not captured"), distinguishable from the real
+        # digest of an empty declaration — the #312 Gap 1 decision.
+        from hpc_agent.ops import submit_flow as sf_module
+        from hpc_agent.ops.submit_flow import submit_flow_batch
+        from hpc_agent.state.runs import read_run_sidecar
+
+        spec = _spec("rNoData")
+        p1, p2, p3 = _mock_prelude_and_submit(sf_module)
+        with p1, p2, p3:
+            submit_flow_batch(tmp_path, spec=_batch([spec]))
+        assert read_run_sidecar(tmp_path, "rNoData")["data_sha"] is None
+
     def test_raises_when_missing_and_no_result_dir_template(
         self, tmp_path: Any, _journal_home: Any
     ) -> None:

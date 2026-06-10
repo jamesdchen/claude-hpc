@@ -182,3 +182,46 @@ def test_sidecar_backfills_data_and_env_to_none(tmp_path: Path) -> None:
     data = read_run_sidecar(tmp_path, "20260101-000001-aaaaaaa")
     assert data["data_sha"] is None
     assert data["env_hash"] is None
+
+
+# --- provenance-manifest primitive (#312 Gap 2) -------------------------------
+
+
+def test_primitive_writes_manifest_and_returns_summary(tmp_path: Path) -> None:
+    from hpc_agent._wire.actions.provenance_manifest import ProvenanceManifestInput
+    from hpc_agent.ops.provenance_manifest import provenance_manifest
+
+    _write(tmp_path, "20260101-000001-aaaaaaa", campaign_id="camp", data_sha="a" * 64)
+    out = provenance_manifest(
+        experiment_dir=tmp_path, spec=ProvenanceManifestInput(campaign_id="camp")
+    )
+    target = Path(out["path"])
+    assert target == tmp_path / ".hpc" / "provenance" / "camp.json"
+    assert out["campaign_id"] == "camp"
+    assert out["run_count"] == 1
+    written = json.loads(target.read_text(encoding="utf-8"))
+    # The returned signature matches the self-attesting file's.
+    assert out["signature"] == written.pop("signature")
+    assert manifest_signature(written) == out["signature"]
+    assert written["runs"][0]["data_sha"] == "a" * 64
+
+
+def test_primitive_unknown_campaign_yields_empty_manifest(tmp_path: Path) -> None:
+    from hpc_agent._wire.actions.provenance_manifest import ProvenanceManifestInput
+    from hpc_agent.ops.provenance_manifest import provenance_manifest
+
+    out = provenance_manifest(
+        experiment_dir=tmp_path, spec=ProvenanceManifestInput(campaign_id="ghost")
+    )
+    assert out["run_count"] == 0
+    assert Path(out["path"]).is_file()
+
+
+def test_primitive_is_registered_and_agent_facing() -> None:
+    from hpc_agent._kernel.registry.primitive import get_meta, register_primitives
+
+    register_primitives()
+    meta = get_meta("provenance-manifest")
+    assert meta.verb == "mutate"
+    assert meta.agent_facing is True
+    assert meta.idempotent is True

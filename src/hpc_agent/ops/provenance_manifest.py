@@ -24,9 +24,18 @@ import json
 from pathlib import Path
 from typing import Any
 
+from hpc_agent import errors
+from hpc_agent._kernel.registry.primitive import SideEffect, primitive
+from hpc_agent._wire.actions.provenance_manifest import ProvenanceManifestInput
+from hpc_agent.cli._dispatch import CliShape, SchemaRef
 from hpc_agent.execution.mapreduce.reduce.history import find_sidecars_by_campaign
 
-__all__ = ["build_provenance_manifest", "manifest_signature", "write_provenance_manifest"]
+__all__ = [
+    "build_provenance_manifest",
+    "manifest_signature",
+    "provenance_manifest",
+    "write_provenance_manifest",
+]
 
 # Manifest schema version. Bump when the emitted shape changes in a way a
 # consumer (a signer, a diff tool) would need to branch on.
@@ -142,3 +151,49 @@ def write_provenance_manifest(
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(target, manifest_with_sig)
     return target
+
+
+@primitive(
+    name="provenance-manifest",
+    verb="mutate",
+    side_effects=[SideEffect("file_write", "<experiment>/.hpc/provenance/<campaign_id>.json")],
+    error_codes=[errors.SpecInvalid],
+    idempotent=True,
+    idempotency_key="campaign_id",
+    cli=CliShape(
+        help=(
+            "Build and write the per-campaign provenance manifest at "
+            "<experiment>/.hpc/provenance/<campaign_id>.json — one signable "
+            "record pairing every run_id/trial_token of the campaign with "
+            "its full {code, data, env, params, cluster} fingerprint, "
+            "recomputed from the run sidecars on demand."
+        ),
+        spec_arg=True,
+        experiment_dir_arg=True,
+        spec_model=ProvenanceManifestInput,
+        schema_ref=SchemaRef(input="provenance_manifest"),
+    ),
+    agent_facing=True,
+)
+def provenance_manifest(*, experiment_dir: Path, spec: ProvenanceManifestInput) -> dict[str, Any]:
+    """Write the campaign provenance manifest and return its summary.
+
+    The agent-facing surface for :func:`write_provenance_manifest` (#312
+    Gap 2): without it the manifest builder was a library function no
+    orchestrator could reach. Returns ``{"path", "campaign_id",
+    "run_count", "signature"}`` — the signature is the manifest's
+    self-attesting digest, so a caller can record it (commit message,
+    paper appendix) without re-reading the file.
+
+    Idempotent by construction: the manifest is derived state, recomputed
+    from the sidecars on every call, so replaying the verb after more
+    submits simply refreshes the file to match the runs on disk.
+    """
+    target = write_provenance_manifest(Path(experiment_dir), spec.campaign_id)
+    written = json.loads(target.read_text(encoding="utf-8"))
+    return {
+        "path": str(target),
+        "campaign_id": spec.campaign_id,
+        "run_count": written.get("run_count", 0),
+        "signature": written.get("signature", ""),
+    }

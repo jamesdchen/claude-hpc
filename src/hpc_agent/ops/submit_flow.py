@@ -673,7 +673,7 @@ def _ensure_run_sidecar(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
     # $CONDA_ENV) and the $HPC_RUNTIME selector — i.e. exactly what this run
     # executes under. ``$MODULES`` is a space-joined string in job_env; split
     # it back to the ordered list compute_env_hash expects.
-    from hpc_agent.state.run_sha import compute_env_hash
+    from hpc_agent.state.run_sha import compute_data_sha, compute_env_hash
 
     modules_str = (job_env.get("MODULES") or "").strip()
     conda_env_str = (job_env.get("CONDA_ENV") or "").strip()
@@ -682,6 +682,16 @@ def _ensure_run_sidecar(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
         conda_source=(job_env.get("CONDA_SOURCE") or "").strip() or None,
         conda_envs=[conda_env_str] if conda_env_str else [],
         runtime=job_env.get("HPC_RUNTIME") or spec.runtime or None,
+    )
+    # #312: capture DATA identity when the spec declares its input dataset(s),
+    # symmetric with the env_hash capture above. Undeclared stays None — a
+    # null data_sha means "not captured", which must stay distinguishable from
+    # the real digest of an empty declaration; a declared-but-missing path
+    # contributes compute_data_sha's "absent" sentinel inside the hash.
+    data_sha = (
+        compute_data_sha(spec.input_datasets, base_dir=experiment_dir)
+        if spec.input_datasets
+        else None
     )
 
     write_run_sidecar(
@@ -708,6 +718,7 @@ def _ensure_run_sidecar(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
         node_sha=resolve_node_sha(
             experiment_dir, cmd_sha=cmd_sha, parent_run_ids=spec.parents or None
         ),
+        data_sha=data_sha,
         env_hash=env_hash,
     )
 

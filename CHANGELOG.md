@@ -5,6 +5,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.59 — 2026-06-10
+
+### Added — operator always-canary override (#283, last acceptance item)
+
+`HPC_AGENT_ALWAYS_CANARY=1` fires a canary on **every** submit, winning over the agent-supplied `canary: false` opt-out and both auto-skips (the #263 tiny-batch threshold and the #249 cached-`cmd_sha` TTL). The #155/#275 operator-vs-agent boundary applied in the strengthening direction: the documented agent opt-out stays, but the override exists only as an env var — no spec field can express it, so an unattended loop cannot talk itself out of an operator's canary policy. This was #283's one remaining (optional) acceptance item.
+
+### Added — Codex `--output-schema` live-validation mirror (#269 residual half)
+
+`scripts/validate_worker_json_schema.py --harness codex` drives the production `CodexCliInvoker` end-to-end (execpolicy fence, strict `worker.strict.output.json` via `--output-schema`, `--output-last-message` report) with the gate forced on — the same two-question protocol (loop composition + schema acceptance) that validated Claude's flip in 0.10.58, ready to run wherever a `codex` CLI and credentials exist. Codex's `HPC_AGENT_CODEX_OUTPUT_SCHEMA` stays off by default until that run passes.
+
+### Added — OTel metrics alongside spans (#313), on the merged #223 `otel` sink
+
+The `claude/issue-223-otel-telemetry-sink` foundation branch is merged (the `otel`/`otlp` value for `HPC_TELEMETRY_SINK`, span export with `hpc.*` attributes), and the deferred metrics half lands on top: the same single `telemetry.record()` producer now also emits the `hpc.events` counter (per-event-kind, dimensioned by a bounded-enum label allowlist — `decision` / `error_class` / `disposition` / `lifecycle_state` / `ok`) and the `hpc.event.value` histogram (every numeric payload field, dimensioned by event + field). High-cardinality identifiers (`trial_token`, `run_id`, job ids, fingerprints) deliberately never become metric dimensions — they stay span attributes. Same deferred-import + fail-fast-on-missing-SDK pattern; the existing `hpc-agent[otel]` extra covers the metric exporter; an embedding host's global meter provider is respected.
+
+### Added — provenance closed end-to-end (#312), on the merged #222 foundations
+
+The `claude/issue-222-provenance-data-env` foundation branch is merged (`compute_data_sha` with DVC-pointer support, `compute_env_hash`, the sidecar v2 `data_sha`/`env_hash` fields, `build_provenance_manifest`/`write_provenance_manifest`, auto-captured `env_hash` at Step 6d) — with union conflict resolution against the DAG-kernel fields and the `models`→`execution` rename it predated. Both deferred gaps then close on top:
+
+- **Gap 1 — `data_sha` auto-capture.** `SubmitFlowSpec` gains `input_datasets` (the same path(s) a `validate-input-dataset` gate names); when declared, the sidecar-synthesis step computes `data_sha = compute_data_sha(input_datasets, base_dir=experiment_dir)` exactly where `env_hash` is captured — no manual `write-run-sidecar` step. The undeclared-dataset decision: `data_sha` stays `null` ("not captured" must remain distinguishable from the real digest of an empty declaration); a declared-but-missing path contributes `compute_data_sha`'s existing `absent` sentinel *inside* the hash. Provenance only — never part of the dedup identity.
+- **Gap 2 — agent-facing manifest surface.** New `provenance-manifest` primitive (`hpc-agent provenance-manifest --spec '{"campaign_id": ...}'`, verb `mutate`, idempotent by construction since the manifest is derived state recomputed from sidecars): wraps `write_provenance_manifest`, returns `{path, campaign_id, run_count, signature}` — the self-attesting digest a caller records to attest "these results came from exactly these {code, data, env, params}". An unknown campaign yields a well-formed `run_count: 0` manifest, not an error. Registry count: 94.
+
 ## 0.10.58 — 2026-06-10
 
 ### Changed — `--json-schema` worker output constraint is the default for Claude workers (#269)
