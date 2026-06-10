@@ -5,6 +5,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.60 — 2026-06-10
+
+### Added — `LlmJudgementResolver`: code drives, an LLM adjudicates the parks
+
+The middle resolver between the two extremes the headless tick-loop shipped with (spawn-a-whole-worker vs all-code halt-and-park). `hpc_agent._kernel.lifecycle.llm_resolver.LlmJudgementResolver` wraps any inner code `JudgementResolver`; when the inner parks (the exit-3 residue convention), it makes **one bounded `structured()` call** to adjudicate the residue against a caller-authored **closed menu** of candidate outcomes, records the verdict as a contract-valid judgement `WorkerDecision` (non-empty `why`, rejected alternatives — `parse_worker_report` validates the merged report), feeds the choice back through the `fields.resolved` channel, and retries the inner. Protocol guarantees, each pinned by a test: success/non-residue passes through with zero LLM calls; an un-menued residue parks with zero LLM calls (genuine interviews are not menu-shaped); off-menu choices are rejected by `post_validate` and repaired; a no-progress guard parks instead of spinning when the inner re-emits the residue; `"park"` is always offered and always honored; an exhausted `structured()` budget parks gracefully.
+
+`DeterministicCampaignResolver` now honors `fields.resolved["path"]` — only when `classify-campaign-path` itself escalated (deterministic evidence always wins; the hint exists to break the tie code could not), recording the adjudication provenance in the decision's `why`. The e2e test drives the full bridge: classify escalates → one fake-model adjudication → the decide chain continues to the (stubbed) submit seam and advances the cursor — exactly one model call, zero worker spawns.
+
+New guide [`docs/workflows/code-driven-orchestration.md`](docs/workflows/code-driven-orchestration.md) documents the third consumption style end-to-end: the `drive_once` + `StepTable` + `JudgementResolver` loop seam, the bridge, the pure-CLI escalation-as-data recipe (`DECISION_POINTS`, `candidate_actions`, `needs_decision`), DAG-frontier composition (and that recorded walks of that shape are the dag-kernel earn-it evidence), and the per-tick cost model.
+
 ## 0.10.59 — 2026-06-10
 
 ### Added — operator always-canary override (#283, last acceptance item)
