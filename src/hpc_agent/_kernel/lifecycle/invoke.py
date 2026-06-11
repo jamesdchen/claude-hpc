@@ -61,12 +61,13 @@ surface, with its own precedence rules:
    entries out-ranking allow by ``priority``.
 4. **Decode-schema-vs-floor.** :func:`parse_worker_report` is the always
    -on floor that validates the worker's final JSON report. A driver MAY
-   add a decode-time schema accelerator on top, but it is optional, off by
-   default, and gated PER HARNESS (turning it on is gated on a per-harness
-   live-validation run, #269). Claude: ``--json-schema`` gated by
-   ``HPC_AGENT_WORKER_JSON_SCHEMA`` (lenient ``worker.output.json``).
+   add a decode-time schema accelerator on top, gated PER HARNESS on a
+   live-validation run (#269). Claude: ``--json-schema``, **on by
+   default** since its run (0.10.59), opt-out via
+   ``HPC_AGENT_WORKER_JSON_SCHEMA=0`` (lenient ``worker.output.json``).
    Codex: ``--output-schema`` gated by ``HPC_AGENT_CODEX_OUTPUT_SCHEMA``
-   (API-strict ``worker.strict.output.json``). Gemini: no CLI decode
+   (API-strict ``worker.strict.output.json``), still off by default
+   pending its own run. Gemini: no CLI decode
    schema exists (``responseSchema`` is API/SDK-only), so the Gemini path
    leans entirely on the #304 floor.
 
@@ -529,7 +530,7 @@ def _run_claude_worker(
         )
     output = proc.stdout
     stderr = getattr(proc, "stderr", None) or ""
-    # The decode constraint is on by default since 0.10.58; a `claude` CLI
+    # The decode constraint is on by default since 0.10.59; a `claude` CLI
     # predating --json-schema rejects the flag with an opaque unknown-option
     # error. Name the off-switch so the failure carries its own remediation.
     if (

@@ -6,7 +6,7 @@ default is gated on a LIVE per-harness validation run (the gate split of #318):
 
 * **claude** — `claude -p --json-schema` with the lenient ``worker.output.json``.
   Validated 2026-06-10 (CLI 2.1.170, three consecutive passes) and flipped on
-  by default in 0.10.58; this harness re-validates after CLI upgrades.
+  by default in 0.10.59; this harness re-validates after CLI upgrades.
 * **codex** — `codex exec --output-schema` with the API-strict
   ``worker.strict.output.json``. The still-pending #269 half: its gate
   (``HPC_AGENT_CODEX_OUTPUT_SCHEMA``) stays off by default until this harness

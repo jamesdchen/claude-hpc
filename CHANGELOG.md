@@ -5,9 +5,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
-## 0.10.61 — 2026-06-11
+## 0.10.62 — 2026-06-11
 
-### Fixed — review findings on the 0.10.58–0.10.60 work
+### Fixed — review findings on the 0.10.59–0.10.61 work
 
 A seven-angle review of the branch surfaced one real gap and two hardenings, all fixed with firing tests, plus two cleanups:
 
@@ -18,7 +18,7 @@ A seven-angle review of the branch surfaced one real gap and two hardenings, all
 
 Considered and deliberately kept: `ResidueAdjudication` stays a separate shape from the `CandidateAction` family (adjudication verdict vs candidate offer — different roles); a repo-wide canonical-JSON helper sweep is its own change.
 
-## 0.10.60 — 2026-06-10
+## 0.10.61 — 2026-06-10
 
 ### Added — `LlmJudgementResolver`: code drives, an LLM adjudicates the parks
 
@@ -28,7 +28,7 @@ The middle resolver between the two extremes the headless tick-loop shipped with
 
 New guide [`docs/workflows/code-driven-orchestration.md`](docs/workflows/code-driven-orchestration.md) documents the third consumption style end-to-end: the `drive_once` + `StepTable` + `JudgementResolver` loop seam, the bridge, the pure-CLI escalation-as-data recipe (`DECISION_POINTS`, `candidate_actions`, `needs_decision`), DAG-frontier composition (and that recorded walks of that shape are the dag-kernel earn-it evidence), and the per-tick cost model.
 
-## 0.10.59 — 2026-06-10
+## 0.10.60 — 2026-06-10
 
 ### Added — operator always-canary override (#283, last acceptance item)
 
@@ -36,7 +36,7 @@ New guide [`docs/workflows/code-driven-orchestration.md`](docs/workflows/code-dr
 
 ### Added — Codex `--output-schema` live-validation mirror (#269 residual half)
 
-`scripts/validate_worker_json_schema.py --harness codex` drives the production `CodexCliInvoker` end-to-end (execpolicy fence, strict `worker.strict.output.json` via `--output-schema`, `--output-last-message` report) with the gate forced on — the same two-question protocol (loop composition + schema acceptance) that validated Claude's flip in 0.10.58, ready to run wherever a `codex` CLI and credentials exist. Codex's `HPC_AGENT_CODEX_OUTPUT_SCHEMA` stays off by default until that run passes.
+`scripts/validate_worker_json_schema.py --harness codex` drives the production `CodexCliInvoker` end-to-end (execpolicy fence, strict `worker.strict.output.json` via `--output-schema`, `--output-last-message` report) with the gate forced on — the same two-question protocol (loop composition + schema acceptance) that validated Claude's flip in 0.10.59, ready to run wherever a `codex` CLI and credentials exist. Codex's `HPC_AGENT_CODEX_OUTPUT_SCHEMA` stays off by default until that run passes.
 
 ### Added — OTel metrics alongside spans (#313), on the merged #223 `otel` sink
 
@@ -49,7 +49,7 @@ The `claude/issue-222-provenance-data-env` foundation branch is merged (`compute
 - **Gap 1 — `data_sha` auto-capture.** `SubmitFlowSpec` gains `input_datasets` (the same path(s) a `validate-input-dataset` gate names); when declared, the sidecar-synthesis step computes `data_sha = compute_data_sha(input_datasets, base_dir=experiment_dir)` exactly where `env_hash` is captured — no manual `write-run-sidecar` step. The undeclared-dataset decision: `data_sha` stays `null` ("not captured" must remain distinguishable from the real digest of an empty declaration); a declared-but-missing path contributes `compute_data_sha`'s existing `absent` sentinel *inside* the hash. Provenance only — never part of the dedup identity.
 - **Gap 2 — agent-facing manifest surface.** New `provenance-manifest` primitive (`hpc-agent provenance-manifest --spec '{"campaign_id": ...}'`, verb `mutate`, idempotent by construction since the manifest is derived state recomputed from sidecars): wraps `write_provenance_manifest`, returns `{path, campaign_id, run_count, signature}` — the self-attesting digest a caller records to attest "these results came from exactly these {code, data, env, params}". An unknown campaign yields a well-formed `run_count: 0` manifest, not an error. Registry count: 94.
 
-## 0.10.58 — 2026-06-10
+## 0.10.59 — 2026-06-10
 
 ### Changed — `--json-schema` worker output constraint is the default for Claude workers (#269)
 
@@ -61,6 +61,16 @@ The decode-time output constraint shipped opt-in because two questions were unan
 The harness is committed as `scripts/validate_worker_json_schema.py`: it exercises the production spawn path (`_run_claude_worker` argv assembly, temp-file + stdin prompt transport, JSON result-envelope unwrap) with the production schema loader, gives the worker a multi-step task with observable side effects, and verifies exit code, both side-effect files, schema validity of the final message (`WorkerReport.model_validate`), and the token round-trip — rerunnable for future CLI upgrades (`--mode bare|ambient` for API-key vs environment-managed auth).
 
 The flip itself, per the #269 spec: `_worker_output_schema()` treats unset as **enabled** (`_decode_schema_enabled` gained a per-gate `default`), keeping `HPC_AGENT_WORKER_JSON_SCHEMA=0` as the documented off-switch back to the plain transport. `parse_worker_report`'s cross-field floor is unchanged — structural complement, not substitute. Per the per-harness discipline the gate split exists for, **Codex's `HPC_AGENT_CODEX_OUTPUT_SCHEMA` stays off by default** — it has had no live run; that residual half stays tracked in #269. Exact-argv tests now pin `--output-format json --json-schema <minified schema>` on the default Claude spawn (both the `--bare` and OAuth paths); the plain-transport test pins the off-switch; the #169 large-prompt argv guard exempts only the fixed ~2KB schema constant. `docs/reference/env-vars.md` updated to match.
+## 0.10.58 — 2026-06-11
+
+### Fixed — the skill-return "additive net" never fired: autofetch re-triggered onto the emit Bash call + new Stop guard
+
+The 2026-06-10 demo re-surfaced the sub-skill boundary stall the 0.10.54 prose fix was supposed to mitigate: `hpc-wrap-entry-point` committed its return via `emit-skill-return`, the orchestrator ended its turn anyway, and the parent `/submit-hpc` procedure stalled until a human typed "keep going". Diagnosis: the prose is advisory, and the harness-side safety net — the `PostToolUse` autofetch hook — was a **structural no-op**. It matched the `Skill` tool, but Claude Code's Skill tool returns *immediately* (its tool result is the injected instructions); the sub-skill body, including the final `emit-skill-return`, runs **afterwards** as ordinary Bash calls. At `PostToolUse(Skill)` time the envelope cannot exist yet, so the hook never injected anything on a fresh run — and could only ever have injected a *stale* envelope from a prior run. Two-tier fix:
+
+- **Tier 1 (retrigger)** — `skill_return_autofetch` now matches `Bash` and fires on the `emit-skill-return` command itself, the one event that coincides with the envelope existing. The skill name and `--experiment-dir` are parsed from the command (quoted/`=`/chained `&&` forms covered), falling back to the payload `cwd`. The installed command wraps the Python entry in a bash `case "$input" in *emit-skill-return*)` pre-filter so the every-Bash-call common path costs a bash builtin, not a ~300-500ms Windows interpreter start (#288 class).
+- **Tier 2 (deterministic backstop)** — new `Stop` hook `skill_return_stop_guard`: when the agent is about to end its turn with a committed-but-unfetched envelope under `<cwd>/.hpc/_returns/`, it blocks the stop with a reason instructing `fetch-skill-return` + continue the parent's next step. `PostToolUse` hooks can't catch this failure mode (it is precisely "no further tool call happens"); `Stop` fires at the exact failure point. Self-healing (the fetch deletes the envelope) and loop-safe (`stop_hook_active` passes through).
+
+`install-commands` wires both: `_merge_skill_return_hook` generalised to `_merge_hook_entry(event, entry, needle)`, reporting `settings_hook` (autofetch) + new `settings_stop_hook` (guard) — and heals a pre-0.10.58 `matcher: "Skill"` entry in place rather than appending a duplicate beside the dead one. Docs: the `skill-policy.md` seam section now records the Skill-tool timing lesson.
 
 ## 0.10.57 — 2026-06-10
 
