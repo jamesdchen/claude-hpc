@@ -129,7 +129,8 @@ def write_provenance_manifest(
     Writes ``<experiment>/.hpc/provenance/<campaign_id>.json`` and returns
     ``(path, written_object)`` — the written object is handed back so a
     caller (the ``provenance-manifest`` primitive) can summarize what was
-    written without re-reading the file it just wrote. The written object is the :func:`build_provenance_manifest`
+    written without re-reading the file it just wrote. The written object
+    is the :func:`build_provenance_manifest`
     record plus a top-level ``signature`` (its :func:`manifest_signature`)
     so the file is self-attesting — a reader can recompute the signature
     over ``{everything except signature}`` and confirm it matches.
