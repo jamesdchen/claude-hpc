@@ -130,7 +130,7 @@ def _otel_attr_value(value: Any) -> Any:
     """
     if isinstance(value, bool | int | float | str):
         return value
-    if isinstance(value, (list, tuple)) and all(
+    if isinstance(value, list | tuple) and all(
         isinstance(v, bool | int | float | str) for v in value
     ):
         return list(value)
