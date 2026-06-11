@@ -5,6 +5,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.61 — 2026-06-11
+
+### Fixed — review findings on the 0.10.58–0.10.60 work
+
+A seven-angle review of the branch surfaced one real gap and two hardenings, all fixed with firing tests, plus two cleanups:
+
+- **Provenance capture now covers pre-written sidecars.** `data_sha`/`env_hash` were computed only on `_ensure_run_sidecar`'s synthesize path — the normal flows (Step 6d / `resolve-submit-inputs` pre-write the sidecar) never captured them. New `backfill_run_sidecar_provenance` (`state/runs.py`, same post-write-update precedent and lock seam as `update_run_sidecar_job_ids`) fills **only null** fields at submit time — an explicitly recorded value is never overwritten and the write-first invariant is untouched. The capture itself extracted to `_spec_provenance`, shared by both paths.
+- **The #269 flip's old-CLI failure now names its off-switch.** A `claude` CLI predating `--json-schema` rejects the flag; `_run_claude_worker` detects the unknown-option stderr shape and appends remediation naming `HPC_AGENT_WORKER_JSON_SCHEMA=0`.
+- **`LlmJudgementResolver` never raises.** A third-party inner emitting a contract-invalid residue report (or a menu keyed on a point invalid for the workflow) made `parse_worker_report` raise out of the resolver, crashing the tick loop. The violation is now annotated on the returned report (`WORKER-REPORT CONTRACT VIOLATION`) and the park stands — a resolver's contract is to return, not raise.
+- Cleanups: boolean env-flag parsing extracted to `infra/env_flags.py:env_flag` (the decode-schema gates and `HPC_AGENT_ALWAYS_CANARY` previously each inlined it); `write_provenance_manifest` returns `(path, written_object)` so the primitive no longer re-reads the file it just wrote.
+
+Considered and deliberately kept: `ResidueAdjudication` stays a separate shape from the `CandidateAction` family (adjudication verdict vs candidate offer — different roles); a repo-wide canonical-JSON helper sweep is its own change.
+
 ## 0.10.60 — 2026-06-10
 
 ### Added — `LlmJudgementResolver`: code drives, an LLM adjudicates the parks

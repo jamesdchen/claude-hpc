@@ -752,6 +752,43 @@ def update_run_sidecar_job_ids(experiment_dir: Path, run_id: str, job_ids: list[
     return target
 
 
+def backfill_run_sidecar_provenance(
+    experiment_dir: Path,
+    run_id: str,
+    *,
+    data_sha: str | None,
+    env_hash: str | None,
+) -> Path:
+    """Fill *null* provenance fields on an existing sidecar; return its path.
+
+    The #312 capture seam for sidecars that were pre-written (Step 6d /
+    ``resolve-submit-inputs``) before submit-flow could compute ``data_sha``
+    / ``env_hash``: strictly **additive** — a field is written only when the
+    sidecar's current value is null/absent AND the supplied value is
+    non-null, so an explicitly recorded provenance value is never
+    overwritten and the write-first invariant (#148/#150: never clobber a
+    pre-written sidecar's config) is untouched. Same post-write-update
+    precedent as :func:`update_run_sidecar_job_ids`, same lock seam.
+
+    Raises :class:`FileNotFoundError` if no sidecar exists for *run_id*.
+    """
+    target = run_sidecar_path(experiment_dir, run_id)
+    if not target.is_file():
+        raise FileNotFoundError(f"run sidecar not found: {target}")
+    from hpc_agent.infra.io import atomic_locked_update
+
+    def _mutate(existing: dict[str, Any] | None) -> dict[str, Any]:
+        if existing is None:
+            raise FileNotFoundError(f"run sidecar not found: {target}")
+        for field, value in (("data_sha", data_sha), ("env_hash", env_hash)):
+            if value is not None and existing.get(field) is None:
+                existing[field] = value
+        return existing
+
+    atomic_locked_update(target, _mutate)
+    return target
+
+
 # Default minimum age before a sidecar is eligible for orphan pruning.
 # ``write_run_sidecar`` writes the (jobless) sidecar at Step 6d, then
 # ``submit_flow`` runs the rsync + qsub + ``update_run_sidecar_job_ids``

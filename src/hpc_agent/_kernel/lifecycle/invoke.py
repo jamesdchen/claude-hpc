@@ -419,10 +419,9 @@ def _decode_schema_enabled(env_var: str, *, default: bool = False) -> bool:
     only ``1``/``true``/``yes``/``on`` enable, everything else (``0``, ``false``,
     …) disables, so the documented off-switch works on a default-on gate.
     """
-    value = os.environ.get(env_var, "").strip()
-    if not value:
-        return default
-    return value.lower() in {"1", "true", "yes", "on"}
+    from hpc_agent.infra.env_flags import env_flag
+
+    return env_flag(env_var, default=default)
 
 
 def _load_schema_resource(resource: str) -> str | None:
@@ -529,6 +528,22 @@ def _run_claude_worker(
             check=False,
         )
     output = proc.stdout
+    stderr = getattr(proc, "stderr", None) or ""
+    # The decode constraint is on by default since 0.10.58; a `claude` CLI
+    # predating --json-schema rejects the flag with an opaque unknown-option
+    # error. Name the off-switch so the failure carries its own remediation.
+    if (
+        proc.returncode != 0
+        and output_schema is not None
+        and "--json-schema" in stderr
+        and ("unknown" in stderr.lower() or "unrecognized" in stderr.lower())
+    ):
+        stderr += (
+            "\nhpc-agent: this `claude` CLI does not support --json-schema (the "
+            "decode-time worker output constraint, on by default). Upgrade the "
+            "claude CLI, or set HPC_AGENT_WORKER_JSON_SCHEMA=0 to fall back to "
+            "the plain transport."
+        )
     cache_stats: dict[str, int] | None = None
     if use_json:
         # Unwrap the JSON result envelope: the worker's report is the inner
@@ -554,7 +569,7 @@ def _run_claude_worker(
     return InvocationResult(
         exit_code=proc.returncode,
         output=output,
-        stderr=getattr(proc, "stderr", None) or "",
+        stderr=stderr,
         cache_stats=cache_stats,
     )
 

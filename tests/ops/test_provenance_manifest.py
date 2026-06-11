@@ -149,9 +149,10 @@ def test_signature_deterministic_and_content_sensitive(tmp_path: Path) -> None:
 
 def test_write_manifest_is_self_attesting(tmp_path: Path) -> None:
     _write(tmp_path, "20260101-000001-aaaaaaa", campaign_id="camp", env_hash="e" * 64)
-    target = write_provenance_manifest(tmp_path, "camp")
+    target, written_obj = write_provenance_manifest(tmp_path, "camp")
     assert target == tmp_path / ".hpc" / "provenance" / "camp.json"
     written = json.loads(target.read_text(encoding="utf-8"))
+    assert written == written_obj  # the returned object IS what was written
 
     sig = written.pop("signature")
     # Re-deriving the signature over the body (sans signature) reproduces it.
@@ -160,7 +161,7 @@ def test_write_manifest_is_self_attesting(tmp_path: Path) -> None:
 
 def test_write_manifest_sanitizes_campaign_in_filename(tmp_path: Path) -> None:
     _write(tmp_path, "20260101-000001-aaaaaaa", campaign_id="team/exp")
-    target = write_provenance_manifest(tmp_path, "team/exp")
+    target, _ = write_provenance_manifest(tmp_path, "team/exp")
     assert target.name == "team_exp.json"
     assert target.parent == tmp_path / ".hpc" / "provenance"
 

@@ -193,3 +193,18 @@ def test_default_apply_decision_copies_not_mutates() -> None:
     assert updated["fields"]["resolved"] == {"path": "strategy"}
     assert "resolved" not in original["fields"]
     assert updated["fields"]["campaign_id"] == "c1"
+
+
+def test_contract_violation_is_annotated_not_raised(tmp_path: Path) -> None:
+    # A third-party inner emitting a residue point not enumerated for the
+    # workflow must not crash the tick loop: the resolver's contract is to
+    # RETURN (report, exit_code), so the violation is annotated instead.
+    model = _FakeModel([_choice("x")])
+
+    def inner(req: dict, exp: Path) -> tuple[WorkerReport, int]:
+        return _residue_report(point="bogus_point", outcome="weird"), _EXIT_RESIDUE
+
+    resolver = LlmJudgementResolver(inner=inner, model=model, menu={"bogus_point": ["x"]})
+    report, code = resolver(_request(), tmp_path)
+    assert code == _EXIT_RESIDUE
+    assert "CONTRACT VIOLATION" in report.anomalies

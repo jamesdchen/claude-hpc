@@ -123,11 +123,13 @@ def manifest_signature(manifest: dict[str, Any]) -> str:
 def write_provenance_manifest(
     experiment_dir: Path,
     campaign_id: str,
-) -> Path:
+) -> tuple[Path, dict[str, Any]]:
     """Build and atomically write the campaign provenance manifest.
 
     Writes ``<experiment>/.hpc/provenance/<campaign_id>.json`` and returns
-    its path. The written object is the :func:`build_provenance_manifest`
+    ``(path, written_object)`` — the written object is handed back so a
+    caller (the ``provenance-manifest`` primitive) can summarize what was
+    written without re-reading the file it just wrote. The written object is the :func:`build_provenance_manifest`
     record plus a top-level ``signature`` (its :func:`manifest_signature`)
     so the file is self-attesting — a reader can recompute the signature
     over ``{everything except signature}`` and confirm it matches.
@@ -150,7 +152,7 @@ def write_provenance_manifest(
     target = RepoLayout(experiment_dir).hpc / "provenance" / f"{safe_campaign}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(target, manifest_with_sig)
-    return target
+    return target, manifest_with_sig
 
 
 @primitive(
@@ -189,8 +191,7 @@ def provenance_manifest(*, experiment_dir: Path, spec: ProvenanceManifestInput) 
     from the sidecars on every call, so replaying the verb after more
     submits simply refreshes the file to match the runs on disk.
     """
-    target = write_provenance_manifest(Path(experiment_dir), spec.campaign_id)
-    written = json.loads(target.read_text(encoding="utf-8"))
+    target, written = write_provenance_manifest(Path(experiment_dir), spec.campaign_id)
     return {
         "path": str(target),
         "campaign_id": spec.campaign_id,

@@ -319,5 +319,24 @@ class LlmJudgementResolver:
     def _validated(report: WorkerReport, workflow: str) -> WorkerReport:
         """Round-trip through ``parse_worker_report`` — the same self-check the
         deterministic resolver applies: every decision point must be enumerated
-        for *workflow* and judgement points must carry a non-empty ``why``."""
-        return parse_worker_report(json.dumps(report.model_dump(mode="json")), workflow=workflow)
+        for *workflow* and judgement points must carry a non-empty ``why``.
+
+        A resolver's contract is to RETURN ``(report, exit_code)``, never to
+        raise — so a contract violation (a third-party inner emitting an
+        unenumerated point, or a menu keyed on a point invalid for this
+        workflow) is annotated on the report instead of crashing the tick
+        loop; the caller's exit code (a park, for every path that can get
+        here with bad decisions) stands.
+        """
+        from hpc_agent._kernel.extension.spawn_prompt import SpawnContractError
+
+        try:
+            return parse_worker_report(
+                json.dumps(report.model_dump(mode="json")), workflow=workflow
+            )
+        except SpawnContractError as exc:
+            note = f"WORKER-REPORT CONTRACT VIOLATION (returned unvalidated): {exc}"
+            anomalies = f"{report.anomalies} | {note}" if report.anomalies else note
+            return WorkerReport(
+                result=report.result, decisions=report.decisions, anomalies=anomalies
+            )

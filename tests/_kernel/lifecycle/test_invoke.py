@@ -1012,3 +1012,27 @@ def test_claude_oauth_still_wins_over_codex_and_gemini(
     monkeypatch.setenv("CODEX_API_KEY", "sk-codex")
     monkeypatch.setenv("GEMINI_API_KEY", "g-key")
     assert get_invoker().name == "claude-cli-oauth"
+
+
+def test_old_cli_json_schema_failure_names_the_off_switch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A `claude` CLI predating --json-schema rejects the flag; with the
+    # constraint on by default the failure must carry its own remediation.
+    class _Proc:
+        returncode = 2
+        stdout = ""
+        stderr = "error: unknown option '--json-schema'"
+
+    def _fake_run(argv, **kwargs):
+        idx = argv.index("--append-system-prompt-file") + 1
+        Path(argv[idx]).read_text(encoding="utf-8")
+        return _Proc()
+
+    monkeypatch.delenv("HPC_AGENT_WORKER_JSON_SCHEMA", raising=False)
+    monkeypatch.setattr(invoke_mod.subprocess, "run", _fake_run)
+    result = ClaudeCliInvoker().invoke(
+        RenderedPrompt(cacheable_prefix="P", variable_suffix="S"), cwd=tmp_path
+    )
+    assert result.exit_code == 2
+    assert "HPC_AGENT_WORKER_JSON_SCHEMA=0" in result.stderr
