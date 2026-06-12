@@ -22,10 +22,12 @@ __all__ = [
     "get_backend_class",
     "register",
     "register_profile",
+    "registered_backend_names",
     "template_ext_for",
 ]
 
 import abc
+import importlib
 import os
 import re
 import subprocess
@@ -475,6 +477,35 @@ def get_backend_class(name: str) -> type[HPCBackend]:
 def template_ext_for(scheduler: str) -> str:
     """Convenience accessor for ``get_backend_class(scheduler).template_ext``."""
     return get_backend_class(scheduler).template_ext
+
+
+def registered_backend_names() -> frozenset[str]:
+    """Every backend name currently registered, plugin backends included.
+
+    Populates the built-in registry, then imports any installed plugin's
+    ``primitive_modules`` — the same side-effect import the primitive
+    registry performs at CLI startup — so a plugin's ``@register`` call
+    has fired before the names are read. Callers (the clusters.yaml
+    ``scheduler`` validator) must not depend on whether primitive
+    registration already ran in this process.
+
+    A plugin module that fails to import is skipped *silently* here:
+    :func:`hpc_agent._kernel.registry.primitive` owns the loud
+    ``warnings.warn`` path for that failure, and an optional plugin
+    must never take down config validation. The consequence of a skip
+    is the conservative one — the plugin's backend name stays
+    unregistered and a clusters.yaml entry naming it fails validation
+    with the names that ARE available.
+    """
+    _populate_registry()
+    from hpc_agent._kernel.registry.plugins import plugin_primitive_modules
+
+    for modname in plugin_primitive_modules():
+        try:
+            importlib.import_module(modname)
+        except Exception:  # noqa: BLE001, S112 — broken plugin must not crash the host
+            continue
+    return frozenset(_REGISTRY)
 
 
 # Re-export the profile-driven engine at the package root. Imported at the

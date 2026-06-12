@@ -34,6 +34,8 @@ print(get_backend_class('vastai'))
 "
 ```
 
-Submitting through it fails by design (`NotImplementedError`) until
-the API layer and the host's two deferred seams (config validation,
-backend construction) exist.
+With the plugin installed, a `clusters.yaml` entry may set
+`scheduler: vastai` directly — the host's config validator accepts any
+plugin-registered backend name. Submitting through it still fails by
+design (`NotImplementedError`) until the API layer and the host's
+remaining deferred seam (backend construction) exist.

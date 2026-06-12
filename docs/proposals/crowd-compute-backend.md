@@ -62,14 +62,17 @@ platforms, and two host seams are not yet pluggable:
    `examples/crowd-compute-executor/` keeps the in-container contract
    identical and pushes the ship-in/ship-out problem to the
    platform-side launcher, where it belongs.
-3. **Config validation.** `infra/clusters.py` permits an unknown
-   `scheduler:` value only with a pinned `scheduler_profile`, and
-   profiles are batch-scheduler-shaped (`KNOWN_FAMILIES` in
-   `infra/backends/profile.py`; `scheduler_resolve.py` deliberately
-   resolves only curated families). A crowd backend name cannot
-   currently flow through `clusters.yaml`. **Deferred core edit #1:**
-   accept a `scheduler:` value when a loaded plugin has registered
-   that backend name.
+3. **Config validation.** ~~Deferred core edit #1.~~ **Landed**: the
+   `clusters.yaml` `scheduler:` validator
+   (`infra/clusters.py::_require_pin_for_unknown_family`) now accepts,
+   besides a known family or a pinned `scheduler_profile`, any name a
+   loaded plugin registered — resolved through
+   `infra.backends.registered_backend_names()`, which imports plugin
+   `primitive_modules` for their `@register` side effect. Tests:
+   `tests/infra/test_clusters.py::TestKnownSchedulerFamilies` and
+   `tests/infra/backends/test_registered_backend_names.py`. Note
+   `scheduler_resolve.py` still deliberately *probes* only curated
+   families — a plugin backend is named in config, never auto-detected.
 4. **Backend construction.** The ops layer builds backends through
    `infra/backends/remote_factory.build_remote_backend`, which
    assumes `ssh_run` / `remote_repo` constructor kwargs. **Deferred
@@ -77,8 +80,8 @@ platforms, and two host seams are not yet pluggable:
    declare its own constructor requirements (API key env var, image
    ref) instead of the SSH pair.
 
-Both deferred edits are small, reviewed changes to declared seams —
-consistent with "core dispatches, never branches."
+Each edit is a small, reviewed change to a declared seam — consistent
+with "core dispatches, never branches."
 
 ## Trust model
 
@@ -104,8 +107,9 @@ gains no per-platform trust logic.
 ## Order of work (when implementation starts)
 
 1. Vast.ai first (SSH-shaped; `_remote_base` partially reuses).
-2. Deferred core edit #1 (config seam), then #2 (construction seam) —
-   each with its lint/test per the enforcement-map convention.
+2. ~~Core edit #1 (config seam)~~ — landed, see "What breaks" item 3.
+   Then #2 (construction seam), with its test per the enforcement-map
+   convention.
 3. Platform API calls + a recorded-fixture CI suite in the plugin repo.
 4. Salad/Akash later via the same seams; registry-collapse rule
    applies at member #2.
