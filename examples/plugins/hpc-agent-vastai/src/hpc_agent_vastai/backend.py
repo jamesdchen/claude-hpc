@@ -30,12 +30,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from hpc_agent.infra.backends import HPCBackend, register
+from hpc_agent.infra.backends import BackendBuildContext, HPCBackend, register
 
-#: Env var the real implementation reads its API key from. Named here
-#: so the eventual construction seam (proposal, deferred edit #2) can
-#: declare it instead of the SSH ssh_run/remote_repo pair.
+#: Env vars the backend reads its configuration from — the
+#: marketplace-shaped replacement for the SSH ssh_run/remote_repo pair
+#: the built-in backends take (see ``from_build_context``).
 API_KEY_ENV = "VAST_API_KEY"
+IMAGE_ENV = "HPC_VASTAI_IMAGE"
 
 
 @register("vastai")
@@ -72,6 +73,22 @@ class VastAIBackend(HPCBackend):
         # a marketplace — logs come from the instances API — so the
         # local path only holds fetched copies.
         self.log_dir = os.path.join(".hpc", "vastai-logs")
+
+    @classmethod
+    def from_build_context(cls, ctx: BackendBuildContext) -> VastAIBackend:
+        """Construct from the host's submit-flow build context.
+
+        The host's construction seam hands every registered non-built-in
+        backend the full :class:`BackendBuildContext`; this backend is
+        marketplace-shaped, so it deliberately ignores the SSH fields
+        (``ctx.ssh_target`` / ``ctx.ssh_run`` / ``ctx.remote_path``) and
+        reads its configuration from the environment instead
+        (``$VAST_API_KEY``, ``$HPC_VASTAI_IMAGE``).
+        """
+        return cls(
+            image=os.environ.get(IMAGE_ENV),
+            label=f"hpc-agent-{ctx.backend_name}",
+        )
 
     # ------------------------------------------------------------------
     # Submission. A marketplace has no shell submit command, so the

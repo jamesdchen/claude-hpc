@@ -73,15 +73,22 @@ platforms, and two host seams are not yet pluggable:
    `tests/infra/backends/test_registered_backend_names.py`. Note
    `scheduler_resolve.py` still deliberately *probes* only curated
    families — a plugin backend is named in config, never auto-detected.
-4. **Backend construction.** The ops layer builds backends through
-   `infra/backends/remote_factory.build_remote_backend`, which
-   assumes `ssh_run` / `remote_repo` constructor kwargs. **Deferred
-   core edit #2:** a construction seam that lets a registered backend
-   declare its own constructor requirements (API key env var, image
-   ref) instead of the SSH pair.
+4. **Backend construction.** ~~Deferred core edit #2.~~ **Landed**:
+   `remote_factory.build_remote_backend` now ends in a registry
+   dispatch — a *backend_name* its inline ladder doesn't know but the
+   registry does constructs itself via the new
+   `HPCBackend.from_build_context(ctx)` classmethod hook, receiving a
+   `BackendBuildContext` value object carrying every factory input
+   (including the bound `ssh_run` transport, which an SSH-shaped
+   marketplace backend may reuse and a pure-API one ignores). A
+   registered backend that hasn't overridden the hook fails loud with
+   `NotImplementedError`, per the capability-hook convention. Tests:
+   `tests/infra/backends/test_build_context_seam.py`.
 
-Each edit is a small, reviewed change to a declared seam — consistent
-with "core dispatches, never branches."
+Both edits were small, reviewed changes to declared seams — consistent
+with "core dispatches, never branches." What remains before a crowd
+backend can run real work is entirely plugin-side: the platform API
+calls behind the skeleton's stubs.
 
 ## Trust model
 
@@ -107,9 +114,8 @@ gains no per-platform trust logic.
 ## Order of work (when implementation starts)
 
 1. Vast.ai first (SSH-shaped; `_remote_base` partially reuses).
-2. ~~Core edit #1 (config seam)~~ — landed, see "What breaks" item 3.
-   Then #2 (construction seam), with its test per the enforcement-map
-   convention.
+2. ~~Core edit #1 (config seam) and #2 (construction seam)~~ — both
+   landed, see "What breaks" items 3–4. No core work remains.
 3. Platform API calls + a recorded-fixture CI suite in the plugin repo.
 4. Salad/Akash later via the same seams; registry-collapse rule
    applies at member #2.

@@ -15,15 +15,16 @@ crowd-compute backend without implementing any of it:
    platform SDK.
 
 With this plugin installed, a clusters.yaml entry may name
-``scheduler: vastai`` directly — the host's config validator accepts
-any plugin-registered backend name (no ``scheduler_profile`` pin
-needed).
+``scheduler: vastai`` directly (the host's config validator accepts
+any plugin-registered backend name; no ``scheduler_profile`` pin
+needed), and the submit flow constructs the backend through
+``VastAIBackend.from_build_context`` — the host's construction seam
+for non-SSH backends.
 
-What this skeleton does NOT do (see
-``docs/proposals/crowd-compute-backend.md`` in the hpc-agent repo for
-the remaining deferred seam): make API calls, or construct the
-backend from the ops layer (which today assumes ssh_run/remote_repo
-kwargs via ``remote_factory.build_remote_backend``).
+What this skeleton does NOT do: make API calls. Every compute method
+raises ``NotImplementedError`` until the real implementation lands
+(see ``docs/proposals/crowd-compute-backend.md`` in the hpc-agent
+repo).
 """
 
 from __future__ import annotations

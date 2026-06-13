@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 __all__ = [
+    "BackendBuildContext",
     "HPCBackend",
     "ProfileBackend",
     "RemoteProfileBackend",
@@ -32,6 +33,7 @@ import os
 import re
 import subprocess
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -55,6 +57,35 @@ _DEFAULT_JOB_ID_REGEX = re.compile(r"(\d+)")
 # block the agent indefinitely; we surface ``TimeoutExpired`` so callers
 # can map it to a cluster-category error.
 SUBMIT_TIMEOUT_SEC = 120
+
+
+@dataclass(frozen=True)
+class BackendBuildContext:
+    """Everything the submit/recover flows know when constructing a backend.
+
+    The construction seam for plugin-registered backends
+    (``docs/proposals/crowd-compute-backend.md``):
+    ``remote_factory.build_remote_backend``'s inline ladder knows the
+    SSH-shaped constructor kwargs of the built-in families; any other
+    registered backend receives this whole context via
+    :meth:`HPCBackend.from_build_context` and decides for itself which
+    fields it needs. The SSH-shaped fields are populated but a backend
+    is free to ignore them — a pure-API (crowd-compute) backend reads
+    its own configuration from the environment instead.
+    """
+
+    backend_name: str
+    script: str
+    ssh_target: str
+    remote_path: str
+    pass_env_keys: tuple[str, ...] | None
+    job_env_keys: tuple[str, ...]
+    slurm_account: str | None = None
+    slurm_cluster: str | None = None
+    # Bound transport: ``(cmd) -> CompletedProcess`` against ssh_target.
+    # An SSH-shaped plugin backend (e.g. a marketplace renting SSH-able
+    # instances) can reuse it; API-driven backends ignore it.
+    ssh_run: Callable[[str], subprocess.CompletedProcess[str]] | None = None
 
 
 class HPCBackend(abc.ABC):
@@ -205,6 +236,24 @@ class HPCBackend(abc.ABC):
     ) -> Any:
         """Return a ``ClusterSnapshot`` for *cluster_name* (B5-PR2)."""
         raise NotImplementedError("backend does not implement inspect_cluster")
+
+    @classmethod
+    def from_build_context(cls, ctx: BackendBuildContext) -> HPCBackend:
+        """Construct this backend from the submit-flow build context.
+
+        The construction seam for plugin-registered backends
+        (``docs/proposals/crowd-compute-backend.md``):
+        ``remote_factory.build_remote_backend`` constructs the built-in
+        families through its inline ladder (their SSH-shaped kwargs are
+        its business); any *other* registered backend is handed the
+        whole :class:`BackendBuildContext` here and owns the decision of
+        which fields matter — a crowd-compute backend typically ignores
+        the SSH pair and reads its API key / image from the environment.
+        Default raises so a plugin backend that hasn't opted into flow
+        construction fails loud at submit time, matching the other
+        capability-hook defaults.
+        """
+        raise NotImplementedError(f"{cls.__name__} does not implement from_build_context")
 
     @abc.abstractmethod
     def _build_command(
