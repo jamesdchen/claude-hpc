@@ -33,6 +33,7 @@ import os
 import re
 import subprocess
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,8 +41,6 @@ from typing import TYPE_CHECKING, Any
 from hpc_agent import errors
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from hpc_agent.infra.throughput import JobBatch, SubmissionPlan
 
 
@@ -538,22 +537,32 @@ def registered_backend_names() -> frozenset[str]:
     ``scheduler`` validator) must not depend on whether primitive
     registration already ran in this process.
 
-    A plugin module that fails to import is skipped *silently* here:
-    :func:`hpc_agent._kernel.registry.primitive` owns the loud
-    ``warnings.warn`` path for that failure, and an optional plugin
-    must never take down config validation. The consequence of a skip
-    is the conservative one — the plugin's backend name stays
-    unregistered and a clusters.yaml entry naming it fails validation
-    with the names that ARE available.
+    A plugin module that fails to import is *skipped, not fatal* — an
+    optional plugin must never take down config validation — but the
+    failure is surfaced via :func:`warnings.warn` so the operator
+    notices. :func:`hpc_agent._kernel.registry.primitive` emits its own
+    warning for the same module, but only on the CLI registration path;
+    this call site is reached during config validation, which a
+    library consumer can drive without ever touching CLI dispatch, so
+    it warns here too rather than relying on that path having run. The
+    consequence of a skip is the conservative one — the plugin's
+    backend name stays unregistered and a clusters.yaml entry naming it
+    fails validation with the names that ARE available.
     """
+    import warnings
+
     _populate_registry()
     from hpc_agent._kernel.registry.plugins import plugin_primitive_modules
 
     for modname in plugin_primitive_modules():
         try:
             importlib.import_module(modname)
-        except Exception:  # noqa: BLE001, S112 — broken plugin must not crash the host
-            continue
+        except Exception as exc:  # noqa: BLE001 — broken plugin must not crash the host
+            warnings.warn(
+                f"hpc-agent plugin backend module {modname!r} failed to import; "
+                f"its backends are unavailable: {exc}",
+                stacklevel=2,
+            )
     return frozenset(_REGISTRY)
 
 

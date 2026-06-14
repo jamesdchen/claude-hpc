@@ -13,6 +13,8 @@ from __future__ import annotations
 import sys
 import textwrap
 
+import pytest
+
 from hpc_agent._kernel.registry import plugins
 from hpc_agent.infra import backends
 
@@ -57,5 +59,10 @@ def test_broken_plugin_module_is_skipped(monkeypatch):
         "plugin_primitive_modules",
         lambda: ("hpc_agent_test_no_such_module_xyz",),
     )
-    names = backends.registered_backend_names()
-    assert "slurm" in names  # the helper survived and still reports built-ins
+    # The helper survives (still reports built-ins) AND surfaces the failure
+    # via a warning — config validation can run outside CLI dispatch, where
+    # the primitive registry's own warning never fires, so a silently-dropped
+    # plugin would otherwise be invisible.
+    with pytest.warns(UserWarning, match="hpc_agent_test_no_such_module_xyz"):
+        names = backends.registered_backend_names()
+    assert "slurm" in names

@@ -90,6 +90,22 @@ with "core dispatches, never branches." What remains before a crowd
 backend can run real work is entirely plugin-side: the platform API
 calls behind the skeleton's stubs.
 
+### Known follow-up: `resolve_scheduler_profile`
+
+`reduce/status.py::resolve_scheduler_profile` carries its own
+`_KNOWN_SCHEDULER_FAMILIES` gate and raises `SpecInvalid` for an
+unknown, unpinned family. It does **not** consult
+`registered_backend_names()`, so it disagrees with the config
+validator about whether a plugin name needs a pin. This is currently
+inert: the helper has no production call site (the live submit/recover
+path reads `scheduler_profile` straight off the spec and never calls
+it), so the disagreement cannot surface today. It is left as-is rather
+than papered over because the right reconciliation is not "return a
+golden profile for `vastai`" — a pure-API backend has *no* profile;
+it is for the caller to skip profile resolution for registered
+non-profile backends. When a real plugin first needs profile
+resolution, that is the seam to revisit.
+
 ## Trust model
 
 Crowd nodes are untrusted: results can be wrong or malicious.
