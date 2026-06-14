@@ -199,7 +199,7 @@ def _cmd_emit_skill_return(args: argparse.Namespace) -> int:
 
     try:
         envelope = json.loads(staged.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         return _err(
             error_code="spec_invalid",
             message=f"staged envelope at {staged} is not valid JSON: {exc}",
@@ -361,7 +361,7 @@ def _cmd_fetch_skill_return(args: argparse.Namespace) -> int:
 
     try:
         envelope = json.loads(committed.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         return _err(
             error_code="spec_invalid",
             message=f"return envelope at {committed} is not valid JSON: {exc}",
