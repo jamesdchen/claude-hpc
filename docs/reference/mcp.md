@@ -47,13 +47,26 @@ Most clients take a stdio server command. For example, in a Claude Code
 ```json
 {
   "mcpServers": {
-    "hpc-agent": { "command": "hpc-agent", "args": ["mcp-serve"] }
+    "hpc-agent": { "type": "stdio", "command": "hpc-agent", "args": ["mcp-serve"] }
   }
 }
 ```
 
 Use `["mcp-serve", "--catalog", "tiered"]` for large catalogs, and add
 `"--allow-mutations"` only when the client is trusted to submit jobs.
+
+The equivalent imperative form in Claude Code (writes the block above when run
+with `--scope project`; default scope is `local`):
+
+```bash
+claude mcp add --scope project hpc-agent -- hpc-agent mcp-serve
+```
+
+`--` is required — it separates Claude Code's own flags from the server command,
+so server flags go after it (`-- hpc-agent mcp-serve --catalog tiered`). To pass
+the SSH agent socket through to read-only cluster-query tools, add it via
+`--env` (and keep the server name off the slot right after `--env`):
+`claude mcp add --env SSH_AUTH_SOCK=$SSH_AUTH_SOCK --scope project hpc-agent -- hpc-agent mcp-serve`.
 
 ## Safety model
 

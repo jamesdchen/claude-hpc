@@ -110,8 +110,12 @@ and `--catalog tiered` mirrors the `find` → `describe` discovery flow. Full
 contract in [`docs/reference/mcp.md`](docs/reference/mcp.md).
 
 ```json
-{ "mcpServers": { "hpc-agent": { "command": "hpc-agent", "args": ["mcp-serve"] } } }
+{ "mcpServers": { "hpc-agent": { "type": "stdio", "command": "hpc-agent", "args": ["mcp-serve"] } } }
 ```
+
+Or register it imperatively in Claude Code (default scope is `local`; use
+`--scope project` to write the shared `.mcp.json` above):
+`claude mcp add --scope project hpc-agent -- hpc-agent mcp-serve`.
 
 ---
 
