@@ -28,6 +28,17 @@ _KNOWN_SKILL = "hpc-wrap-entry-point"
 _SAMPLE_ENVELOPE = {"ok": True, "skill": _KNOWN_SKILL, "entry_point_kind": "register_run"}
 
 
+@pytest.fixture(autouse=True)
+def _isolate_breadcrumb_home(tmp_path, monkeypatch):
+    """Isolate the skill-return breadcrumb (``<home>/_skill_return_dirs.json``)
+    per test. The breadcrumb lives under ``_current_homedir()`` (``~/.claude/hpc``,
+    HPC_JOURNAL_DIR-overridable); without isolation a sibling emit test on
+    another xdist worker leaks a committed-return dir into these no-op
+    assertions. Tests that set HPC_JOURNAL_DIR themselves override this default.
+    """
+    monkeypatch.setenv("HPC_JOURNAL_DIR", str(tmp_path / "_bc_home"))
+
+
 def _commit(exp: Path, skill: str, envelope: dict) -> Path:
     committed = _committed_path(exp, skill)
     committed.parent.mkdir(parents=True, exist_ok=True)
