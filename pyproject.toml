@@ -154,6 +154,20 @@ mypy_path = ["src"]
 #   pytest -m '' --cov=src/hpc_agent --cov-report=term-missing
 # to surface untested files in the critical path. No fail-under
 # threshold — chasing % over behaviour-coverage is the anti-pattern.
+#
+# CAVEAT — full-suite per-module numbers can UNDER-report. A few modules
+# (observed: incorporation/build/template.py, incorporation/build/tasks_py.py)
+# read as ~12% in a full-suite run while their own test files cover them
+# 90-100%. Root-caused to a coverage.py tracer artifact, not a test gap: the
+# bodies execute (their tests pass on the asserted output) but only the
+# import-time ``def`` lines get recorded. It is emergent — no single test
+# triggers it; it needs a critical mass of the suite — and reproduces both
+# serially and under ``-n auto``, so it is not an xdist combine race. On
+# Python 3.10/3.11 (C tracer) ``COVERAGE_CORE=pytrace`` recovers template.py
+# (slow, and only a partial fix). The discipline: before concluding a module
+# is under-tested, SPOT-CHECK by running its own test file
+# (``pytest tests/<path> --cov=hpc_agent.<module>``) — do not trust a single
+# full-suite number.
 [tool.coverage.run]
 source = ["src/hpc_agent"]
 branch = true
