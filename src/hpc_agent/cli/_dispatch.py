@@ -293,8 +293,15 @@ def _load_and_model_validate_spec(name: str, shape: CliShape, ns: argparse.Names
                     remediation=_schema_remediation(schema_name),
                 )
             raise errors.SpecInvalid(f"--spec is required for `{name}`")
-        # Optional-spec primitive with no --spec: let arg_pre synthesize.
-        return None
+        if spec_path is None:
+            # No --spec flag at all: let arg_pre synthesize the spec from other
+            # flags (e.g. aggregate-flow's --run-id shortcut).
+            return None
+        # An explicit --spec pointing at an empty object is a malformed spec,
+        # not the synthesize-from-another-flag path: fall through to schema /
+        # model validation so it fails with a schema-named remediation instead
+        # of slipping None past arg_pre into the primitive (which would
+        # dereference it and surface as an opaque `internal` AttributeError).
     if not isinstance(raw, dict):
         raise errors.SpecInvalid(
             f"--spec for `{name}` must be a JSON object; got {type(raw).__name__}"

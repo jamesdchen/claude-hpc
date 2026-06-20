@@ -39,7 +39,7 @@ from hpc_agent._wire.queries.recommend_partition import (
     RecommendPartitionResult,
     RecommendPartitionSpec,
 )
-from hpc_agent.cli._dispatch import CliShape
+from hpc_agent.cli._dispatch import CliShape, SchemaRef
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,6 +75,7 @@ def _highest_priority_non_debug(parts: list[PartitionInfo]) -> PartitionInfo | N
         ),
         spec_arg=True,
         spec_model=RecommendPartitionSpec,
+        schema_ref=SchemaRef(input="recommend_partition"),
         experiment_dir_arg=True,
     ),
     agent_facing=True,
