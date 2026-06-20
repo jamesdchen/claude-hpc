@@ -157,6 +157,27 @@ def _err(
     return _EXIT_CODE_BY_CATEGORY.get(category, EXIT_INTERNAL)
 
 
+def _failure_features_for(exc: errors.HpcError) -> dict[str, Any]:
+    """Minimal structured ``failure_features`` evidence for an error envelope.
+
+    Every ``ok=false`` envelope carries ``failure_features`` so a headless
+    caller can branch on structured evidence instead of parsing the prose
+    ``message`` (the WS3 contract — see
+    ``tests/contract/test_primitive_remediation.py``). At this boundary the
+    only signal available is the typed error itself, so ``error_class_raw``
+    preserves the producer's ``error_code`` verbatim. ``error_class`` resolves
+    to the governed ``FailureCategory`` vocabulary; that taxonomy keys on
+    cluster-side stderr *runtime*-failure signatures (``gpu_oom`` / ``walltime``
+    / …) which a pre-/non-execution error such as ``spec_invalid`` does not
+    carry, so these map to ``unknown`` — the documented escape hatch meaning
+    "not a recognized runtime-failure signature" — with the exact code kept in
+    ``error_class_raw``. Additive: nothing on these envelopes consumed
+    ``error_class`` before, so this introduces no retry/escalation behaviour
+    change (the deterministic policy still keys on ``error_code``/``retry_safe``).
+    """
+    return {"error_class": "unknown", "error_class_raw": exc.error_code}
+
+
 def _err_from_hpc(exc: errors.HpcError) -> int:
     remediation = exc.remediation
     # No hard pre-flight agent gate any more: ``ssh_run`` uses
@@ -183,6 +204,7 @@ def _err_from_hpc(exc: errors.HpcError) -> int:
         category=exc.category,
         retry_safe=exc.retry_safe,
         remediation=remediation,
+        failure_features=_failure_features_for(exc),
     )
 
 
@@ -312,14 +334,26 @@ def _validate_against_schema(payload: Any, schema_name: str) -> None:
         _validate(payload, schema)
     except jsonschema.ValidationError as exc:
         path = "/".join(str(p) for p in exc.absolute_path) or "<root>"
-        # Schema names are underscored (interview, submit_flow); CLI verbs are
-        # hyphenated (interview, submit-flow). The mapping is mechanical.
-        verb = schema_name.replace("_", "-")
         raise errors.SpecInvalid(
             f"--spec failed schema {schema_name}.input.json at {path}: {exc.message}",
-            remediation=(
-                f"Inspect the schema: `hpc-agent describe {verb}` (returns the "
-                f"input_schema name) or read hpc_agent/schemas/"
-                f"{schema_name}.input.json directly. Failing JSON path: {path}."
-            ),
+            remediation=_schema_remediation(schema_name, path=path),
         ) from exc
+
+
+def _schema_remediation(schema_name: str, *, path: str | None = None) -> str:
+    """Remediation string that names the schema file and the ``describe`` verb.
+
+    The single source for the "name something actionable" half of the
+    ``spec_invalid`` contract (``tests/contract/test_primitive_remediation.py``):
+    a caller gets the ``hpc-agent describe <verb>`` form (resolves to the input
+    schema) or the on-disk schema path, instead of the generic "rebuild via
+    /submit" default. Schema names are underscored (``submit_flow``); CLI verbs
+    are hyphenated (``submit-flow``) — the mapping is mechanical.
+    """
+    verb = schema_name.replace("_", "-")
+    tail = f" Failing JSON path: {path}." if path is not None else ""
+    return (
+        f"Inspect the schema: `hpc-agent describe {verb}` (returns the "
+        f"input_schema name) or read hpc_agent/schemas/{schema_name}.input.json "
+        f"directly.{tail}"
+    )

@@ -5,6 +5,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 on the wire surface enumerated in
 [`docs/integrations/CONTRACT.md`](docs/integrations/CONTRACT.md).
 
+## 0.10.64 — 2026-06-20
+
+### Added — structured `failure_features` on every error envelope + schema-named remediation for all `--spec` verbs (WS3, #333)
+
+The WS4 contract (`tests/contract/test_primitive_remediation.py`) requires every primitive that takes a JSON `--spec` to reject a bad input with structured evidence a headless caller can branch on without parsing prose. That structured layer (WS3) had shipped for only a handful of verbs; the rest sat on a `strict=True` xfail punch list. This drains the bulk of it at the shared chokepoints:
+
+- **`failure_features` on every `ok=false` envelope.** `_err_from_hpc` — the single renderer every `HpcError` (and the last-resort `internal` wrap) flows through — now attaches `failure_features` with `error_class_raw` (the producer's `error_code`, verbatim) and `error_class`. The `FailureCategory` vocabulary classifies cluster-side *runtime* stderr signatures (`gpu_oom`/`walltime`/…), which a pre-/non-execution error like `spec_invalid` does not carry, so those resolve to `unknown` — the documented escape hatch — with the exact code preserved in `error_class_raw`. Purely additive: nothing consumed `error_class` on these envelopes before, so deterministic retry/escalation (which keys on `error_code`/`retry_safe`) is unchanged.
+- **Schema-named remediation for the empty/under-specified `--spec` case.** A registry-projected verb fired with `{}` (or no `--spec`) previously raised a generic "rebuild via /submit" `SpecInvalid` *before* reaching schema validation. The dispatcher now validates the empty object against the verb's input schema first, so the rejection names `hpc-agent describe <verb>` / the schema file (the actionable form), falling back to the bare "--spec is required" only when the verb has no schema to point at. The `model_validate` failure path carries the same schema-named remediation. Factored into one `_schema_remediation` helper shared with `_validate_against_schema`.
+
+18 verbs were dropped from the `XFAIL_NO_FAILURE_FEATURES` punch list as they now satisfy the contract as hard assertions. The residual long tail (verbs whose `{}` is accepted as legitimately empty, verbs that raise a bare `SpecInvalid` deep in their own ops code such as `recommend-partition`, and `aggregate-flow`'s pre-existing dereference-before-validate `internal`) stays tracked in #333.
+
 ## 0.10.63 — 2026-06-11
 
 ### Fixed — lost main-array job id: post-qsub sidecar pre-stamp + fabricated-id guard + worker wait discipline

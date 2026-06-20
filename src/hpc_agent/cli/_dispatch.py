@@ -44,6 +44,7 @@ from hpc_agent.cli._helpers import (
     _err_from_hpc,
     _load_spec,
     _ok,
+    _schema_remediation,
     _validate_against_schema,
 )
 
@@ -275,6 +276,22 @@ def _load_and_model_validate_spec(name: str, shape: CliShape, ns: argparse.Names
     raw = _load_spec(spec_path, schema_name=None)
     if not raw:
         if shape.spec_required:
+            # An empty / absent --spec for a required-spec verb. Validate the
+            # empty object against the schema first so the rejection names the
+            # schema file / `hpc-agent describe <verb>` form (the remediation
+            # contract in tests/contract/test_primitive_remediation.py) instead
+            # of the generic SpecInvalid "rebuild" message. Falls through to the
+            # bare "--spec is required" only when the verb has no schema to
+            # point at, or a schema that legitimately accepts {}.
+            if schema_name is not None:
+                _validate_against_schema(raw, schema_name)
+                # Schema accepted {} (no required fields) but the verb still
+                # needs a populated spec — point at the schema / describe form
+                # rather than the generic SpecInvalid "rebuild" default.
+                raise errors.SpecInvalid(
+                    f"--spec is required for `{name}`",
+                    remediation=_schema_remediation(schema_name),
+                )
             raise errors.SpecInvalid(f"--spec is required for `{name}`")
         # Optional-spec primitive with no --spec: let arg_pre synthesize.
         return None
@@ -289,7 +306,8 @@ def _load_and_model_validate_spec(name: str, shape: CliShape, ns: argparse.Names
     try:
         return shape.spec_model.model_validate(raw)
     except Exception as exc:  # noqa: BLE001 — pydantic ValidationError shape
-        raise errors.SpecInvalid(str(exc)) from exc
+        remediation = _schema_remediation(schema_name) if schema_name is not None else None
+        raise errors.SpecInvalid(str(exc), remediation=remediation) from exc
 
 
 def _coerce_result(result: Any) -> dict[str, Any]:

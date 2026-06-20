@@ -164,29 +164,27 @@ def _run_verb_with_bad_spec(verb: str, spec: dict, tmp_path: Path) -> dict:
 
 
 # Verbs whose primitive does not yet emit ``failure_features`` on the
-# spec_invalid envelope. This is the punch list for WS3 (the parallel
-# work wiring ``failure_features`` into ``ErrorEnvelope``). When WS3
-# lands a verb, drop it from this set; the parametrize then asserts
-# the field as a hard requirement instead of xfail-ing.
+# spec_invalid envelope. This is the punch list for WS3 (#333 — wiring
+# ``failure_features`` into ``ErrorEnvelope``). When a verb lands, drop it
+# from this set; the parametrize then asserts the field as a hard
+# requirement instead of xfail-ing.
 #
-# Discovery method: every ``--spec``-bearing verb in the CLI tree was
-# fired against ``{}`` and inspected; none of them populate
-# ``failure_features`` today (the schema-aware remediation in 50a4b61d
-# was the prose-layer fix; the structured-evidence layer is WS3's
-# scope).
+# 2026-06-20: the shared chokepoint ``_err_from_hpc`` now attaches
+# ``failure_features`` (error_class + error_class_raw) to every ``ok=false``
+# envelope, so every ``--spec`` verb that reaches a typed error envelope now
+# populates the field — they were drained from this set. What remains are the
+# verbs that never reach that assertion from a bare ``{}`` probe: the
+# ``NEEDS_EXTRA_CLI_ARGS`` verbs (argparse rejects the invocation before any
+# envelope) and verbs whose ``{}`` is accepted as a legitimately-empty spec so
+# the probe never produces a failure envelope to inspect.
 XFAIL_NO_FAILURE_FEATURES: set[str] = {
+    # argparse rejects ``{}`` before an envelope is emitted (also in
+    # NEEDS_EXTRA_CLI_ARGS) — the failure_features assertion is unreachable.
     "interview",
-    "submit-flow",
-    "submit",
-    "submit-and-verify",
-    "submit-flow-batch",
-    "monitor-flow",
-    "aggregate-flow",
-    "build-submit-spec",
-    "build-tasks-py",
-    "classify-axis",
-    "recommend-partition",
-    "validate-campaign",
+    "resubmit",
+    # Verbs whose ``{}`` probe does not yield a typed failure envelope to carry
+    # failure_features (accepted as empty / different error mode); not testable
+    # from the bare-``{}`` surface. Drop as a richer probe is added.
     "validate-executor-signatures",
     "validate-input-dataset",
     "validate-self-qos-limit",
@@ -197,20 +195,9 @@ XFAIL_NO_FAILURE_FEATURES: set[str] = {
     "stages",
     "export-package",
     "recall",
-    "decide-monitor-arm",
-    "resubmit",
     "update-run-constraints",
     "summarize-submit-plan",
     "find-prior-run",
-    "write-run-sidecar",
-    "provenance-manifest",
-    # status-pipeline / submit-pipeline / campaign-run / resolve-submit-inputs are
-    # new spec-verb composites; like the other workflow composites they do not yet
-    # thread failure_features into their spec_invalid envelope (WS3).
-    "status-pipeline",
-    "submit-pipeline",
-    "campaign-run",
-    "resolve-submit-inputs",
 }
 
 
