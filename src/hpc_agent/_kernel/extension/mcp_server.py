@@ -417,7 +417,7 @@ class McpServer:
                     "name": {"type": "string", "description": "The primitive's wire name."},
                     "arguments": {
                         "type": "object",
-                        "description": "The primitive's arguments (e.g. {\"spec\": {...}}).",
+                        "description": 'The primitive\'s arguments (e.g. {"spec": {...}}).',
                     },
                 },
                 "required": ["name"],
