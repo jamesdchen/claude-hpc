@@ -148,6 +148,21 @@ class HPCBackend(abc.ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not implement alive_job_ids")
 
+    def task_statuses(self, job_ids: list[str], *, total_tasks: int) -> dict[int, str]:
+        """Per-task status map (0-based task id → ``TaskStatus`` value) for a run.
+
+        The richer-status counterpart of :meth:`alive_job_ids`: a pure-API
+        backend that can report per-task progress over its API (e.g. per-task
+        result artifacts present vs. the run still in flight) overrides this so
+        the monitor reports real complete / running / pending / failed counts
+        instead of run-level liveness alone. Keys are 0-based task ids in
+        ``range(total_tasks)``; values are
+        ``hpc_agent._kernel.contract.vocabulary.TaskStatus`` members. Default
+        raises so a backend that only knows liveness falls back to the liveness
+        summary, matching the other capability-hook defaults.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement task_statuses")
+
     def inspect(self, cluster_name: str, **kwargs: Any) -> Any:
         """Return a :class:`ClusterSnapshot` for *cluster_name*.
 

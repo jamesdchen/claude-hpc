@@ -66,7 +66,7 @@ def fake_backend():
         backends._REGISTRY.pop("fakemonbackend", None)
 
 
-def _record(run_id: str, *, job_ids=("1", "2")) -> RunRecord:
+def _record(run_id: str, *, job_ids=("1", "2"), backend="fakemonbackend") -> RunRecord:
     return RunRecord(
         run_id=run_id,
         profile="p",
@@ -79,7 +79,7 @@ def _record(run_id: str, *, job_ids=("1", "2")) -> RunRecord:
         submitted_at="2026-06-04T00:00:00Z",
         experiment_dir="/exp",
         status="in_flight",
-        backend="fakemonbackend",
+        backend=backend,
     )
 
 
@@ -132,6 +132,75 @@ def test_record_status_derives_liveness_with_zero_ssh(tmp_path, monkeypatch, fak
     assert summary["in_flight"] is True
     assert summary["alive_job_ids"] == ["1"]
     assert "checked_at" in summary
+
+
+def test_record_status_uses_task_statuses_when_available(tmp_path, monkeypatch):
+    # A backend that implements the richer ``task_statuses`` hook drives real
+    # per-task counts (complete/running/pending/failed) — not just liveness.
+    monkeypatch.setattr(status_mod, "_ssh_status_report", _boom)
+
+    class _RichBackend(HPCBackend):
+        scheduler_name = "fakerichbackend"
+        requires_ssh = False
+
+        @classmethod
+        def from_build_context(cls, ctx: object) -> _RichBackend:
+            return cls()
+
+        def _build_command(self, *a: object, **k: object) -> object:
+            raise NotImplementedError
+
+        def alive_job_ids(self, job_ids: list[str]) -> list[str]:
+            raise AssertionError("task_statuses available — liveness must not be used")
+
+        def task_statuses(self, job_ids: list[str], *, total_tasks: int) -> dict[int, str]:
+            return {0: "complete", 1: "complete", 2: "running", 3: "failed"}
+
+    backends.register("fakerichbackend")(_RichBackend)
+    try:
+        upsert_run(tmp_path, _record("r-rich", job_ids=("10",), backend="fakerichbackend"))
+        record = status_mod.record_status(
+            tmp_path,
+            "r-rich",
+            ssh_target="u@h",
+            remote_path="/remote",
+            job_ids=["10"],
+            job_name="j",
+        )
+    finally:
+        backends._REGISTRY.pop("fakerichbackend", None)
+
+    summary = record.last_status or {}
+    assert summary["complete"] == 2
+    assert summary["running"] == 1
+    assert summary["failed"] == 1
+    assert summary["pending"] == 0
+    assert summary["tasks"]["3"] == {"status": "failed"}
+    assert "checked_at" in summary
+
+
+def test_record_status_falls_back_to_liveness_without_task_statuses(
+    tmp_path, monkeypatch, fake_backend
+):
+    # The default fake backend only implements ``alive_job_ids`` — record_status
+    # must degrade gracefully to the run-level liveness summary.
+    monkeypatch.setattr(status_mod, "_ssh_status_report", _boom)
+    fake_backend.alive_return = ["1"]
+    upsert_run(tmp_path, _record("r-fallback"))
+
+    record = status_mod.record_status(
+        tmp_path,
+        "r-fallback",
+        ssh_target="u@h",
+        remote_path="/remote",
+        job_ids=["1", "2"],
+        job_name="j",
+    )
+
+    summary = record.last_status or {}
+    assert summary["in_flight"] is True
+    assert summary["alive_job_ids"] == ["1"]
+    assert "complete" not in summary  # liveness shape, not per-task counts
 
 
 def test_fetch_logs_pulls_via_backend_hook_with_zero_ssh(tmp_path, monkeypatch, fake_backend):

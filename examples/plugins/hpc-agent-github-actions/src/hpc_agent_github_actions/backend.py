@@ -296,6 +296,41 @@ class GitHubActionsBackend(HPCBackend):
                 alive.append(jid)
         return alive
 
+    def task_statuses(self, job_ids: list[str], *, total_tasks: int) -> dict[int, str]:
+        """Per-task status from uploaded ``task-<i>`` artifacts + run liveness.
+
+        Lets the host monitor report real per-task counts instead of run-level
+        liveness alone (the ``HPCBackend.task_statuses`` hook). A task whose
+        0-based ``task-<i>`` artifact has been uploaded is ``complete``; the
+        rest are ``running`` while any run in *job_ids* is still alive, else
+        ``failed`` — the run finished without that task's result. GitHub runs
+        the whole array under one workflow run, so there is no per-task
+        ``pending`` once dispatched. Values match the host's ``TaskStatus``
+        vocabulary (``complete`` / ``running`` / ``failed``).
+        """
+        completed: set[int] = set()
+        any_alive = False
+        for jid in job_ids:
+            run = self._get_run_any(jid)
+            if run is not None and str(run.get("status")) in _ALIVE_STATUSES:
+                any_alive = True
+            for art in self._owner_of(jid).list_artifacts(jid):
+                name = str(art.get("name", ""))
+                if name.startswith("task-"):
+                    try:
+                        completed.add(int(name[len("task-") :]))
+                    except ValueError:
+                        continue
+        statuses: dict[int, str] = {}
+        for i in range(total_tasks):
+            if i in completed:
+                statuses[i] = "complete"
+            elif any_alive:
+                statuses[i] = "running"
+            else:
+                statuses[i] = "failed"
+        return statuses
+
     def _get_run_any(self, run_id: str) -> dict[str, object] | None:
         """Probe every pooled account for *run_id* (run ids are account-scoped)."""
         for api in self._accounts:

@@ -8,6 +8,7 @@ import json
 from typing import TYPE_CHECKING
 
 from hpc_agent import errors
+from hpc_agent._kernel.contract.vocabulary import TaskStatus
 from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent.cli._dispatch import CliArg, CliShape
 from hpc_agent.infra.backends import backend_requires_ssh
@@ -41,6 +42,24 @@ def _status_handler(ns: argparse.Namespace) -> int:
 from hpc_agent.infra.cluster_status import ssh_status_report  # noqa: E402
 
 _ssh_status_report = ssh_status_report
+
+
+def _pure_api_status_summary(per_task: dict[int, str]) -> dict[str, object]:
+    """Build a ``last_status`` summary from a pure-API backend's per-task map.
+
+    Mirrors the SSH reporter's persisted shape — the five ``TaskStatus`` count
+    keys plus ``checked_at`` — and additionally carries a per-task ``tasks``
+    breakdown (``{task_id: {"status": ...}}``) so a consumer gets richer detail
+    than run-level liveness. Unknown/foreign status strings are bucketed under
+    ``unknown`` rather than silently dropped.
+    """
+    counts: dict[str, int] = {s.value: 0 for s in TaskStatus}
+    tasks: dict[str, dict[str, str]] = {}
+    for tid, status in sorted(per_task.items()):
+        key = status if status in counts else TaskStatus.UNKNOWN.value
+        counts[key] += 1
+        tasks[str(tid)] = {"status": status}
+    return {**counts, "tasks": tasks, "checked_at": utcnow_iso()}
 
 
 @primitive(
@@ -121,19 +140,26 @@ def record_status(
 
     _record = load_run(experiment_dir, run_id)
     if _record is not None and not backend_requires_ssh(_record.backend):
-        # Pure-API path (#337 Increment 4): no login-node reporter. Status is
-        # derived from the backend's ``alive_job_ids`` instance hook — liveness
-        # is the only ground truth a pure-API backend exposes here; per-task
-        # counts come back later through ``fetch_results`` (Increment 5), not
-        # this control-plane probe. Zero SSH.
+        # Pure-API path (#337): no login-node reporter. Prefer the backend's
+        # richer ``task_statuses`` hook (real per-task complete/running/pending/
+        # failed counts, derived over the API) and fall back to run-level
+        # ``alive_job_ids`` liveness for a backend that only knows liveness.
+        # Either way: zero SSH.
         from hpc_agent.infra.backends.remote_factory import backend_for_record
 
-        alive = backend_for_record(_record).alive_job_ids(job_ids)
-        summary: dict[str, object] = {
-            "checked_at": utcnow_iso(),
-            "alive_job_ids": sorted(alive),
-            "in_flight": bool(alive),
-        }
+        backend = backend_for_record(_record)
+        summary: dict[str, object]
+        try:
+            per_task = backend.task_statuses(job_ids, total_tasks=_record.total_tasks)
+        except NotImplementedError:
+            alive = backend.alive_job_ids(job_ids)
+            summary = {
+                "checked_at": utcnow_iso(),
+                "alive_job_ids": sorted(alive),
+                "in_flight": bool(alive),
+            }
+        else:
+            summary = _pure_api_status_summary(per_task)
     else:
         report = _ssh_status_report(
             ssh_target=ssh_target,
