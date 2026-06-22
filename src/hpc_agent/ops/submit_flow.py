@@ -316,7 +316,7 @@ def _run_shared_prelude(
     rsync_excludes: list[str] | None,
     scheduler: str | None,
     job_envs: list[dict[str, str]],
-    requires_ssh: bool,
+    requires_ssh: bool = True,  # SSH is the default transport; pure-API callers pass False
     skip_preflight: bool,
     skip_prelude_io: bool,
 ) -> None:
