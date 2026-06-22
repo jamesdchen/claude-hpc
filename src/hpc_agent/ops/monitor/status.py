@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING
 from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent.cli._dispatch import CliArg, CliShape
+from hpc_agent.infra.backends import backend_requires_ssh
 from hpc_agent.infra.time import utcnow_iso
-from hpc_agent.state.journal import update_run_status
+from hpc_agent.state.journal import load_run, update_run_status
 from hpc_agent.state.run_record import RunRecord, _atomic_write_json, runs_dir
 
 if TYPE_CHECKING:
@@ -118,33 +119,49 @@ def record_status(
     ):  # missing/bad sidecar → bare python; a bug propagates
         _sidecar = {}
 
-    report = _ssh_status_report(
-        ssh_target=ssh_target,
-        remote_path=remote_path,
-        run_id=run_id,
-        job_ids=job_ids,
-        job_name=job_name,
-        file_glob=file_glob,
-        min_rows=min_rows,
-        remote_activation=remote_activation_for_sidecar(_sidecar),
-    )
-    summary = dict(report.get("summary", {}))
-    summary["checked_at"] = utcnow_iso()
-    # Carry per-wave breakdown into the persisted last_status when the
-    # cluster-side reporter emitted one (sidecar carried a wave_map).
-    if isinstance(report.get("waves"), dict) and report["waves"]:
-        summary["waves"] = report["waves"]
-    # Carry the fresh scheduler-side preemption signal (exit 130/143 / state
-    # PREEMPTED) into last_status so the monitor's auto-resume gate (#299)
-    # reads it without a second round-trip. These are *report-space* ids
-    # (1-based scheduler array indices, matching report["tasks"] keys); the
-    # auto-resume composite converts them to 0-based HPC_TASK_ID for resubmit.
-    # Present only when the reporter found preempted tasks; absent → the
-    # composite falls back to a log-based fetch (cross-scheduler, e.g. SGE
-    # without exit codes).
-    preempted_ids = report.get("preempted_task_ids")
-    if isinstance(preempted_ids, list) and preempted_ids:
-        summary["preempted_task_ids"] = preempted_ids
+    _record = load_run(experiment_dir, run_id)
+    if _record is not None and not backend_requires_ssh(_record.backend):
+        # Pure-API path (#337 Increment 4): no login-node reporter. Status is
+        # derived from the backend's ``alive_job_ids`` instance hook — liveness
+        # is the only ground truth a pure-API backend exposes here; per-task
+        # counts come back later through ``fetch_results`` (Increment 5), not
+        # this control-plane probe. Zero SSH.
+        from hpc_agent.ops.backend_for_record import backend_for_record
+
+        alive = backend_for_record(_record).alive_job_ids(job_ids)
+        summary: dict[str, object] = {
+            "checked_at": utcnow_iso(),
+            "alive_job_ids": sorted(alive),
+            "in_flight": bool(alive),
+        }
+    else:
+        report = _ssh_status_report(
+            ssh_target=ssh_target,
+            remote_path=remote_path,
+            run_id=run_id,
+            job_ids=job_ids,
+            job_name=job_name,
+            file_glob=file_glob,
+            min_rows=min_rows,
+            remote_activation=remote_activation_for_sidecar(_sidecar),
+        )
+        summary = dict(report.get("summary", {}))
+        summary["checked_at"] = utcnow_iso()
+        # Carry per-wave breakdown into the persisted last_status when the
+        # cluster-side reporter emitted one (sidecar carried a wave_map).
+        if isinstance(report.get("waves"), dict) and report["waves"]:
+            summary["waves"] = report["waves"]
+        # Carry the fresh scheduler-side preemption signal (exit 130/143 / state
+        # PREEMPTED) into last_status so the monitor's auto-resume gate (#299)
+        # reads it without a second round-trip. These are *report-space* ids
+        # (1-based scheduler array indices, matching report["tasks"] keys); the
+        # auto-resume composite converts them to 0-based HPC_TASK_ID for resubmit.
+        # Present only when the reporter found preempted tasks; absent → the
+        # composite falls back to a log-based fetch (cross-scheduler, e.g. SGE
+        # without exit codes).
+        preempted_ids = report.get("preempted_task_ids")
+        if isinstance(preempted_ids, list) and preempted_ids:
+            summary["preempted_task_ids"] = preempted_ids
     record = update_run_status(experiment_dir, run_id, last_status=summary)
     # Cache the snapshot for cheap external reads. Best-effort: a write
     # failure here must not roll back the journal update.

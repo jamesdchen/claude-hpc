@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Any
 from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent.cli._dispatch import CliArg, CliShape
+from hpc_agent.infra.backends import backend_requires_ssh
 from hpc_agent.infra.clusters import load_clusters_config
 from hpc_agent.ops.monitor.logs import fetch_task_logs
 from hpc_agent.ops.monitor.status import _ssh_status_report
 from hpc_agent.state.journal import load_run
+from hpc_agent.state.run_record import runs_dir
 
 if TYPE_CHECKING:
     import argparse
@@ -110,6 +112,21 @@ def fetch_logs(
     record = load_run(experiment_dir, run_id)
     if record is None:
         raise errors.JournalCorrupt(f"no journal record for run_id {run_id!r}")
+
+    if not backend_requires_ssh(record.backend):
+        # Pure-API path (#337 Increment 4): no login node to ``ssh tail`` a
+        # per-task stderr path. The backend's ``fetch_logs`` instance hook pulls
+        # the run's logs over its API into a local dir; task-id selection is
+        # advisory (the API returns the run's logs as a unit). Zero SSH.
+        from hpc_agent.ops.backend_for_record import backend_for_record
+
+        dest = runs_dir(experiment_dir) / f"{run_id}-logs"
+        written = backend_for_record(record).fetch_logs(run_id, str(dest))
+        return {
+            "run_id": run_id,
+            "scheduler": record.backend,
+            "logs": [{"path": written}],
+        }
 
     resolved_task_ids: list[int] = []
     note: str | None = None
