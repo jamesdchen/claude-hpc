@@ -113,9 +113,11 @@ assumptions the proposal flags as "do not survive contact"):
   instance methods above replace them.
 
 For most tuning loops the clean path is to **not route through submit-flow** at
-all — drive the backend's dispatch/poll/fetch from your own local loop. See the
-`drive_gha.py` sketch in the chat history / the framework's
-`code-driven-orchestration` doc.
+all — drive the backend's dispatch/poll/fetch from your own local loop (propose
+params → `_execute_command` dispatches → `alive_job_ids` polls → `fetch_results`
+pulls → reduce → repeat). The framework's
+[`code-driven-orchestration`](../../../docs/workflows/code-driven-orchestration.md)
+doc documents this seam.
 
 ## Where the input data lives
 
@@ -215,8 +217,9 @@ two constraints, both already solved here:
 - **Ephemeral state** — the container is reclaimed after inactivity and re-cloned
   fresh, so the campaign state (`.hpc/runs/*.json`, `.hpc/campaigns/<id>/`, with
   `HPC_JOURNAL_DIR` pointed into the repo) must be committed back each iteration;
-  `prior()` replays it on the next session. The same checkpoint-to-git discipline
-  the data-staging and account-rotation sections rely on.
+  `prior()` replays it on the next session. It's the account-rotation section's
+  "local state is the source of truth" property — here that state just has to live
+  in git, because the container doesn't persist.
 
 Pieces to add when this is taken on: a SessionStart hook / `setup.sh` that
 installs hpc-agent + this plugin + strategy deps, the config as environment

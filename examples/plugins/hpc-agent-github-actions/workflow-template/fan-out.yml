@@ -21,6 +21,9 @@ on:
       campaign_id: { required: false, type: string }
       data_tag: { required: false, type: string, default: data-v1 } # release tag of the dataset
 
+permissions:
+  contents: read # gh release download needs this; artifacts need no token permission
+
 jobs:
   expand: # turn total_tasks into a 0..N-1 matrix
     runs-on: ubuntu-latest
@@ -58,7 +61,7 @@ jobs:
           # Store the dataset as a release asset, e.g.:
           #   gh release create data-v1 train.parquet
           # Release downloads are free + unmetered (GitHub -> runner, no egress).
-          gh release download "${{ inputs.data_tag }}" --dir data --clobber
+          gh release download "${{ inputs.data_tag }}" -R ${{ github.repository }} --dir data --clobber
 
   task: # the fan-out — one runner per task point (GitHub caps a matrix at 256)
     needs: [expand, prefetch]
@@ -84,7 +87,7 @@ jobs:
         name: Download the dataset (rare cache-miss fallback)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download "${{ inputs.data_tag }}" --dir data --clobber
+        run: gh release download "${{ inputs.data_tag }}" -R ${{ github.repository }} --dir data --clobber
       - name: Resolve this task's kwargs from .hpc/tasks.py
         # Mirrors the cluster dispatcher: resolve(HPC_TASK_ID) -> HPC_KW_* env
         # (the dispatcher contract in docs/integrations/CONTRACT.md). The
