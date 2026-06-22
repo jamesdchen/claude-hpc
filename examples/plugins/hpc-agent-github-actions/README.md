@@ -120,28 +120,73 @@ all — drive the backend's dispatch/poll/fetch from your own local loop. See th
 ## Where the input data lives
 
 The runners have no shared filesystem. `fetch_results` solves *data-out* (per-task
-metrics → artifacts), but each ephemeral cell must also obtain its *data-in* — the
-training set every trial reads.
+metrics → artifacts); this is the *data-in* half — the training set every trial
+reads. **Only the compute needs it**: the orchestrator just proposes
+hyperparameters and reduces metrics, so the dataset never touches the laptop /
+cloud container. It's purely a runner-side staging concern, content-addressed by
+the `data_sha` hpc-agent already computes.
 
-- **Only the compute needs the data.** The orchestrator (laptop or cloud
-  container) just proposes hyperparameters and reduces metrics; it never touches
-  the raw dataset. So this is purely a runner-side staging concern — the
-  orchestrator stays data-free.
-- **Decouple data location from compute, keyed by content.** On a cluster the
-  data sat on a shared mount; here it lives in a network-reachable store every
-  runner pulls from, ideally keyed by the `data_sha` hpc-agent already computes
-  from `input_datasets` (provenance + a cache key + cross-iteration drift
-  detection). Tiers by size/privacy:
-  - **small tabular (typical tree tuning):** commit it (or Git LFS) → `checkout`
-    brings it. Zero infra.
-  - **larger / private:** a GitHub Release asset, or an object store (S3 / GCS /
-    HF Hub) pulled per-job with a secret, cached via `actions/cache` so it's
-    fetched once per runner.
-- **The wiring:** the `task` job stages data into `LOCAL_DATA_DIR` — the
-  dispatcher-contract data root the executor already reads (see `fan-out.yml`).
-- **Pin the version.** Every campaign iteration must train on the *same* data for
-  metrics to compare; folding `data_sha` into the run's `env_hash` surfaces
-  accidental drift.
+### The end-to-end flow
+
+```
+orchestrator                         backend                       each runner
+────────────                         ───────                       ───────────
+spec.input_datasets=["data/train.   reads data_sha off the         actions/cache key=data-<sha>
+  parquet"]                          run sidecar, sends it as       → miss: dvc pull (fetch+md5
+  → submit-flow writes               a workflow_dispatch input        verify) → hit: bytes restored
+  data_sha to the sidecar            (cache key)                    LOCAL_DATA_DIR=$WORKSPACE/data
+                                                                    executor reads it
+```
+
+1. **Declare it** — put `input_datasets: ["data/train.parquet"]` on the submit
+   spec. submit-flow runs `compute_data_sha` and stamps `data_sha` on the run
+   sidecar (provenance leg #222).
+2. **The backend threads it** — `_execute_command` reads `data_sha` off
+   `.hpc/runs/<run_id>.json` and sends it as a `data_sha` dispatch input. No user
+   wiring; absent declaration → omitted (un-keyed cache).
+3. **Each runner stages by content** — the workflow caches `data/` keyed by
+   `data-<data_sha>`, so the bytes are pulled once per content version and any
+   data change misses the cache and re-pulls.
+
+### Recommended: DVC (the framework was built for it)
+
+`compute_data_sha` **special-cases DVC**: when a `data/train.parquet.dvc` pointer
+sits beside the path, it uses the pointer's md5 instead of re-hashing the working
+tree. So with DVC the whole chain is one identity:
+
+```bash
+# once, on the orchestrator:
+dvc add data/train.parquet      # writes data/train.parquet.dvc (commit it); bytes → DVC remote
+dvc push
+```
+
+Then `data_sha == the DVC md5`, and the runner's `dvc pull` (in `fan-out.yml`)
+fetches **and md5-verifies** the exact bytes — the cache key and the verified
+content are the same hash end to end. The bytes live in any DVC remote (S3 / GCS /
+Azure), private, never in the repo. Small tabular data is the trivial fallback:
+commit it and `checkout` brings it (no `.dvc`, no pull).
+
+### Runner-side: the executor reads `LOCAL_DATA_DIR`
+
+`LOCAL_DATA_DIR` is the dispatcher-contract data root; your executor already keys
+off it (no GitHub-specific code):
+
+```python
+# .hpc/executor.py
+import os, xgboost as xgb, pandas as pd
+from hpc_agent.execution.mapreduce.metrics_io import read_kw_env, write_metrics
+
+kw = read_kw_env()                                          # {"max_depth": 6, "eta": 0.3, ...}
+df = pd.read_parquet(os.path.join(os.environ["LOCAL_DATA_DIR"], "train.parquet"))
+booster = xgb.train({"max_depth": int(kw["max_depth"]), "eta": float(kw["eta"])},
+                    xgb.DMatrix(df.drop(columns="y"), label=df["y"]))
+rmse = ...                                                  # eval on a holdout
+write_metrics(os.environ["RESULT_DIR"], {"objective": rmse})  # → task-<i> artifact → reduce
+```
+
+Pin the version: every campaign iteration must train on the *same* data for
+metrics to compare. `data_sha` riding in the run's `env_hash` makes accidental
+drift change run identity, so it surfaces instead of silently skewing the sweep.
 
 ## Limits worth knowing
 

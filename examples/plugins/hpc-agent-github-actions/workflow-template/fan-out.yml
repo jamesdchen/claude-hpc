@@ -19,6 +19,7 @@ on:
       executor: { required: true, type: string } # per-task command, e.g. "python train.py"
       cmd_sha: { required: false, type: string }
       campaign_id: { required: false, type: string }
+      data_sha: { required: false, type: string } # hpc-agent's content hash of input_datasets
 
 jobs:
   expand: # turn total_tasks into a 0..N-1 matrix
@@ -47,24 +48,26 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install hpc-agent xgboost optuna # framework + your executor deps
-      # No shared filesystem: each ephemeral runner must obtain the dataset
-      # itself. Cache it by a content key so it is fetched once per runner image,
-      # then point LOCAL_DATA_DIR at it (the executor reads from there). Pick ONE
-      # source below. The cache key should be your dataset's content hash —
-      # ideally hpc-agent's data_sha — so a data change misses and re-pulls.
+      # No shared filesystem: each ephemeral runner stages the dataset itself into
+      # data/. The cache key is hpc-agent's data_sha — the content hash of the
+      # declared input_datasets — so the bytes are pulled once per content version
+      # and a data change misses the cache and re-pulls.
       - uses: actions/cache@v4
         with:
-          path: _data
-          key: data-${{ inputs.cmd_sha }}
+          path: data
+          key: data-${{ inputs.data_sha || 'none' }}
       - name: Stage input data
         run: |
-          mkdir -p _data
-          # (a) committed to the repo (small tabular data) — already here via checkout:
-          #     cp -r data/. _data/
-          # (b) a GitHub Release asset (medium):
-          #     gh release download "$DATA_TAG" -D _data        # GH_TOKEN in env
-          # (c) an object store (large / private):
-          #     aws s3 sync "s3://my-bucket/tree-data/$DATA_VERSION" _data  # creds in secrets
+          set -euo pipefail
+          # RECOMMENDED — DVC. Commit `.dvc` pointers (the bytes live in a DVC
+          # remote: S3 / GCS / Azure / ...). `dvc pull` fetches AND md5-verifies,
+          # and that md5 IS hpc-agent's data_sha (compute_data_sha reads the
+          # pointer) — so the cache key and the verified bytes are one identity.
+          if ls data/*.dvc >/dev/null 2>&1; then
+            pip install 'dvc[s3]'        # match your remote: dvc[gs] / dvc[azure] / ...
+            dvc pull                     # remote creds via env / OIDC / repo secrets
+          fi
+          # else: small data committed to the repo is already present from checkout.
       - name: Resolve this task's kwargs from .hpc/tasks.py
         # Mirrors the cluster dispatcher: resolve(HPC_TASK_ID) -> HPC_KW_* env
         # (the dispatcher contract in docs/integrations/CONTRACT.md). The
@@ -85,7 +88,7 @@ jobs:
           HPC_RUN_ID: ${{ inputs.run_id }}
           HPC_CAMPAIGN_ID: ${{ inputs.campaign_id }}
           RESULT_DIR: ${{ github.workspace }}/_out/${{ matrix.i }}
-          LOCAL_DATA_DIR: ${{ github.workspace }}/_data # dispatcher data root; executor reads here
+          LOCAL_DATA_DIR: ${{ github.workspace }}/data # dispatcher data root; executor reads here
         run: |
           mkdir -p "$RESULT_DIR"
           ${{ inputs.executor }}   # writes per-task metrics into $RESULT_DIR
