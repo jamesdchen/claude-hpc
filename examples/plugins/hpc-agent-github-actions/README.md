@@ -123,69 +123,56 @@ The runners have no shared filesystem. `fetch_results` solves *data-out* (per-ta
 metrics → artifacts); this is the *data-in* half — the training set every trial
 reads. **Only the compute needs it**: the orchestrator just proposes
 hyperparameters and reduces metrics, so the dataset never touches the laptop /
-cloud container. It's purely a runner-side staging concern, content-addressed by
-the `data_sha` hpc-agent already computes.
+cloud container. It's purely a runner-side staging concern.
 
-### The end-to-end flow
+### Store it as a GitHub Release asset
 
-```
-orchestrator                         backend                       each runner
-────────────                         ───────                       ───────────
-spec.input_datasets=["data/train.   reads data_sha off the         actions/cache key=data-<sha>
-  parquet"]                          run sidecar, sends it as       → miss: dvc pull (fetch+md5
-  → submit-flow writes               a workflow_dispatch input        verify) → hit: bytes restored
-  data_sha to the sidecar            (cache key)                    LOCAL_DATA_DIR=$WORKSPACE/data
-                                                                    executor reads it
-```
-
-1. **Declare it** — put `input_datasets: ["data/train.parquet"]` on the submit
-   spec. submit-flow runs `compute_data_sha` and stamps `data_sha` on the run
-   sidecar (provenance leg #222).
-2. **The backend threads it** — `_execute_command` reads `data_sha` off
-   `.hpc/runs/<run_id>.json` and sends it as a `data_sha` dispatch input. No user
-   wiring; absent declaration → omitted (un-keyed cache).
-3. **Each runner stages by content** — the workflow caches `data/` keyed by
-   `data-<data_sha>`, so the bytes are pulled once per content version and any
-   data change misses the cache and re-pulls.
-
-### Recommended: DVC (the framework was built for it)
-
-`compute_data_sha` **special-cases DVC**: when a `data/train.parquet.dvc` pointer
-sits beside the path, it uses the pointer's md5 instead of re-hashing the working
-tree. So with DVC the whole chain is one identity:
+A dataset too big to commit (>100 MB) doesn't need a separate cloud account — put
+it on a **release asset**. Downloads are free and unmetered (GitHub → runner, no
+egress, no credentials beyond the workflow's own token), up to 2 GB per file.
 
 ```bash
-# once, on the orchestrator:
-dvc add data/train.parquet      # writes data/train.parquet.dvc (commit it); bytes → DVC remote
-dvc push
+# once, on the orchestrator — upload + version-tag the dataset:
+gh release create data-v1 train.parquet
 ```
 
-Then `data_sha == the DVC md5`, and the runner's `dvc pull` (in `fan-out.yml`)
-fetches **and md5-verifies** the exact bytes — the cache key and the verified
-content are the same hash end to end. The bytes live in any DVC remote (S3 / GCS /
-Azure), private, never in the repo. Small tabular data is the trivial fallback:
-commit it and `checkout` brings it (no `.dvc`, no pull).
+The flow:
+
+```
+orchestrator                  backend                        each runner
+────────────                  ───────                        ───────────
+gh release create data-v1     sends data_tag as a            prefetch: gh release download
+  train.parquet               workflow_dispatch input        (once) -> actions/cache key=data-<tag>
+HPC_GHA_DATA_TAG=data-v1      (or the workflow default)      task xN: cache restore
+                                                             LOCAL_DATA_DIR=$WORKSPACE/data
+```
+
+1. **Upload + tag** the dataset as a release asset (`data-v1`).
+2. **Pin the version** — set `HPC_GHA_DATA_TAG=data-v1` (the backend forwards it as
+   the `data_tag` dispatch input), or rely on the workflow's `data_tag` default.
+   Bump the tag (`data-v2`) when the data changes; the cache key changes with it.
+3. **Each runner stages once** — the `prefetch` job runs `gh release download`
+   **once** and warms `actions/cache`; the matrix `needs: [expand, prefetch]` and
+   restores from GitHub's cache. So a 256-cell fan-out is **1 download**, then free
+   co-located cache restores — not 256 downloads.
 
 ### Big files (e.g. 193 MB)
 
 A 193 MB file is comfortable to *process* — runners have ~14 GB disk, 7 GB RAM
 (16 GB on larger runners), 6 h/job, so loading it into pandas and training XGBoost
-is routine. The constraints are elsewhere:
+is routine. The only real constraints:
 
-- **You can't commit it.** GitHub hard-blocks files >100 MB, so the commit-to-repo
-  tier is out — use DVC (above) or an object store. Only the small `.dvc` pointer
-  enters git; the bytes never do.
-- **Don't re-download it on every cell.** A 256-cell fan-out would otherwise pull
-  193 MB × 256 from your remote. `fan-out.yml` runs a `prefetch` job that pulls
-  **once** and warms `actions/cache`; the matrix `needs: [expand, prefetch]` and
-  restores from GitHub's cache (free, fast, co-located) — so it's 1 remote
-  download per run, then cache restores. The 10 GB Actions cache holds a 193 MB
-  entry easily, and since the dataset is pinned per campaign it's reused across
-  iterations (re-pulled only when `data_sha` changes).
+- **You can't commit it.** GitHub hard-blocks files >100 MB — hence the release
+  asset (≤2 GB/file), where the bytes live outside git.
+- **Don't re-download it on every cell.** The `prefetch` job + `actions/cache`
+  make it 1 download per run; the 10 GB cache holds a 193 MB entry easily, and a
+  tag-pinned dataset is reused across iterations (re-fetched only when the tag
+  changes).
 
 Sharding the data across cells is *not* an option for tuning — every trial trains
 on the full dataset (only the hyperparameters differ), so caching the whole file
-is the lever, not splitting it.
+is the lever, not splitting it. (If 193 MB ever became painful, downsample into a
+smaller pinned asset — an experiment-design choice, not infra.)
 
 ### Runner-side: the executor reads `LOCAL_DATA_DIR`
 
@@ -206,8 +193,8 @@ write_metrics(os.environ["RESULT_DIR"], {"objective": rmse})  # → task-<i> art
 ```
 
 Pin the version: every campaign iteration must train on the *same* data for
-metrics to compare. `data_sha` riding in the run's `env_hash` makes accidental
-drift change run identity, so it surfaces instead of silently skewing the sweep.
+metrics to compare — so keep `data_tag` fixed across a campaign, bumping it only
+for a deliberate dataset change.
 
 ## Limits worth knowing
 

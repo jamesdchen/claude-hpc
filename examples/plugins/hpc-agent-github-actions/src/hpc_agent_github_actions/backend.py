@@ -59,6 +59,7 @@ WORKFLOW_ENV = "HPC_GHA_WORKFLOW"  # workflow file name, e.g. "fan-out.yml"
 REF_ENV = "HPC_GHA_REF"  # git ref the workflow runs on (default "main")
 TOKEN_ENV = "GITHUB_TOKEN"  # PAT / Actions token: actions:write + actions:read
 POOL_ENV = "HPC_GHA_POOL"  # "owner/a=TOKEN_ENV_A,owner/b=TOKEN_ENV_B" — rotate on quota
+DATA_TAG_ENV = "HPC_GHA_DATA_TAG"  # release tag of the dataset asset the runners download
 
 # Sentinel marking a ``_build_command`` payload so ``_execute_command`` knows it
 # is an API dispatch request, not a shell argv.
@@ -111,25 +112,6 @@ def _parse_pool(spec: str) -> list[tuple[str, str]]:
     return accounts
 
 
-def _read_data_sha(experiment_dir: Path | None, run_id: str) -> str:
-    """Read the framework's ``data_sha`` off the run sidecar, for the data cache key.
-
-    ``compute_data_sha`` (provenance leg #222) hashes the run's declared
-    ``input_datasets`` — the DVC ``.dvc`` md5 when present — and submit-flow writes
-    it to ``.hpc/runs/<run_id>.json``. Surfacing it to the workflow lets each
-    runner cache the dataset by content, so a data change misses the cache and
-    re-pulls. Best-effort: an absent sidecar / no declared data yields ``""`` (the
-    workflow falls back to an un-keyed cache).
-    """
-    if experiment_dir is None or not run_id:
-        return ""
-    sidecar = experiment_dir / ".hpc" / "runs" / f"{run_id}.json"
-    try:
-        return str(json.loads(sidecar.read_text(encoding="utf-8")).get("data_sha") or "")
-    except (OSError, ValueError):
-        return ""
-
-
 @register("github-actions")
 class GitHubActionsBackend(HPCBackend):
     """Fan task arrays out onto GitHub Actions runners, across one or more accounts."""
@@ -146,9 +128,13 @@ class GitHubActionsBackend(HPCBackend):
         token: str | None = None,
         *,
         pool: list[tuple[str, str]] | None = None,
+        data_tag: str | None = None,
     ) -> None:
         self.workflow = workflow
         self.ref = ref
+        # Release tag of the dataset asset the runners download (optional; the
+        # workflow has its own default). See README "Where the input data lives".
+        self.data_tag = data_tag or os.environ.get(DATA_TAG_ENV) or ""
         # No remote log directory on a runner; this only holds fetched copies.
         self.log_dir = os.path.join(".hpc", "gha-logs")
         if pool:
@@ -243,11 +229,10 @@ class GitHubActionsBackend(HPCBackend):
             "cmd_sha": job_env.get("HPC_CMD_SHA", ""),
             "campaign_id": job_env.get("HPC_CAMPAIGN_ID", ""),
         }
-        # Content-address the dataset cache by the framework's data_sha so a data
-        # change re-pulls on the runners (see workflow-template/fan-out.yml).
-        data_sha = _read_data_sha(cwd, inputs["run_id"])
-        if data_sha:
-            inputs["data_sha"] = data_sha
+        # Pin the dataset version: the release tag the runners download and cache
+        # by (see workflow-template/fan-out.yml). Omitted -> the workflow default.
+        if self.data_tag:
+            inputs["data_tag"] = self.data_tag
         last: Exception | None = None
         for _ in range(len(self._accounts)):
             api = self._accounts[self._current]

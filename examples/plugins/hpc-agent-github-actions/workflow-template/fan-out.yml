@@ -19,7 +19,7 @@ on:
       executor: { required: true, type: string } # per-task command, e.g. "python train.py"
       cmd_sha: { required: false, type: string }
       campaign_id: { required: false, type: string }
-      data_sha: { required: false, type: string } # hpc-agent's content hash of input_datasets
+      data_tag: { required: false, type: string, default: data-v1 } # release tag of the dataset
 
 jobs:
   expand: # turn total_tasks into a 0..N-1 matrix
@@ -36,35 +36,29 @@ jobs:
           print("matrix=" + json.dumps({"i": list(range(int(os.environ["N"])))}))
           PY
 
-  prefetch: # pull the dataset ONCE and warm the cache, so the N-cell matrix
-    # restores it from GitHub's cache instead of each cell re-hitting your DVC/S3
-    # remote (1 download vs up to 256). Within a single run parallel cells can't
-    # share a cache that's only saved at job end — so this job saves it first.
+  prefetch: # download the dataset ONCE from the release and warm the cache, so the
+    # N-cell matrix restores it from GitHub's cache instead of each cell
+    # re-downloading (1 fetch vs up to 256). Within a single run parallel cells
+    # can't share a cache that's only saved at job end — so this job saves it first.
     needs: expand
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - uses: actions/cache@v4
         id: cache
         with:
           path: data
-          key: data-${{ inputs.data_sha || 'none' }}
+          key: data-${{ inputs.data_tag }}
       - if: steps.cache.outputs.cache-hit != 'true'
-        name: Pull the dataset into the cache (once)
+        name: Download the dataset from the release (once)
+        env:
+          GH_TOKEN: ${{ github.token }} # the workflow's own token — no extra creds
         run: |
           set -euo pipefail
-          # RECOMMENDED — DVC. Commit `.dvc` pointers (bytes in a DVC remote:
-          # S3 / GCS / Azure / ...). `dvc pull` fetches AND md5-verifies, and that
-          # md5 IS hpc-agent's data_sha (compute_data_sha reads the pointer) — so
-          # the cache key and the verified bytes are one identity.
-          if ls data/*.dvc >/dev/null 2>&1; then
-            pip install 'dvc[s3]'        # match your remote: dvc[gs] / dvc[azure] / ...
-            dvc pull                     # remote creds via env / OIDC / repo secrets
-          fi
-          # else: small data committed to the repo is already present from checkout.
+          mkdir -p data
+          # Store the dataset as a release asset, e.g.:
+          #   gh release create data-v1 train.parquet
+          # Release downloads are free + unmetered (GitHub -> runner, no egress).
+          gh release download "${{ inputs.data_tag }}" --dir data --clobber
 
   task: # the fan-out — one runner per task point (GitHub caps a matrix at 256)
     needs: [expand, prefetch]
@@ -78,19 +72,19 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install hpc-agent xgboost optuna # framework + your executor deps
-      # The prefetch job already pulled the dataset and warmed the cache; restore
-      # it here — 1 remote download for the whole run, then free GitHub-cache
-      # restores per cell (a 193 MB restore is fast and counts against nothing).
+      # The prefetch job already downloaded the dataset and warmed the cache;
+      # restore it here — 1 release download for the whole run, then free
+      # GitHub-cache restores per cell (a 193 MB restore is fast and free).
       - uses: actions/cache/restore@v4
         id: datacache
         with:
           path: data
-          key: data-${{ inputs.data_sha || 'none' }}
+          key: data-${{ inputs.data_tag }}
       - if: steps.datacache.outputs.cache-hit != 'true'
-        name: Stage input data (rare cache-miss fallback)
-        run: |
-          set -euo pipefail
-          if ls data/*.dvc >/dev/null 2>&1; then pip install 'dvc[s3]'; dvc pull; fi
+        name: Download the dataset (rare cache-miss fallback)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.data_tag }}" --dir data --clobber
       - name: Resolve this task's kwargs from .hpc/tasks.py
         # Mirrors the cluster dispatcher: resolve(HPC_TASK_ID) -> HPC_KW_* env
         # (the dispatcher contract in docs/integrations/CONTRACT.md). The
