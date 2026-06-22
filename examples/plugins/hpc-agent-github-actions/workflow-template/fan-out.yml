@@ -47,6 +47,24 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install hpc-agent xgboost optuna # framework + your executor deps
+      # No shared filesystem: each ephemeral runner must obtain the dataset
+      # itself. Cache it by a content key so it is fetched once per runner image,
+      # then point LOCAL_DATA_DIR at it (the executor reads from there). Pick ONE
+      # source below. The cache key should be your dataset's content hash —
+      # ideally hpc-agent's data_sha — so a data change misses and re-pulls.
+      - uses: actions/cache@v4
+        with:
+          path: _data
+          key: data-${{ inputs.cmd_sha }}
+      - name: Stage input data
+        run: |
+          mkdir -p _data
+          # (a) committed to the repo (small tabular data) — already here via checkout:
+          #     cp -r data/. _data/
+          # (b) a GitHub Release asset (medium):
+          #     gh release download "$DATA_TAG" -D _data        # GH_TOKEN in env
+          # (c) an object store (large / private):
+          #     aws s3 sync "s3://my-bucket/tree-data/$DATA_VERSION" _data  # creds in secrets
       - name: Resolve this task's kwargs from .hpc/tasks.py
         # Mirrors the cluster dispatcher: resolve(HPC_TASK_ID) -> HPC_KW_* env
         # (the dispatcher contract in docs/integrations/CONTRACT.md). The
@@ -67,6 +85,7 @@ jobs:
           HPC_RUN_ID: ${{ inputs.run_id }}
           HPC_CAMPAIGN_ID: ${{ inputs.campaign_id }}
           RESULT_DIR: ${{ github.workspace }}/_out/${{ matrix.i }}
+          LOCAL_DATA_DIR: ${{ github.workspace }}/_data # dispatcher data root; executor reads here
         run: |
           mkdir -p "$RESULT_DIR"
           ${{ inputs.executor }}   # writes per-task metrics into $RESULT_DIR

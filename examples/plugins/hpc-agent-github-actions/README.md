@@ -117,12 +117,59 @@ all — drive the backend's dispatch/poll/fetch from your own local loop. See th
 `drive_gha.py` sketch in the chat history / the framework's
 `code-driven-orchestration` doc.
 
+## Where the input data lives
+
+The runners have no shared filesystem. `fetch_results` solves *data-out* (per-task
+metrics → artifacts), but each ephemeral cell must also obtain its *data-in* — the
+training set every trial reads.
+
+- **Only the compute needs the data.** The orchestrator (laptop or cloud
+  container) just proposes hyperparameters and reduces metrics; it never touches
+  the raw dataset. So this is purely a runner-side staging concern — the
+  orchestrator stays data-free.
+- **Decouple data location from compute, keyed by content.** On a cluster the
+  data sat on a shared mount; here it lives in a network-reachable store every
+  runner pulls from, ideally keyed by the `data_sha` hpc-agent already computes
+  from `input_datasets` (provenance + a cache key + cross-iteration drift
+  detection). Tiers by size/privacy:
+  - **small tabular (typical tree tuning):** commit it (or Git LFS) → `checkout`
+    brings it. Zero infra.
+  - **larger / private:** a GitHub Release asset, or an object store (S3 / GCS /
+    HF Hub) pulled per-job with a secret, cached via `actions/cache` so it's
+    fetched once per runner.
+- **The wiring:** the `task` job stages data into `LOCAL_DATA_DIR` — the
+  dispatcher-contract data root the executor already reads (see `fan-out.yml`).
+- **Pin the version.** Every campaign iteration must train on the *same* data for
+  metrics to compare; folding `data_sha` into the run's `env_hash` surfaces
+  accidental drift.
+
 ## Limits worth knowing
 
 - A matrix is capped at **256 cells per run** and ~20 concurrent runners by
   default; for larger sweeps chunk into multiple dispatches.
 - Standard runners are CPU-only, 6 h/job; results come back only as artifacts
   (default 90-day retention).
+
+## Future: orchestrating from an ephemeral cloud container
+
+A natural extension (recorded here, not yet implemented): run the orchestrator
+itself in a Claude Code web container instead of a laptop. It inherits the same
+two constraints, both already solved here:
+
+- **Reachability** — the pure-API backend reaches GitHub over HTTPS, so a
+  locked-down container that can't SSH a campus cluster can still drive a
+  campaign (the network policy must allow `api.github.com`).
+- **Ephemeral state** — the container is reclaimed after inactivity and re-cloned
+  fresh, so the campaign state (`.hpc/runs/*.json`, `.hpc/campaigns/<id>/`, with
+  `HPC_JOURNAL_DIR` pointed into the repo) must be committed back each iteration;
+  `prior()` replays it on the next session. The same checkpoint-to-git discipline
+  the data-staging and account-rotation sections rely on.
+
+Pieces to add when this is taken on: a SessionStart hook / `setup.sh` that
+installs hpc-agent + this plugin + strategy deps, the config as environment
+variables, and the network policy. Then the whole pipeline is HTTPS + git — no
+laptop, no SSH, no shared filesystem.
+See https://code.claude.com/docs/en/claude-code-on-the-web.
 
 ## Live validation (the #269 discipline)
 
