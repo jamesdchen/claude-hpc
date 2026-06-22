@@ -145,8 +145,11 @@ def _sibling_run_ids(run_id: str) -> list[str]:
             CliArg(
                 flag="--scheduler",
                 required=True,
-                choices=("sge", "slurm", "pbspro", "torque"),
-                help="Scheduler family — needed to query alive job IDs.",
+                # No static ``choices``: the valid set is the live backend
+                # registry (built-ins + plugin backends), not a frozen list
+                # (#337). ``get_backend_class`` in ``_ssh_alive_job_ids`` fails
+                # loud (``SpecInvalid``) on an unregistered name.
+                help="Backend name — needed to query alive job IDs.",
             ),
         ),
         result_post=_reconcile_envelope,
