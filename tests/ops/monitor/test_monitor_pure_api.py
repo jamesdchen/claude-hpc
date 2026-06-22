@@ -16,7 +16,8 @@ import pytest
 
 from hpc_agent.infra import backends
 from hpc_agent.infra.backends import HPCBackend
-from hpc_agent.ops.monitor import logs_atom, reconcile as recon
+from hpc_agent.ops.monitor import logs_atom
+from hpc_agent.ops.monitor import reconcile as recon
 from hpc_agent.ops.monitor import status as status_mod
 from hpc_agent.state.journal import load_run, upsert_run
 from hpc_agent.state.run_record import RunRecord
@@ -42,7 +43,7 @@ def fake_backend():
         alive_return: list[str] = []
 
         @classmethod
-        def from_build_context(cls, ctx: object) -> "_FakeMon":
+        def from_build_context(cls, ctx: object) -> _FakeMon:
             return cls()
 
         def _build_command(self, *a: object, **k: object) -> object:

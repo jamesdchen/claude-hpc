@@ -374,7 +374,7 @@ def _pure_api_reduce(
     constructed via the shared :func:`backend_for_record` helper so core never
     names the concrete (plugin) backend module; it routes through the registry.
     """
-    from hpc_agent.ops.backend_for_record import backend_for_record
+    from hpc_agent.infra.backends.remote_factory import backend_for_record
 
     backend = backend_for_record(record)
     result_dirs = backend.fetch_results(run_id, str(out))

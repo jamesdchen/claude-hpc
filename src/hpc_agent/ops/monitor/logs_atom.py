@@ -118,7 +118,7 @@ def fetch_logs(
         # per-task stderr path. The backend's ``fetch_logs`` instance hook pulls
         # the run's logs over its API into a local dir; task-id selection is
         # advisory (the API returns the run's logs as a unit). Zero SSH.
-        from hpc_agent.ops.backend_for_record import backend_for_record
+        from hpc_agent.infra.backends.remote_factory import backend_for_record
 
         dest = runs_dir(experiment_dir) / f"{run_id}-logs"
         written = backend_for_record(record).fetch_logs(run_id, str(dest))

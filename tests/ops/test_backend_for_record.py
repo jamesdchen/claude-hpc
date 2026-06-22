@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 from hpc_agent.infra import backends
 from hpc_agent.infra.backends import HPCBackend
-from hpc_agent.ops.backend_for_record import backend_for_record
+from hpc_agent.infra.backends.remote_factory import backend_for_record
 
 
 def _record(backend_name: str) -> SimpleNamespace:

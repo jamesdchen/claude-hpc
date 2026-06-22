@@ -301,7 +301,7 @@ def _reconcile_one(
         # instance hook (a pure-API backend holds its own authenticated client);
         # there is no SSH status reporter and no wave-listing to do, so the
         # combiner waves stay as the journal recorded them.
-        from hpc_agent.ops.backend_for_record import backend_for_record
+        from hpc_agent.infra.backends.remote_factory import backend_for_record
 
         summary = {"checked_at": utcnow_iso()}
         reporter_failed = False

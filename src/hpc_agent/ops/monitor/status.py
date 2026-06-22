@@ -126,7 +126,7 @@ def record_status(
         # is the only ground truth a pure-API backend exposes here; per-task
         # counts come back later through ``fetch_results`` (Increment 5), not
         # this control-plane probe. Zero SSH.
-        from hpc_agent.ops.backend_for_record import backend_for_record
+        from hpc_agent.infra.backends.remote_factory import backend_for_record
 
         alive = backend_for_record(_record).alive_job_ids(job_ids)
         summary: dict[str, object] = {
