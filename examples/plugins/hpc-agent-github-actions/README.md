@@ -35,6 +35,38 @@ clusters:
     scheduler: github-actions
 ```
 
+## Running out of CI compute: account rotation
+
+Set `HPC_GHA_POOL` instead of `HPC_GHA_REPO`/`GITHUB_TOKEN` to spread a campaign
+across several accounts. When one returns a quota/billing `403`, the backend
+advances to the next entry and re-dispatches — the campaign keeps going on your
+other account at the next iteration boundary.
+
+```bash
+export HPC_GHA_WORKFLOW=fan-out.yml
+export GH_TOKEN_A=ghp_aaa            # tokens stay in their own vars …
+export GH_TOKEN_B=ghp_bbb
+export HPC_GHA_POOL="me/exp=GH_TOKEN_A,other/exp=GH_TOKEN_B"   # … referenced by name
+```
+
+This works because the durable state is **local** (the Optuna study + the
+completed-iteration sidecars), so switching accounts loses nothing — the next
+batch just lands on the next account. Two things the backend handles for you:
+
+- **Run ids are account-scoped.** `alive_job_ids` / `fetch_results` / `fetch_logs`
+  **probe the pool**, so a batch that ran on account B is still polled and pulled
+  from B even after rotation.
+- **Only a quota/billing `403` rotates** (matched on `minutes` / `spending limit`
+  / `billing` / …). A permissions `403` surfaces as a real error instead of
+  silently burning through your accounts. Each rotation leaves an stderr
+  breadcrumb.
+
+Caveats: an **in-flight** run can't migrate — rotation takes effect on the *next*
+dispatch, so switch at an iteration boundary (pull a running batch's results
+before it rotates away). And Actions minutes bill to the **repo owner**, so each
+pool entry must be a repo that account owns (a fork / separate push), not just a
+collaborator on one shared repo.
+
 ## How it maps onto hpc-agent
 
 | Scheduler concept | This backend |
