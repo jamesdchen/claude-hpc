@@ -36,8 +36,38 @@ jobs:
           print("matrix=" + json.dumps({"i": list(range(int(os.environ["N"])))}))
           PY
 
-  task: # the fan-out — one runner per task point (GitHub caps a matrix at 256)
+  prefetch: # pull the dataset ONCE and warm the cache, so the N-cell matrix
+    # restores it from GitHub's cache instead of each cell re-hitting your DVC/S3
+    # remote (1 download vs up to 256). Within a single run parallel cells can't
+    # share a cache that's only saved at job end — so this job saves it first.
     needs: expand
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: data
+          key: data-${{ inputs.data_sha || 'none' }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        name: Pull the dataset into the cache (once)
+        run: |
+          set -euo pipefail
+          # RECOMMENDED — DVC. Commit `.dvc` pointers (bytes in a DVC remote:
+          # S3 / GCS / Azure / ...). `dvc pull` fetches AND md5-verifies, and that
+          # md5 IS hpc-agent's data_sha (compute_data_sha reads the pointer) — so
+          # the cache key and the verified bytes are one identity.
+          if ls data/*.dvc >/dev/null 2>&1; then
+            pip install 'dvc[s3]'        # match your remote: dvc[gs] / dvc[azure] / ...
+            dvc pull                     # remote creds via env / OIDC / repo secrets
+          fi
+          # else: small data committed to the repo is already present from checkout.
+
+  task: # the fan-out — one runner per task point (GitHub caps a matrix at 256)
+    needs: [expand, prefetch]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.expand.outputs.matrix) }}
@@ -48,26 +78,19 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install hpc-agent xgboost optuna # framework + your executor deps
-      # No shared filesystem: each ephemeral runner stages the dataset itself into
-      # data/. The cache key is hpc-agent's data_sha — the content hash of the
-      # declared input_datasets — so the bytes are pulled once per content version
-      # and a data change misses the cache and re-pulls.
-      - uses: actions/cache@v4
+      # The prefetch job already pulled the dataset and warmed the cache; restore
+      # it here — 1 remote download for the whole run, then free GitHub-cache
+      # restores per cell (a 193 MB restore is fast and counts against nothing).
+      - uses: actions/cache/restore@v4
+        id: datacache
         with:
           path: data
           key: data-${{ inputs.data_sha || 'none' }}
-      - name: Stage input data
+      - if: steps.datacache.outputs.cache-hit != 'true'
+        name: Stage input data (rare cache-miss fallback)
         run: |
           set -euo pipefail
-          # RECOMMENDED — DVC. Commit `.dvc` pointers (the bytes live in a DVC
-          # remote: S3 / GCS / Azure / ...). `dvc pull` fetches AND md5-verifies,
-          # and that md5 IS hpc-agent's data_sha (compute_data_sha reads the
-          # pointer) — so the cache key and the verified bytes are one identity.
-          if ls data/*.dvc >/dev/null 2>&1; then
-            pip install 'dvc[s3]'        # match your remote: dvc[gs] / dvc[azure] / ...
-            dvc pull                     # remote creds via env / OIDC / repo secrets
-          fi
-          # else: small data committed to the repo is already present from checkout.
+          if ls data/*.dvc >/dev/null 2>&1; then pip install 'dvc[s3]'; dvc pull; fi
       - name: Resolve this task's kwargs from .hpc/tasks.py
         # Mirrors the cluster dispatcher: resolve(HPC_TASK_ID) -> HPC_KW_* env
         # (the dispatcher contract in docs/integrations/CONTRACT.md). The

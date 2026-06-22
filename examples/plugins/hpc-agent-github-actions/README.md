@@ -166,6 +166,27 @@ content are the same hash end to end. The bytes live in any DVC remote (S3 / GCS
 Azure), private, never in the repo. Small tabular data is the trivial fallback:
 commit it and `checkout` brings it (no `.dvc`, no pull).
 
+### Big files (e.g. 193 MB)
+
+A 193 MB file is comfortable to *process* — runners have ~14 GB disk, 7 GB RAM
+(16 GB on larger runners), 6 h/job, so loading it into pandas and training XGBoost
+is routine. The constraints are elsewhere:
+
+- **You can't commit it.** GitHub hard-blocks files >100 MB, so the commit-to-repo
+  tier is out — use DVC (above) or an object store. Only the small `.dvc` pointer
+  enters git; the bytes never do.
+- **Don't re-download it on every cell.** A 256-cell fan-out would otherwise pull
+  193 MB × 256 from your remote. `fan-out.yml` runs a `prefetch` job that pulls
+  **once** and warms `actions/cache`; the matrix `needs: [expand, prefetch]` and
+  restores from GitHub's cache (free, fast, co-located) — so it's 1 remote
+  download per run, then cache restores. The 10 GB Actions cache holds a 193 MB
+  entry easily, and since the dataset is pinned per campaign it's reused across
+  iterations (re-pulled only when `data_sha` changes).
+
+Sharding the data across cells is *not* an option for tuning — every trial trains
+on the full dataset (only the hyperparameters differ), so caching the whole file
+is the lever, not splitting it.
+
 ### Runner-side: the executor reads `LOCAL_DATA_DIR`
 
 `LOCAL_DATA_DIR` is the dispatcher-contract data root; your executor already keys
