@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from hpc_agent import errors
+from hpc_agent.infra.backends import HPCBackend
 from hpc_agent.ops.recover_flow import (
     render_overrides_to_extra_flags,
     resubmit_flow,
@@ -88,18 +89,21 @@ def _write_clusters_yaml(tmp_path, monkeypatch):
     monkeypatch.setenv("HPC_CLUSTERS_CONFIG", str(yaml_path))
 
 
-class _StubBackend:
-    """Minimal backend stub mirroring HPCBackend's private surface.
+class _StubBackend(HPCBackend):
+    """Minimal backend stub over the real HPCBackend interface.
 
-    Records every ``_build_command`` and ``_execute_command`` invocation
-    so tests can assert on the task_range strings + extra_flags that
-    flowed through. Returns a synthetic job id by default; tests can
-    override ``submit_responses`` to simulate failures.
+    Subclasses :class:`HPCBackend` so it inherits the shared per-batch primitive
+    (:meth:`HPCBackend.submit_one`) that ``_submit_one_batch`` now routes through
+    (#339 inc 3). Records every ``_build_command`` and ``_execute_command``
+    invocation so tests can assert on the task_range strings + extra_flags that
+    flowed through. Returns a synthetic job id by default; tests can override
+    ``submit_responses`` to simulate failures.
     """
 
     JOB_ID_REGEX = re.compile(r"Submitted batch job (\d+)")
 
     def __init__(self, *, submit_responses=None):
+        self.log_dir = "/tmp/recover-stub-logs"
         self.calls: list[dict] = []
         self.responses: list = list(submit_responses) if submit_responses else []
         self._next_id = 90000000
@@ -107,7 +111,7 @@ class _StubBackend:
     def _setup_log_dir(self):
         self.calls.append({"step": "setup_log_dir"})
 
-    def _build_command(self, task_range, job_name, job_env, *, extra_flags=None):
+    def _build_command(self, task_range, job_name, job_env, *, extra_flags=None, array=True):
         self.calls.append(
             {
                 "step": "build_command",

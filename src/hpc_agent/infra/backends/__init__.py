@@ -141,6 +141,18 @@ class HPCBackend(abc.ABC):
     # Read off the *class* so the guard never pays the constructor cost.
     max_array_size: int | None = None
 
+    # Whether this backend can split an over-cap sweep into multiple
+    # concurrency-bounded WAVES (#339). The shared wave submitter
+    # (:meth:`submit_plan`) drives every batch through the same per-batch
+    # primitive (:meth:`submit_one`), so any backend that can submit one array
+    # can submit N waves of arrays — hence the default ``True``. A backend that
+    # genuinely cannot wave (e.g. a one-shot dispatch with no per-wave
+    # sequencing) overrides to ``False``, and the submit-flow array-cap guard
+    # then hard-rejects an over-cap sweep instead of routing it through waves.
+    # Read off the *class* (a capability, not per-run state) so the guard pays
+    # no constructor cost.
+    can_wave: bool = True
+
     log_dir: str  # subclasses must set this
     JOB_ID_REGEX: re.Pattern[str] = _DEFAULT_JOB_ID_REGEX
 
@@ -391,6 +403,60 @@ class HPCBackend(abc.ABC):
         """
         return []
 
+    def submit_one(
+        self,
+        task_range: str | None,
+        job_name: str,
+        job_env: dict[str, str],
+        *,
+        extra_flags: list[str] | None = None,
+        cwd: Path | None = None,
+        array: bool = True,
+        setup_log_dir: bool = True,
+    ) -> str:
+        """Submit ONE scheduler array (or one non-array job) and return its id.
+
+        The single per-batch submission primitive shared by every submit edge
+        (#339 increment 3): :meth:`submit_plan`'s wave loop, submit-flow's
+        ``_make_single_array_submission`` (the ≤cap fast path and the canary),
+        and recover-flow's ``_submit_one_batch`` all collapse onto this one
+        ``setup_log_dir + _build_command + _execute_command + returncode-check +
+        JOB_ID_REGEX`` sequence so the qsub edge lives in exactly one place.
+
+        *task_range* is the scheduler array expression (``"1-100"``,
+        ``"4,8,13-15"``), or ``None`` together with ``array=False`` for a single
+        multi-rank MPI job (#293). *extra_flags* are appended verbatim to the
+        built command (resource flags, an afterok/hold dependency, planner
+        overrides). *setup_log_dir* lets a caller that has already ensured the
+        log directory (``submit_plan`` does it once per plan) skip the redundant
+        per-batch ``mkdir``.
+
+        Raises
+        ------
+        RuntimeError
+            If the submission exits non-zero (message carries the command and
+            stderr) or the scheduler stdout has no parseable job id.
+        """
+        cwd = cwd or Path.cwd()
+        if setup_log_dir:
+            self._setup_log_dir()
+        cmd = self._build_command(
+            task_range, job_name, job_env, extra_flags=extra_flags, array=array
+        )
+        result = self._execute_command(cmd, job_env, cwd)
+        if result.returncode != 0:
+            stderr_msg = result.stderr.strip() if result.stderr else "(no stderr)"
+            raise RuntimeError(
+                f"Job submission failed (exit {result.returncode}) "
+                f"for array {task_range}:\n"
+                f"  command: {' '.join(cmd)}\n"
+                f"  stderr:  {stderr_msg}"
+            )
+        match = self.JOB_ID_REGEX.search(result.stdout)
+        if not match:
+            raise RuntimeError(f"Could not parse job ID from output: {result.stdout!r}")
+        return match.group(1)
+
     def submit_plan(
         self,
         plan: SubmissionPlan,
@@ -398,15 +464,17 @@ class HPCBackend(abc.ABC):
         job_env: dict[str, str],
         *,
         cwd: Path | None = None,
+        base_extra_flags: list[str] | None = None,
     ) -> list[tuple[int, str, str]]:
         """Submit a :class:`SubmissionPlan` as wave-sequenced array jobs (#339).
 
         The shared, subject-neutral wave submitter for both ``ops/submit`` and
         ``ops/recover`` (it lives on :class:`HPCBackend` so neither subject
         imports the other). Each :class:`JobBatch` is submitted as one global
-        sub-array using its :attr:`JobBatch.task_range`, reusing the same
-        ``_build_command`` / ``_execute_command`` / ``JOB_ID_REGEX`` triplet the
-        per-batch submitters (``_submit_one_batch``, ``_run_batches``) use.
+        sub-array using its :attr:`JobBatch.task_range`, routed through the
+        shared per-batch primitive :meth:`submit_one` so the qsub edge
+        (``_build_command`` / ``_execute_command`` / ``JOB_ID_REGEX``) lives in
+        exactly one place.
 
         Batches are grouped by :attr:`JobBatch.wave` and waves are submitted in
         ascending order. When ``max_concurrent_jobs`` > 1 yields multiple waves,
@@ -418,6 +486,13 @@ class HPCBackend(abc.ABC):
         to :meth:`_build_dependency_flag` (completion-only), preserving prior
         behaviour.
 
+        *base_extra_flags* are flags applied to **wave 0 only** — the seam the
+        canary×waves gate uses (#339 increment 4): the canary's afterok
+        dependency gates wave 0, and the inter-wave afterok chain (wave0→wave1→…)
+        transitively propagates the gate so a canary failure drops every wave.
+        Resource flags, which must apply to every wave, are folded into each
+        batch's ``extra_flags`` here too.
+
         Returns ``(wave, task_range, job_id)`` tuples in submission order.
 
         Raises
@@ -427,6 +502,8 @@ class HPCBackend(abc.ABC):
             stderr) or the scheduler stdout has no parseable job id.
         """
         cwd = cwd or Path.cwd()
+        # Ensure the log dir once for the whole plan; each per-batch
+        # ``submit_one`` below skips its own (idempotent) ``mkdir``.
         self._setup_log_dir()
 
         # Group batches by wave.
@@ -438,37 +515,31 @@ class HPCBackend(abc.ABC):
         prev_wave_ids: list[str] = []
 
         for wave_num in sorted(waves):
-            # Wave sequencing (the net-new piece): chain each wave behind the
-            # previous wave's job ids. Prefer the SUCCESS-only afterok
-            # dependency where the backend supports it; otherwise fall back to
-            # the completion-only flag so afterok-less schedulers (SGE) keep
-            # their existing behaviour.
+            # Wave sequencing: chain each wave behind the previous wave's job
+            # ids. Prefer the SUCCESS-only afterok dependency where the backend
+            # supports it; otherwise fall back to the completion-only flag so
+            # afterok-less schedulers (SGE) keep their existing behaviour. Wave 0
+            # carries the caller's ``base_extra_flags`` (the canary afterok gate,
+            # #339 inc 4) instead — later waves inherit the gate transitively
+            # through the inter-wave chain.
             if wave_num > 0 and prev_wave_ids:
                 if self.supports_afterok:
                     dep_flags = self._build_afterok_dependency_flag(prev_wave_ids)
                 else:
                     dep_flags = self._build_dependency_flag(prev_wave_ids)
             else:
-                dep_flags = []
+                dep_flags = list(base_extra_flags or [])
 
             current_wave_ids: list[str] = []
             for batch in waves[wave_num]:
-                cmd = self._build_command(
-                    batch.task_range, job_name, job_env, extra_flags=dep_flags
+                job_id = self.submit_one(
+                    batch.task_range,
+                    job_name,
+                    job_env,
+                    extra_flags=dep_flags,
+                    cwd=cwd,
+                    setup_log_dir=False,
                 )
-                result = self._execute_command(cmd, job_env, cwd)
-                if result.returncode != 0:
-                    stderr_msg = result.stderr.strip() if result.stderr else "(no stderr)"
-                    raise RuntimeError(
-                        f"Job submission failed (exit {result.returncode}) "
-                        f"for array {batch.task_range}:\n"
-                        f"  command: {' '.join(cmd)}\n"
-                        f"  stderr:  {stderr_msg}"
-                    )
-                match = self.JOB_ID_REGEX.search(result.stdout)
-                if not match:
-                    raise RuntimeError(f"Could not parse job ID from output: {result.stdout!r}")
-                job_id = match.group(1)
                 current_wave_ids.append(job_id)
                 submissions.append((wave_num, batch.task_range, job_id))
 

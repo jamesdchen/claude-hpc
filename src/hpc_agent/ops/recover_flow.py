@@ -633,27 +633,30 @@ def _submit_one_batch(
 ) -> str:
     """Submit one batch with a precomputed array expression. Returns the job id.
 
-    Mirrors :func:`~hpc_agent.ops.submit_flow._make_single_array_submission`
-    but accepts an arbitrary ``task_range`` (e.g., ``"3,7,12-14"``)
-    instead of hardcoding ``"1-N"``, and threads ``extra_flags`` so the
-    planner-adjusted overrides land on the qsub command line.
+    #339 increment 3: converges onto the SHARED per-batch primitive
+    :meth:`HPCBackend.submit_one` — the same ``setup_log_dir + _build_command +
+    _execute_command + returncode-check + JOB_ID_REGEX`` sequence the initial
+    submit (``_make_single_array_submission``) and the wave submitter
+    (``submit_plan``) now use, so the duplicated qsub edge lives in one place.
+    Accepts an arbitrary ``task_range`` (e.g. ``"3,7,12-14"`` — resubmit's
+    non-contiguous failed ids) and threads ``extra_flags`` so the
+    planner-adjusted overrides land on the qsub command line. The resubmit loop
+    keeps driving this per-batch (preserving ``start_batch`` partial-resume and
+    the shared ``submitted_ids`` crash-safety list) rather than handing the
+    whole plan to ``submit_plan``, which cannot express partial-resume.
+
+    ``submit_one`` raises a ``RuntimeError`` on a non-zero exit / unparseable
+    id; resubmit re-wraps it as the typed :class:`RemoteCommandFailed` its
+    callers expect.
     """
-    backend._setup_log_dir()  # type: ignore[attr-defined]
-    cmd = backend._build_command(  # type: ignore[attr-defined]
-        task_range, job_name, job_env, extra_flags=extra_flags
-    )
-    result = backend._execute_command(cmd, job_env, cwd)  # type: ignore[attr-defined]
-    if result.returncode != 0:
-        stderr_msg = result.stderr.strip() if result.stderr else "(no stderr)"
-        raise errors.RemoteCommandFailed(
-            f"resubmit failed (exit {result.returncode}) for array {task_range}: {stderr_msg}"
+    try:
+        return backend.submit_one(
+            task_range, job_name, job_env, extra_flags=extra_flags, cwd=cwd
         )
-    match = backend.JOB_ID_REGEX.search(result.stdout)
-    if not match:
+    except RuntimeError as exc:
         raise errors.RemoteCommandFailed(
-            f"could not parse job id from scheduler output: {result.stdout!r}"
-        )
-    return match.group(1)
+            f"resubmit failed for array {task_range}: {exc}"
+        ) from exc
 
 
 def _safe_read_sidecar(experiment_dir: Path, run_id: str) -> dict | None:
