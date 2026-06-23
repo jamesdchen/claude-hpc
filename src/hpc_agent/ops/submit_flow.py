@@ -749,7 +749,9 @@ def _ensure_run_sidecar(experiment_dir: Path, spec: SubmitFlowSpec) -> None:
     ):
         from hpc_agent.infra.throughput import build_wave_map
 
-        plan = _main_submission_plan(total_tasks=int(spec.total_tasks), cluster=spec.cluster)
+        plan = _main_submission_plan(
+            total_tasks=int(spec.total_tasks), cluster=spec.cluster, backend_name=spec.backend
+        )
         cap_wave_map = {str(w): ids for w, ids in build_wave_map(plan).items()}
 
     write_run_sidecar(
@@ -1166,18 +1168,32 @@ def _is_multiwave_sweep(*, backend_name: str, total_tasks: int, cluster: str | N
     return cap is not None and total_tasks > cap
 
 
-def _main_submission_plan(*, total_tasks: int, cluster: str) -> Any:
+def _main_submission_plan(*, total_tasks: int, cluster: str, backend_name: str) -> Any:
     """The cap-driven multi-wave :class:`SubmissionPlan` for the main array.
 
-    Packs ``total_tasks`` with the cluster's constraints via
-    ``compute_submission_plan(constraints, WorkloadSpec(total_tasks))`` — the
-    SAME deterministic packer the ``plan-throughput`` primitive uses — so the
-    waves submitted and the ``wave_map`` written to the sidecar both derive from
-    one plan.
+    Packs ``total_tasks`` via ``compute_submission_plan(constraints,
+    WorkloadSpec(total_tasks))`` — the SAME deterministic packer the
+    ``plan-throughput`` primitive uses — so the waves submitted and the
+    ``wave_map`` written to the sidecar both derive from one plan.
+
+    The packer's ``max_array_size`` is the EFFECTIVE cap — the smaller of the
+    backend's platform cap (:attr:`HPCBackend.max_array_size`, e.g. GitHub
+    Actions' 256) and the cluster's declared limit — not the cluster constraint
+    alone. Otherwise a backend whose platform is the binding constraint (GHA on a
+    cluster that declares no ``max_array_size``, so the constraint defaults to
+    1000) would pack a >cap sweep into a single oversized array that the platform
+    then rejects — the exact failure waves exist to prevent. This keeps the plan
+    consistent with :func:`_is_multiwave_sweep`, which keys on the same effective
+    cap.
     """
+    import dataclasses
+
     from hpc_agent.infra.throughput import WorkloadSpec, compute_submission_plan
 
     constraints = _load_cluster_constraints(cluster)
+    eff_cap = _effective_cap_for_backend_name(backend_name, cluster)
+    if eff_cap is not None and eff_cap < constraints.max_array_size:
+        constraints = dataclasses.replace(constraints, max_array_size=eff_cap)
     return compute_submission_plan(constraints, WorkloadSpec(total_tasks=int(total_tasks)))
 
 
@@ -1237,7 +1253,9 @@ def _submit_main_array(
     # Over-cap: split into concurrency-bounded waves. Resource flags apply to
     # every wave; the canary success-gate (gate_job_ids) applies to every wave,
     # merged with the inter-wave completion-chain inside submit_plan.
-    plan = _main_submission_plan(total_tasks=total_tasks, cluster=cluster or "")
+    plan = _main_submission_plan(
+        total_tasks=total_tasks, cluster=cluster or "", backend_name=backend_name
+    )
     try:
         submissions = backend.submit_plan(
             plan,

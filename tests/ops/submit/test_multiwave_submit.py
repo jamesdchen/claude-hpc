@@ -124,6 +124,36 @@ def test_over_cap_sweep_stamps_cap_plan_wave_map(tmp_path: Path, _capped_cluster
     assert all_ids == list(range(250))
 
 
+def test_backend_platform_cap_binds_plan_when_cluster_declares_no_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # GHA-like: the BACKEND platform cap (256) is the binding constraint and the
+    # cluster declares NO max_array_size (so ClusterConstraints defaults to 1000).
+    # The cap-driven plan must pack to the EFFECTIVE cap (256), not the cluster
+    # default — otherwise a >256 sweep becomes ONE oversized array the platform
+    # rejects, the exact failure waves exist to prevent. Regression for that bug.
+    monkeypatch.setattr(
+        "hpc_agent.infra.clusters.load_clusters_config",
+        lambda: {"c": {"scheduler": "gha"}},  # note: no constraints block
+    )
+
+    class _CappedBackend:
+        max_array_size = 256
+        can_wave = True
+
+    monkeypatch.setattr("hpc_agent.infra.backends.get_backend_class", lambda name: _CappedBackend)
+
+    # Keyed on the backend cap, a 300-task sweep is multi-wave.
+    assert sf._is_multiwave_sweep(backend_name="gha", total_tasks=300, cluster="c")
+
+    plan = sf._main_submission_plan(total_tasks=300, cluster="c", backend_name="gha")
+    # 300 tasks at the 256 cap -> 2 batches; every array must be <= 256 (the bug
+    # produced a single 300-cell array because the packer used the 1000 default).
+    assert plan.total_batches == 2
+    assert max(b.array_size for b in plan.batches) <= 256
+    assert sum(b.array_size for b in plan.batches) == 300
+
+
 def test_at_cap_sweep_stamps_no_explicit_wave_map(tmp_path: Path, _capped_cluster: None) -> None:
     # 100 tasks == cap -> single wave; provenance precedence keeps today's
     # behaviour: no cap-driven wave_map (the axes-derived default applies, which
