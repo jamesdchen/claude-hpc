@@ -955,6 +955,84 @@ def _make_single_array_submission(
     return [match.group(1)]
 
 
+def _cluster_array_cap(cluster: str | None) -> int | None:
+    """The cluster's *declared* ``constraints.max_array_size``, or ``None``.
+
+    Returns the cap only when ``cluster`` names a clusters.yaml entry that
+    explicitly declares ``constraints.max_array_size``. A cluster that declares
+    no such limit (or is absent / unreadable) returns ``None`` so the guard
+    leaves today's behaviour byte-for-byte unchanged — we never synthesise a
+    phantom ceiling from ``ClusterConstraints`` defaults.
+    """
+    if not cluster:
+        return None
+    try:
+        from hpc_agent.infra.clusters import load_clusters_config
+
+        cfg = load_clusters_config().get(cluster)
+    except Exception:  # noqa: BLE001 — a missing/broken clusters.yaml must not block submit
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    block = cfg.get("constraints")
+    if not isinstance(block, dict):
+        return None
+    val = block.get("max_array_size")
+    return int(val) if isinstance(val, int) and not isinstance(val, bool) else None
+
+
+def _effective_array_cap(backend: HPCBackend, cluster: str | None) -> int | None:
+    """Smallest array-size ceiling that applies to this submission, or ``None``.
+
+    Reconciles the backend's hard platform cap
+    (:attr:`HPCBackend.max_array_size` — e.g. GitHub Actions' 256 matrix
+    cells/run; ``None`` for the SSH families) with the cluster's declared
+    ``constraints.max_array_size``. The effective ceiling is the smaller of
+    whichever are present; ``None`` means no cap is known and the guard is
+    skipped.
+    """
+    caps: list[int] = []
+    # Read the cap off the *class* — it is a backend capability, not per-run
+    # state — so the guard never pays the constructor cost (mirroring
+    # ``HPCBackend.max_array_size``'s "read off the class" note). ``getattr``
+    # with a ``None`` default keeps a test double / unmigrated backend that
+    # lacks the attribute uncapped rather than crashing.
+    backend_cap = getattr(type(backend), "max_array_size", None)
+    if backend_cap is not None:
+        caps.append(int(backend_cap))
+    cluster_cap = _cluster_array_cap(cluster)
+    if cluster_cap is not None:
+        caps.append(cluster_cap)
+    return min(caps) if caps else None
+
+
+def _enforce_array_cap(
+    backend: HPCBackend,
+    *,
+    total_tasks: int,
+    backend_name: str,
+    cluster: str | None,
+) -> None:
+    """Reject a sweep larger than the effective array cap before any dispatch.
+
+    Turns what would otherwise be a post-dispatch platform error (GitHub
+    Actions rejecting a >256-cell matrix) — or a silent mis-submission — into a
+    clean, actionable :class:`~hpc_agent.errors.SpecInvalid` raised *before* the
+    first qsub. Wave-based submission past the cap is the rest of #339; until it
+    lands this is the safety net. A ``None`` effective cap (built-in SSH backend
+    with no declared limit) is a no-op, so ≤cap sweeps are unaffected.
+    """
+    cap = _effective_array_cap(backend, cluster)
+    if cap is not None and total_tasks > cap:
+        where = f" on cluster {cluster!r}" if cluster else ""
+        raise errors.SpecInvalid(
+            f"submit-flow: {total_tasks} tasks exceeds the {cap}-task array cap "
+            f"for backend {backend_name!r}{where}. Wave-based submission past the "
+            "cap is not yet wired (#339); reduce the grid to <= "
+            f"{cap} tasks or raise the cap."
+        )
+
+
 @primitive(
     name="submit-flow",
     verb="workflow",
@@ -1141,6 +1219,17 @@ def _submit_one_spec(
         slurm_account=spec.slurm_account,
         slurm_cluster=spec.slurm_cluster,
         scheduler_profile=spec.scheduler_profile,
+    )
+
+    # Fail loud BEFORE any dispatch when the grid exceeds the backend / cluster
+    # array cap (e.g. GitHub Actions' 256-cell matrix limit). Otherwise the
+    # over-cap array is only rejected by the platform after the canary + main
+    # qsub fire, surfacing as a low-signal RemoteCommandFailed. (#339)
+    _enforce_array_cap(
+        backend_obj,
+        total_tasks=spec.total_tasks,
+        backend_name=spec.backend,
+        cluster=spec.cluster,
     )
 
     canary_run_id: str | None = None

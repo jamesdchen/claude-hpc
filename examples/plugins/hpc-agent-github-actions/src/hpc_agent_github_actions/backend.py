@@ -170,6 +170,11 @@ class GitHubActionsBackend(HPCBackend):
     # rsync steps and use this backend's ``alive_job_ids`` / ``fetch_results`` /
     # ``fetch_logs`` hooks instead (docs/proposals/crowd-compute-backend.md).
     requires_ssh = False
+    # GitHub Actions caps a matrix at 256 jobs per workflow run, so a single
+    # fan-out array can hold at most 256 tasks. Declaring it here lets
+    # submit-flow reject an over-cap sweep with a clean ``SpecInvalid`` before
+    # dispatch, rather than the runner rejecting a >256-cell matrix afterward.
+    max_array_size = 256
 
     def __init__(
         self,

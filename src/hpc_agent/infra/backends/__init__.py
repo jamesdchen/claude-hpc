@@ -129,6 +129,18 @@ class HPCBackend(abc.ABC):
     # ``fetch_logs`` (below) as the artifact-based replacement for the rsync pull.
     requires_ssh: bool = True
 
+    # Hard *platform* ceiling on the task count this backend can submit in a
+    # single scheduler array, independent of any clusters.yaml config. ``None``
+    # (the default for the built-in SSH families) means the backend imposes no
+    # cap of its own — the effective ceiling is then the cluster's
+    # ``constraints.max_array_size`` if one is declared. A pure-API backend
+    # whose platform caps the array overrides this (GitHub Actions = 256 matrix
+    # cells/run) so submit-flow can reject an over-cap sweep with a clean
+    # ``SpecInvalid`` *before* dispatch, instead of a low-signal platform error
+    # after (a >256-cell matrix that GitHub Actions rejects post-dispatch).
+    # Read off the *class* so the guard never pays the constructor cost.
+    max_array_size: int | None = None
+
     log_dir: str  # subclasses must set this
     JOB_ID_REGEX: re.Pattern[str] = _DEFAULT_JOB_ID_REGEX
 
