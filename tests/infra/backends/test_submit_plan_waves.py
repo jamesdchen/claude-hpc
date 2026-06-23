@@ -137,12 +137,8 @@ def test_multi_batch_wave_chains_on_all_prior_ids():
     """A wave with several batches: the next wave depends on ALL prior ids."""
     batches = [
         JobBatch(batch_index=0, task_start=1, task_end=10, array_size=10, est_wall_s=None, wave=0),
-        JobBatch(
-            batch_index=1, task_start=11, task_end=20, array_size=10, est_wall_s=None, wave=0
-        ),
-        JobBatch(
-            batch_index=2, task_start=21, task_end=30, array_size=10, est_wall_s=None, wave=1
-        ),
+        JobBatch(batch_index=1, task_start=11, task_end=20, array_size=10, est_wall_s=None, wave=0),
+        JobBatch(batch_index=2, task_start=21, task_end=30, array_size=10, est_wall_s=None, wave=1),
     ]
     plan = SubmissionPlan(
         batches=batches,

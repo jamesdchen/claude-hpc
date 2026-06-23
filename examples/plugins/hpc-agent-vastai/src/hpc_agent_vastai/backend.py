@@ -109,9 +109,7 @@ class VastAIBackend(HPCBackend):
         extra_flags: list[str] | None = None,
         array: bool = True,
     ) -> list[str]:
-        raise NotImplementedError(
-            "vastai submits via API, not a shell command; use submit_plan"
-        )
+        raise NotImplementedError("vastai submits via API, not a shell command; use submit_plan")
 
     def submit_plan(
         self,
