@@ -218,5 +218,37 @@ def test_fetch_logs_pulls_via_backend_hook_with_zero_ssh(tmp_path, monkeypatch, 
     assert len(data["logs"]) == 1
     written = Path(data["logs"][0]["path"])
     assert written.read_text(encoding="utf-8") == "synthetic api log"
+    # The envelope flags the pure-API run-level nature (no per-task addressing).
+    assert "pure-API" in data["note"]
     # journal record is intact (load proves the run still resolves).
     assert load_run(tmp_path, "r-logs") is not None
+
+
+def test_pure_api_log_entries_unpacks_a_zip(tmp_path):
+    # A pure-API fetch_logs that returns a single archive (GitHub's job-logs zip)
+    # is unpacked into one entry per file — browsable, not an opaque blob.
+    import zipfile
+
+    archive = tmp_path / "r-logs.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("task-0.txt", "task 0 stderr")
+        zf.writestr("task-1.txt", "task 1 stderr")
+
+    entries = logs_atom._pure_api_log_entries(str(archive))
+
+    paths = sorted(Path(e["path"]).name for e in entries)
+    assert paths == ["task-0.txt", "task-1.txt"]
+    assert all(Path(e["path"]).is_file() for e in entries)
+
+
+def test_pure_api_log_entries_passthrough_for_plain_file(tmp_path):
+    f = tmp_path / "run.log"
+    f.write_text("oops", encoding="utf-8")
+    assert logs_atom._pure_api_log_entries(str(f)) == [{"path": str(f)}]
+
+
+def test_pure_api_log_entries_returns_path_for_unreadable_zip(tmp_path):
+    # A ".zip" that isn't a valid archive must not crash — hand back the path.
+    bogus = tmp_path / "broken.zip"
+    bogus.write_text("not a zip", encoding="utf-8")
+    assert logs_atom._pure_api_log_entries(str(bogus)) == [{"path": str(bogus)}]

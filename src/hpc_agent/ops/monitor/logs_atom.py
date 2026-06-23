@@ -10,6 +10,7 @@ this before delegating, so the atom assumes a usable SSH agent.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hpc_agent import errors
@@ -24,7 +25,35 @@ from hpc_agent.state.run_record import runs_dir
 
 if TYPE_CHECKING:
     import argparse
-    from pathlib import Path
+
+
+def _pure_api_log_entries(written: str) -> list[dict[str, Any]]:
+    """Normalize a pure-API ``fetch_logs`` return into per-file log entries.
+
+    A pure-API backend hands back a path to the run's fetched logs — often a
+    single archive (GitHub returns one job-logs ``.zip``). Unpack an archive so
+    the caller gets browsable, greppable files instead of an opaque blob, and
+    return one ``{"path": ...}`` entry per file (a directory is listed as-is; a
+    plain file is returned as the single entry). Deliberately does NOT synthesize
+    a ``task_id`` per entry the way the SSH path does — a pure-API backend's logs
+    are run-level, not per-task-addressable; the ``note`` on the envelope says so.
+    """
+    import zipfile
+
+    p = Path(written)
+    if p.is_file() and p.suffix == ".zip":
+        out_dir = p.with_suffix("")
+        try:
+            with zipfile.ZipFile(p) as zf:
+                zf.extractall(out_dir)
+        except (zipfile.BadZipFile, OSError):
+            return [{"path": str(p)}]  # not a readable archive — hand back the path
+        files = sorted(str(f) for f in out_dir.rglob("*") if f.is_file())
+        return [{"path": f} for f in files] or [{"path": str(out_dir)}]
+    if p.is_dir():
+        files = sorted(str(f) for f in p.rglob("*") if f.is_file())
+        return [{"path": f} for f in files] or [{"path": str(p)}]
+    return [{"path": str(p)}]
 
 
 def _logs_arg_pre(ns: argparse.Namespace) -> dict[str, Any]:
@@ -125,7 +154,11 @@ def fetch_logs(
         return {
             "run_id": run_id,
             "scheduler": record.backend,
-            "logs": [{"path": written}],
+            "logs": _pure_api_log_entries(written),
+            "note": (
+                "pure-API backend: run-level logs fetched over the API (no per-task "
+                "stderr addressing). Files named 'task-<i>' map to task ids."
+            ),
         }
 
     resolved_task_ids: list[int] = []

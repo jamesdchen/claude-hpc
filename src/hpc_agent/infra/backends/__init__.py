@@ -512,6 +512,12 @@ class HPCBackend(abc.ABC):
 
 _REGISTRY: dict[str, type[HPCBackend]] = {}
 
+# Plugin modules whose import already failed once. ``registered_backend_names``
+# runs on every wire validation of a backend name; without this, a single broken
+# plugin would re-emit the same import warning on every spec validated this
+# process. Warn once per module instead.
+_WARNED_BROKEN_PLUGIN_MODULES: set[str] = set()
+
 
 def register(name: str) -> Callable[[type[HPCBackend]], type[HPCBackend]]:
     """Decorator to register a backend class."""
@@ -629,11 +635,13 @@ def registered_backend_names() -> frozenset[str]:
         try:
             importlib.import_module(modname)
         except Exception as exc:  # noqa: BLE001 — broken plugin must not crash the host
-            warnings.warn(
-                f"hpc-agent plugin backend module {modname!r} failed to import; "
-                f"its backends are unavailable: {exc}",
-                stacklevel=2,
-            )
+            if modname not in _WARNED_BROKEN_PLUGIN_MODULES:
+                _WARNED_BROKEN_PLUGIN_MODULES.add(modname)
+                warnings.warn(
+                    f"hpc-agent plugin backend module {modname!r} failed to import; "
+                    f"its backends are unavailable: {exc}",
+                    stacklevel=2,
+                )
     return frozenset(_REGISTRY)
 
 
