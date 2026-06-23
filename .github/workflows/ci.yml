@@ -192,14 +192,15 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             uv.lock
-      - name: Install core (workspace) + plugin
-        # Core from the checkout FIRST so the plugin's ``hpc-agent`` dependency
-        # resolves to the workspace, not PyPI; then the plugin with ``--no-deps``
-        # so it does not re-pull core over the top.
+      - name: Install core (with test harness) + plugin
+        # ``.[dev]`` FIRST so the plugin's ``hpc-agent`` dependency resolves to
+        # the workspace, not PyPI — and so the plugin tests run under the same
+        # pytest harness the repo's ``addopts`` assume (``-n auto`` needs
+        # pytest-xdist, the ``timeout`` ini needs pytest-timeout). The plugin
+        # goes on top with ``--no-deps`` so it does not re-pull core.
         run: |
-          pip install -e .
+          pip install -e '.[dev]'
           pip install -e "examples/plugins/${{ matrix.plugin }}" --no-deps
-          pip install pytest
       - name: Plugin offline tests (fake API client, zero network)
         run: pytest -q "examples/plugins/${{ matrix.plugin }}/tests"
       - name: actionlint workflow templates (syntax + expressions)
