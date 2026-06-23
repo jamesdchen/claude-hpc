@@ -163,7 +163,10 @@ class TestSSHWrappedCommand:
             cwd=tmp_path,
         )
         assert len(submissions) == 2
-        wave0_jid = submissions[0][1]
+        # submit_plan returns (wave, task_range, job_id) tuples (#339).
+        assert submissions[0][0] == 0
+        assert submissions[1][0] == 1
+        wave0_jid = submissions[0][2]
 
         qsub_calls = [c for c in recorder.calls if "qsub" in c]
         assert len(qsub_calls) == 2
@@ -223,7 +226,7 @@ class TestStdoutParsing:
             job_env={},
             cwd=tmp_path,
         )
-        assert submissions == [("1-10", "42")]
+        assert submissions == [(0, "1-10", "42")]
 
 
 # ---------------------------------------------------------------------------

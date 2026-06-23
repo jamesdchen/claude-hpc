@@ -398,26 +398,60 @@ class HPCBackend(abc.ABC):
         job_env: dict[str, str],
         *,
         cwd: Path | None = None,
-    ) -> list[tuple[str, str]]:
-        """Submit batches according to a SubmissionPlan using scheduler dependencies.
+    ) -> list[tuple[int, str, str]]:
+        """Submit a :class:`SubmissionPlan` as wave-sequenced array jobs (#339).
 
-        Returns (task_range, job_id) pairs.
+        The shared, subject-neutral wave submitter for both ``ops/submit`` and
+        ``ops/recover`` (it lives on :class:`HPCBackend` so neither subject
+        imports the other). Each :class:`JobBatch` is submitted as one global
+        sub-array using its :attr:`JobBatch.task_range`, reusing the same
+        ``_build_command`` / ``_execute_command`` / ``JOB_ID_REGEX`` triplet the
+        per-batch submitters (``_submit_one_batch``, ``_run_batches``) use.
+
+        Batches are grouped by :attr:`JobBatch.wave` and waves are submitted in
+        ascending order. When ``max_concurrent_jobs`` > 1 yields multiple waves,
+        each wave after wave 0 is *chained* behind the prior wave: its commands
+        carry a scheduler dependency on every job id submitted in the previous
+        wave. The dependency is the SUCCESS-only ``afterok`` form via
+        :meth:`_build_afterok_dependency_flag` when :attr:`supports_afterok` is
+        ``True`` (SLURM / PBS); backends without afterok support (SGE) fall back
+        to :meth:`_build_dependency_flag` (completion-only), preserving prior
+        behaviour.
+
+        Returns ``(wave, task_range, job_id)`` tuples in submission order.
+
+        Raises
+        ------
+        RuntimeError
+            If a submission exits non-zero (message carries the command and
+            stderr) or the scheduler stdout has no parseable job id.
         """
         cwd = cwd or Path.cwd()
         self._setup_log_dir()
 
-        # Group batches by wave
+        # Group batches by wave.
         waves: dict[int, list[JobBatch]] = defaultdict(list)
         for batch in plan.batches:
             waves[batch.wave].append(batch)
 
-        submissions: list[tuple[str, str]] = []
+        submissions: list[tuple[int, str, str]] = []
         prev_wave_ids: list[str] = []
 
         for wave_num in sorted(waves):
-            current_wave_ids: list[str] = []
-            dep_flags = self._build_dependency_flag(prev_wave_ids) if wave_num > 0 else []
+            # Wave sequencing (the net-new piece): chain each wave behind the
+            # previous wave's job ids. Prefer the SUCCESS-only afterok
+            # dependency where the backend supports it; otherwise fall back to
+            # the completion-only flag so afterok-less schedulers (SGE) keep
+            # their existing behaviour.
+            if wave_num > 0 and prev_wave_ids:
+                if self.supports_afterok:
+                    dep_flags = self._build_afterok_dependency_flag(prev_wave_ids)
+                else:
+                    dep_flags = self._build_dependency_flag(prev_wave_ids)
+            else:
+                dep_flags = []
 
+            current_wave_ids: list[str] = []
             for batch in waves[wave_num]:
                 cmd = self._build_command(
                     batch.task_range, job_name, job_env, extra_flags=dep_flags
@@ -436,7 +470,7 @@ class HPCBackend(abc.ABC):
                     raise RuntimeError(f"Could not parse job ID from output: {result.stdout!r}")
                 job_id = match.group(1)
                 current_wave_ids.append(job_id)
-                submissions.append((batch.task_range, job_id))
+                submissions.append((wave_num, batch.task_range, job_id))
 
             prev_wave_ids = current_wave_ids
 

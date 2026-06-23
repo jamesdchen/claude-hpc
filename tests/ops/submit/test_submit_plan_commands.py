@@ -106,8 +106,12 @@ class TestSubmitPlanSlurm:
         wave0 = recorder.calls[:3]
         wave1 = recorder.calls[3:]
 
+        # Submissions are (wave, task_range, job_id) tuples (#339).
+        assert [s[0] for s in submissions[:3]] == [0, 0, 0]
+        assert [s[0] for s in submissions[3:]] == [1, 1, 1]
+
         # Wave-0 job IDs were 1001, 1002, 1003.
-        wave0_jids = [s[1] for s in submissions[:3]]
+        wave0_jids = [s[2] for s in submissions[:3]]
         assert wave0_jids == ["1001", "1002", "1003"]
 
         # Every wave-0 argv must carry the sbatch binary and the --array flag,
@@ -123,16 +127,16 @@ class TestSubmitPlanSlurm:
         assert actual_ranges_w0 == expected_ranges_w0
 
         # Every wave-1 argv must carry --dependency referencing all wave-0 IDs.
+        # SLURM supports the SUCCESS-only afterok dependency, so wave sequencing
+        # uses afterok:<jid1>:<jid2>:<jid3> (#339 increment 2 revives the
+        # afterok wave-chaining).
         for argv in wave1:
             assert "--dependency" in argv
             dep_value = argv[argv.index("--dependency") + 1]
-            # SlurmBackend uses `afterany:<jid1>:<jid2>:<jid3>`.
-            # Plan file recommends `afterany`; code currently uses `afterany`.
-            # If this ever changes to `afterok`, the assertion below will flag it.
-            assert dep_value.startswith("afterany:"), (
-                f"Expected 'afterany:' prefix but got {dep_value!r}. "
-                "If this has become 'afterok:', that contradicts the plan "
-                "review which recommends afterany."
+            assert dep_value.startswith("afterok:"), (
+                f"Expected 'afterok:' prefix but got {dep_value!r}. "
+                "SLURM supports afterok, so wave sequencing must chain on "
+                "success-only dependencies."
             )
             for jid in wave0_jids:
                 assert jid in dep_value
@@ -143,7 +147,7 @@ class TestSubmitPlanSlurm:
         assert actual_ranges_w1 == expected_ranges_w1
 
         # Returned submissions should pair task_range with job_id in order.
-        assert [s[0] for s in submissions] == expected_ranges_w0 + expected_ranges_w1
+        assert [s[1] for s in submissions] == expected_ranges_w0 + expected_ranges_w1
 
 
 # ---------------------------------------------------------------------------
@@ -182,9 +186,13 @@ class TestSubmitPlanSge:
         wave0 = recorder.calls[:3]
         wave1 = recorder.calls[3:]
 
+        # Submissions are (wave, task_range, job_id) tuples (#339).
+        assert [s[0] for s in submissions[:3]] == [0, 0, 0]
+        assert [s[0] for s in submissions[3:]] == [1, 1, 1]
+
         # Wave-0 job IDs were 2001, 2002, 2003 (the FIRST integer parsed from
         # stdout — the re.search in submit_plan picks up the leading number).
-        wave0_jids = [s[1] for s in submissions[:3]]
+        wave0_jids = [s[2] for s in submissions[:3]]
         assert wave0_jids == ["2001", "2002", "2003"]
 
         # Wave 0: qsub with -t, no -hold_jid.
@@ -208,4 +216,4 @@ class TestSubmitPlanSge:
         actual_ranges_w1 = [argv[argv.index("-t") + 1] for argv in wave1]
         assert actual_ranges_w1 == expected_ranges_w1
 
-        assert [s[0] for s in submissions] == expected_ranges_w0 + expected_ranges_w1
+        assert [s[1] for s in submissions] == expected_ranges_w0 + expected_ranges_w1
