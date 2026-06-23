@@ -202,6 +202,14 @@ command runs the SSH; the framework primitive parses the text. This
 keeps planning replayable and unit-testable, and keeps audits of "what
 does this primitive touch?" trivial.
 
+The runtime residue of this boundary — the handful of places where a
+deterministic primitive legitimately *abstains* and hands a choice back
+to the caller — is enumerated and metered in
+[`internals/judgement-floor.md`](internals/judgement-floor.md): seven
+judgement points across the four workflows, with the
+`count_llm_touchpoints` meter ratcheting the deterministic surface down
+toward that floor.
+
 The advisory / forecasting layer (queue-wait prediction, submit-plan
 scoring) lives in an optional, separately-distributed plugin, which
 re-attaches through the `hpc_agent.plugins` entry-point seam wired up
