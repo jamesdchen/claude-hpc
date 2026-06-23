@@ -127,17 +127,20 @@ class TestSubmitPlanSlurm:
         assert actual_ranges_w0 == expected_ranges_w0
 
         # Every wave-1 argv must carry --dependency referencing all wave-0 IDs.
-        # SLURM supports the SUCCESS-only afterok dependency, so wave sequencing
-        # uses afterok:<jid1>:<jid2>:<jid3> (#339 increment 2 revives the
-        # afterok wave-chaining).
+        # Inter-wave chaining is COMPLETION-gated (afterany), not success-gated:
+        # the waves are independent slices of one sweep, so a failed task in
+        # wave 0 must NOT cancel wave 1 (#339 — afterok would, losing work; it is
+        # reserved for the canary gate). No canary here, so no afterok / kill flag.
         for argv in wave1:
             assert "--dependency" in argv
             dep_value = argv[argv.index("--dependency") + 1]
-            assert dep_value.startswith("afterok:"), (
-                f"Expected 'afterok:' prefix but got {dep_value!r}. "
-                "SLURM supports afterok, so wave sequencing must chain on "
-                "success-only dependencies."
+            assert dep_value.startswith("afterany:"), (
+                f"Expected 'afterany:' prefix but got {dep_value!r}. "
+                "Inter-wave concurrency chaining must be completion-gated so an "
+                "independent later wave is not dropped on a partial failure."
             )
+            assert "afterok" not in dep_value
+            assert not any("--kill-on-invalid-dep=yes" in a for a in argv)
             for jid in wave0_jids:
                 assert jid in dep_value
 

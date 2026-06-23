@@ -160,6 +160,50 @@ class ProfileBackend(HPCBackend):
             return ["-W", f"depend=afterok:{':'.join(job_ids)}"]
         return []
 
+    def _build_wave_dependency_flag(
+        self, *, afterok_ids: list[str], afterany_ids: list[str]
+    ) -> list[str]:
+        """One combined dependency flag gating on success AND/OR completion (#339).
+
+        The wave submitter needs a *single* dependency expression per wave: an
+        over-cap wave may have to both success-gate on the canary (``afterok``,
+        so a canary failure drops every wave) and completion-gate on the prior
+        wave (``afterany``, the concurrency chain that must NOT drop later waves
+        when one task fails). SLURM/PBS accept only one ``--dependency`` /
+        ``-W depend=`` flag, so the two conditions are ANDed into one
+        comma-separated expression here rather than emitted as two flags (the
+        second of which would clobber the first).
+
+        * SLURM: ``--dependency afterok:<c>,afterany:<p> --kill-on-invalid-dep=yes``
+          (the kill flag only when an afterok condition is present).
+        * PBS Pro / TORQUE: ``-W depend=afterok:<c>,afterany:<p>``.
+        * SGE: ``-hold_jid`` is completion-only and cannot express afterok, so
+          both id sets collapse to a single hold list (a canary gate is not
+          enforceable here — matching :attr:`supports_afterok` = False).
+        """
+        if not afterok_ids and not afterany_ids:
+            return []
+        fam = self.profile.family
+        if fam == "slurm":
+            conds: list[str] = []
+            if afterok_ids:
+                conds.append(f"afterok:{':'.join(afterok_ids)}")
+            if afterany_ids:
+                conds.append(f"afterany:{':'.join(afterany_ids)}")
+            flags = ["--dependency", ",".join(conds)]
+            if afterok_ids:
+                flags.append("--kill-on-invalid-dep=yes")
+            return flags
+        if fam in ("pbspro", "torque"):
+            conds = []
+            if afterok_ids:
+                conds.append(f"afterok:{':'.join(afterok_ids)}")
+            if afterany_ids:
+                conds.append(f"afterany:{':'.join(afterany_ids)}")
+            return ["-W", f"depend={','.join(conds)}"]
+        # sge: completion-only hold on the union (no native afterok).
+        return ["-hold_jid", ",".join(afterok_ids + afterany_ids)]
+
     def resource_flags(self, resources: object) -> list[str]:
         """Translate a resources object into scheduler command-line flags.
 

@@ -5,10 +5,10 @@ Covers the three increment-4 guarantees that ride on the wave submitter:
 * **Partial accounting on mid-plan failure** — when a wave fails mid-plan,
   ``submit_plan`` attaches the ids that DID land to the raised exception
   (``partial_submit_results``), mirroring ``_submit_flow_batch_locked``.
-* **Canary × waves gating** — the canary afterok dependency gates WAVE 0 only
-  (passed as ``base_extra_flags``); later waves chain off their predecessor via
-  the inter-wave afterok chain, so a canary failure transitively drops every
-  wave.
+* **Canary × waves gating** — the canary afterok dependency gates EVERY wave
+  (passed as ``gate_job_ids``), because the inter-wave chain is completion-only
+  (``afterany``) and cannot propagate a canary failure on its own. Each wave's
+  success-gate and completion-chain are merged into one dependency flag.
 * **N ids per run round-trip** — the sidecar pre-stamp + dedup tolerate one job
   id per wave (covered in ``tests/state`` for the storage layer; here we assert
   ``submit_plan`` returns N triples a >cap main run will pre-stamp as N ids).
@@ -46,9 +46,20 @@ class _StubBackend(HPCBackend):
     def _build_afterok_dependency_flag(self, job_ids: list[str]) -> list[str]:
         return ["--dependency", "afterok:" + ":".join(job_ids)] if job_ids else []
 
-    def _build_command(
-        self, task_range, job_name, job_env, *, extra_flags=None, array=True
-    ):  # type: ignore[override]
+    def _build_wave_dependency_flag(self, *, afterok_ids, afterany_ids):  # type: ignore[override]
+        if not afterok_ids and not afterany_ids:
+            return []
+        conds: list[str] = []
+        if afterok_ids:
+            conds.append("afterok:" + ":".join(afterok_ids))
+        if afterany_ids:
+            conds.append("afterany:" + ":".join(afterany_ids))
+        flags = ["--dependency", ",".join(conds)]
+        if afterok_ids:
+            flags.append("--kill-on-invalid-dep=yes")
+        return flags
+
+    def _build_command(self, task_range, job_name, job_env, *, extra_flags=None, array=True):  # type: ignore[override]
         cmd = ["submit", "--array", str(task_range), "-N", job_name]
         cmd.extend(extra_flags or [])
         return cmd
@@ -88,36 +99,38 @@ def _wave_plan(n_waves: int) -> SubmissionPlan:
 
 
 # --------------------------------------------------------------------------- #
-# Canary × waves: the canary gates wave 0; later waves chain off predecessors.
+# Canary × waves: the canary gates EVERY wave; inter-wave is afterany.
 # --------------------------------------------------------------------------- #
 
 
-def test_canary_gates_wave0_and_inter_wave_chain_propagates() -> None:
+def test_canary_gates_every_wave_with_afterany_chain() -> None:
     backend = _StubBackend(afterok=True)
     plan = _wave_plan(3)
 
-    # The canary's afterok dependency on canary job id "5" is the wave-0 base.
+    # The canary's job id "5" success-gates every wave (gate_job_ids).
     submissions = backend.submit_plan(
         plan,
         job_name="probe",
         job_env={},
         cwd=Path("."),
-        base_extra_flags=["--dependency", "afterok:5"],
+        gate_job_ids=["5"],
     )
 
     assert [w for w, _r, _j in submissions] == [0, 1, 2]
     wave_ids = [j for _w, _r, j in submissions]
 
-    # Wave 0 carries the CANARY afterok dependency (the gate).
+    # Every wave success-gates on the canary (so a canary failure drops the whole
+    # sweep — the completion-only afterany chain can't propagate that on its own).
+    # Wave 0: just the canary. Later waves: canary AND completion of the prior
+    # wave, merged into ONE --dependency.
     dep0 = backend.commands[0]
     assert dep0[dep0.index("--dependency") + 1] == "afterok:5"
-
-    # Wave 1 chains off wave 0's id; wave 2 off wave 1's — so a canary failure
-    # transitively drops every wave (wave0 dropped → wave1 afterok unmet → …).
+    assert "--kill-on-invalid-dep=yes" in dep0
     dep1 = backend.commands[1]
-    assert dep1[dep1.index("--dependency") + 1] == f"afterok:{wave_ids[0]}"
+    assert dep1[dep1.index("--dependency") + 1] == f"afterok:5,afterany:{wave_ids[0]}"
+    assert "--kill-on-invalid-dep=yes" in dep1
     dep2 = backend.commands[2]
-    assert dep2[dep2.index("--dependency") + 1] == f"afterok:{wave_ids[1]}"
+    assert dep2[dep2.index("--dependency") + 1] == f"afterok:5,afterany:{wave_ids[1]}"
 
 
 def test_no_canary_means_wave0_has_no_dependency() -> None:
@@ -126,8 +139,10 @@ def test_no_canary_means_wave0_has_no_dependency() -> None:
     submissions = backend.submit_plan(plan, job_name="probe", job_env={}, cwd=Path("."))
     assert len(submissions) == 2
     assert "--dependency" not in backend.commands[0]
-    # Wave 1 still chains off wave 0.
-    assert "--dependency" in backend.commands[1]
+    # Wave 1 still completion-chains off wave 0 (afterany, no canary).
+    dep1 = backend.commands[1]
+    assert dep1[dep1.index("--dependency") + 1].startswith("afterany:")
+    assert "afterok" not in " ".join(dep1)
 
 
 # --------------------------------------------------------------------------- #

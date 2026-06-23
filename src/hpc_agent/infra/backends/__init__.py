@@ -403,6 +403,19 @@ class HPCBackend(abc.ABC):
         """
         return []
 
+    def _build_wave_dependency_flag(
+        self, *, afterok_ids: list[str], afterany_ids: list[str]
+    ) -> list[str]:
+        """One combined dependency flag: success-gate AND/OR completion-gate (#339).
+
+        Used by :meth:`submit_plan` so each wave can depend on the canary
+        SUCCEEDING (``afterok_ids``) and on the prior wave COMPLETING
+        (``afterany_ids``) in a single scheduler flag. Default ``[]``
+        (no dependency support); the profile-driven engine overrides it. See
+        :meth:`ProfileBackend._build_wave_dependency_flag`.
+        """
+        return []
+
     def submit_one(
         self,
         task_range: str | None,
@@ -464,7 +477,8 @@ class HPCBackend(abc.ABC):
         job_env: dict[str, str],
         *,
         cwd: Path | None = None,
-        base_extra_flags: list[str] | None = None,
+        per_wave_extra_flags: list[str] | None = None,
+        gate_job_ids: list[str] | None = None,
     ) -> list[tuple[int, str, str]]:
         """Submit a :class:`SubmissionPlan` as wave-sequenced array jobs (#339).
 
@@ -478,20 +492,22 @@ class HPCBackend(abc.ABC):
 
         Batches are grouped by :attr:`JobBatch.wave` and waves are submitted in
         ascending order. When ``max_concurrent_jobs`` > 1 yields multiple waves,
-        each wave after wave 0 is *chained* behind the prior wave: its commands
-        carry a scheduler dependency on every job id submitted in the previous
-        wave. The dependency is the SUCCESS-only ``afterok`` form via
-        :meth:`_build_afterok_dependency_flag` when :attr:`supports_afterok` is
-        ``True`` (SLURM / PBS); backends without afterok support (SGE) fall back
-        to :meth:`_build_dependency_flag` (completion-only), preserving prior
-        behaviour.
+        each wave after wave 0 is *chained* behind the prior wave for
+        concurrency bounding via a **completion** dependency (``afterany``):
+        wave N starts once wave N-1 has TERMINATED, regardless of per-task
+        outcome. Completion (not success) is deliberate — the waves are
+        independent slices of one sweep, so a single failed task must NOT cancel
+        the later, unrelated waves (a success-gate would, losing work). The
+        success-gate is reserved for the canary below.
 
-        *base_extra_flags* are flags applied to **wave 0 only** — the seam the
-        canary×waves gate uses (#339 increment 4): the canary's afterok
-        dependency gates wave 0, and the inter-wave afterok chain (wave0→wave1→…)
-        transitively propagates the gate so a canary failure drops every wave.
-        Resource flags, which must apply to every wave, are folded into each
-        batch's ``extra_flags`` here too.
+        *gate_job_ids* are job ids that EVERY wave must depend on SUCCEEDING
+        (the canary, #339 increment 4). Because the inter-wave dependency is
+        completion-only it does not propagate a canary failure on its own, so
+        the gate is applied to every wave directly (not just wave 0). The
+        per-wave success-gate and the inter-wave completion-gate are ANDed into
+        a single scheduler dependency flag by
+        :meth:`_build_wave_dependency_flag`. *per_wave_extra_flags* (resource
+        flags) are applied to every wave.
 
         Returns ``(wave, task_range, job_id)`` tuples in submission order.
 
@@ -513,22 +529,18 @@ class HPCBackend(abc.ABC):
 
         submissions: list[tuple[int, str, str]] = []
         prev_wave_ids: list[str] = []
+        gate_ids = list(gate_job_ids or [])
 
         for wave_num in sorted(waves):
-            # Wave sequencing: chain each wave behind the previous wave's job
-            # ids. Prefer the SUCCESS-only afterok dependency where the backend
-            # supports it; otherwise fall back to the completion-only flag so
-            # afterok-less schedulers (SGE) keep their existing behaviour. Wave 0
-            # carries the caller's ``base_extra_flags`` (the canary afterok gate,
-            # #339 inc 4) instead — later waves inherit the gate transitively
-            # through the inter-wave chain.
-            if wave_num > 0 and prev_wave_ids:
-                if self.supports_afterok:
-                    dep_flags = self._build_afterok_dependency_flag(prev_wave_ids)
-                else:
-                    dep_flags = self._build_dependency_flag(prev_wave_ids)
-            else:
-                dep_flags = list(base_extra_flags or [])
+            # Every wave success-gates on the canary (gate_ids); waves after the
+            # first ALSO complete-gate on the prior wave for concurrency bounding
+            # (afterany — must not drop later waves on a partial failure). Both
+            # conditions are merged into one dependency flag (a scheduler accepts
+            # only one). Resource flags apply to every wave.
+            afterany_ids = prev_wave_ids if wave_num > 0 else []
+            dep_flags = list(per_wave_extra_flags or []) + self._build_wave_dependency_flag(
+                afterok_ids=gate_ids, afterany_ids=afterany_ids
+            )
 
             current_wave_ids: list[str] = []
             for batch in waves[wave_num]:

@@ -650,13 +650,9 @@ def _submit_one_batch(
     callers expect.
     """
     try:
-        return backend.submit_one(
-            task_range, job_name, job_env, extra_flags=extra_flags, cwd=cwd
-        )
+        return backend.submit_one(task_range, job_name, job_env, extra_flags=extra_flags, cwd=cwd)
     except RuntimeError as exc:
-        raise errors.RemoteCommandFailed(
-            f"resubmit failed for array {task_range}: {exc}"
-        ) from exc
+        raise errors.RemoteCommandFailed(f"resubmit failed for array {task_range}: {exc}") from exc
 
 
 def _safe_read_sidecar(experiment_dir: Path, run_id: str) -> dict | None:

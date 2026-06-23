@@ -1,11 +1,14 @@
-"""Wave-sequenced ``HPCBackend.submit_plan`` submitter (#339 increment 2).
+"""Wave-sequenced ``HPCBackend.submit_plan`` submitter (#339 increments 2-3).
 
 The revived ``submit_plan`` is the shared, subject-neutral wave submitter:
 per :class:`JobBatch` it submits the global ``task_range`` reusing the
 ``_build_command`` / ``_execute_command`` / ``JOB_ID_REGEX`` triplet, groups
 batches by wave, submits waves in order, and chains each wave behind the prior
-wave's job ids via the SUCCESS-only ``afterok`` dependency (falling back to the
-completion-only flag when the backend has no afterok support).
+wave's job ids via a **completion** dependency (``afterany`` — the concurrency
+chain must NOT drop later independent waves when one task fails; the
+success-only ``afterok`` gate is reserved for the canary, passed via
+``gate_job_ids``). Per-wave + inter-wave conditions are merged into one
+scheduler flag by ``_build_wave_dependency_flag``.
 
 These tests drive it through a stub backend that captures the emitted commands,
 mirroring the fake-backend pattern in ``test_afterok_dependency.py``.
@@ -55,6 +58,27 @@ class _StubBackend(HPCBackend):
             return []
         return ["-hold_jid", ",".join(job_ids)]
 
+    def _build_wave_dependency_flag(
+        self, *, afterok_ids: list[str], afterany_ids: list[str]
+    ) -> list[str]:
+        # Models the real engine: a SLURM-like backend (afterok=True) merges
+        # success+completion conditions into one ``--dependency``; an
+        # afterok-less backend (afterok=False, SGE-like) collapses everything to
+        # a completion-only ``-hold_jid`` on the union.
+        if not afterok_ids and not afterany_ids:
+            return []
+        if self._afterok:
+            conds: list[str] = []
+            if afterok_ids:
+                conds.append("afterok:" + ":".join(afterok_ids))
+            if afterany_ids:
+                conds.append("afterany:" + ":".join(afterany_ids))
+            flags = ["--dependency", ",".join(conds)]
+            if afterok_ids:
+                flags.append("--kill-on-invalid-dep=yes")
+            return flags
+        return ["-hold_jid", ",".join(afterok_ids + afterany_ids)]
+
     # -- triplet the submitter reuses ------------------------------------
     def _build_command(
         self,
@@ -99,7 +123,7 @@ def _three_batch_plan() -> SubmissionPlan:
     )
 
 
-def test_three_waves_afterok_chain():
+def test_three_waves_afterany_chain():
     backend = _StubBackend(afterok=True)
     plan = _three_batch_plan()
 
@@ -123,14 +147,17 @@ def test_three_waves_afterok_chain():
     # Wave 0 has no dependency.
     assert "--dependency" not in backend.commands[0]
 
-    # Wave 1 depends on wave 0's job id (afterok); wave 2 on wave 1's.
+    # Inter-wave chaining is COMPLETION-gated (afterany), not success-gated:
+    # an independent wave must not be dropped when a prior wave has a failed
+    # task. Wave 1 waits on wave 0's id; wave 2 on wave 1's.
     dep1 = backend.commands[1]
-    assert dep1[dep1.index("--dependency") + 1] == "afterok:101"
+    assert dep1[dep1.index("--dependency") + 1] == "afterany:101"
     dep2 = backend.commands[2]
-    assert dep2[dep2.index("--dependency") + 1] == "afterok:102"
+    assert dep2[dep2.index("--dependency") + 1] == "afterany:102"
 
-    # afterok backend never emits the completion-only fallback flag.
-    assert not any("-hold_jid" in c for c in backend.commands)
+    # No canary gate here → no afterok / kill-on-invalid-dep anywhere.
+    assert not any("afterok" in tok for c in backend.commands for tok in c)
+    assert not any("--kill-on-invalid-dep=yes" in c for c in backend.commands)
 
 
 def test_multi_batch_wave_chains_on_all_prior_ids():
@@ -156,19 +183,41 @@ def test_multi_batch_wave_chains_on_all_prior_ids():
     wave0_ids = [s[2] for s in submissions[:2]]
     assert wave0_ids == ["101", "102"]
 
-    # Wave 1's single batch depends on BOTH wave-0 ids.
+    # Wave 1's single batch completion-depends on BOTH wave-0 ids.
     dep = backend.commands[2]
-    assert dep[dep.index("--dependency") + 1] == "afterok:101:102"
+    assert dep[dep.index("--dependency") + 1] == "afterany:101:102"
 
 
-def test_afterok_less_backend_falls_back_to_plain_dependency():
+def test_every_wave_gates_on_canary_and_chains_for_concurrency():
+    """gate_job_ids success-gates EVERY wave; inter-wave adds the afterany chain.
+
+    The two conditions are merged into one ``--dependency`` (a scheduler accepts
+    only one): wave 0 carries just the canary afterok; later waves carry
+    ``afterok:<canary>,afterany:<prev>`` plus ``--kill-on-invalid-dep=yes``.
+    """
+    backend = _StubBackend(afterok=True)
+    plan = _three_batch_plan()
+
+    backend.submit_plan(plan, job_name="probe", job_env={}, cwd=Path("."), gate_job_ids=["42"])
+
+    dep0 = backend.commands[0]
+    assert dep0[dep0.index("--dependency") + 1] == "afterok:42"
+    assert "--kill-on-invalid-dep=yes" in dep0
+    dep1 = backend.commands[1]
+    assert dep1[dep1.index("--dependency") + 1] == "afterok:42,afterany:101"
+    assert "--kill-on-invalid-dep=yes" in dep1
+    dep2 = backend.commands[2]
+    assert dep2[dep2.index("--dependency") + 1] == "afterok:42,afterany:102"
+
+
+def test_afterok_less_backend_uses_completion_hold():
     backend = _StubBackend(afterok=False)
     plan = _three_batch_plan()
 
     submissions = backend.submit_plan(plan, job_name="probe", job_env={}, cwd=Path("."))
 
     assert [s[0] for s in submissions] == [0, 1, 2]
-    # No afterok anywhere; the completion-only flag chains the waves instead.
+    # No afterok anywhere; the completion-only hold chains the waves instead.
     assert not any("--dependency" in c for c in backend.commands)
     assert "-hold_jid" not in backend.commands[0]
     dep1 = backend.commands[1]

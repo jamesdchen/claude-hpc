@@ -974,8 +974,9 @@ def _make_single_array_submission(
             )
             return [job_id]
         # Normal array case: a one-batch, one-wave plan. submit_plan emits the
-        # same ``1-N`` array command the old inline qsub did; resource +
-        # afterok flags ride as the wave-0 base_extra_flags.
+        # same ``1-N`` array command the old inline qsub did; resource + afterok
+        # flags ride as the per-wave flags (a single wave, so no inter-wave dep
+        # to merge — byte-identical to the pre-#339 inline qsub).
         plan = SubmissionPlan(
             batches=[
                 JobBatch(
@@ -994,7 +995,7 @@ def _make_single_array_submission(
             strategy="single array (<=cap)",
         )
         submissions = backend.submit_plan(
-            plan, job_name, job_env, cwd=cwd, base_extra_flags=flags
+            plan, job_name, job_env, cwd=cwd, per_wave_extra_flags=flags
         )
     except RuntimeError as exc:
         # Map the backend submitter's RuntimeError (non-zero exit / unparseable
@@ -1090,8 +1091,7 @@ def _enforce_array_cap(
         return
     where = f" on cluster {cluster!r}" if cluster else ""
     reason = (
-        "a single multi-rank MPI job is indivisible — it cannot be split into "
-        "waves"
+        "a single multi-rank MPI job is indivisible — it cannot be split into waves"
         if single_mpi_job
         else f"backend {backend_name!r} declares it cannot wave (can_wave=False)"
     )
@@ -1189,7 +1189,7 @@ def _submit_main_array(
     job_env: dict[str, str],
     cwd: Path,
     resources: object,
-    afterok_flags: list[str],
+    gate_job_ids: list[str],
     backend_name: str,
     cluster: str | None,
 ) -> list[str]:
@@ -1199,23 +1199,31 @@ def _submit_main_array(
     wave submitter for both shapes:
 
     * **≤cap** → :func:`_make_single_array_submission` (a one-batch, one-wave
-      plan; byte-identical to the pre-#339 inline qsub).
+      plan; byte-identical to the pre-#339 inline qsub). The canary gate is the
+      afterok dependency built from *gate_job_ids*.
     * **>cap** → the cap-driven multi-wave plan
       (:func:`_main_submission_plan`) submitted via
-      :meth:`HPCBackend.submit_plan`, which chains each wave behind the prior
-      wave's job ids (afterok where supported). The canary's ``afterok_flags``
-      gate **wave 0 only** (passed as ``base_extra_flags``); the inter-wave
-      chain propagates the gate to later waves transitively (#339 inc 4). The
-      plan derives from the same packer over the same (constraints, total_tasks)
-      as the cap-plan ``wave_map`` stamped into the sidecar, so the waves run
-      and the combiner's map agree.
+      :meth:`HPCBackend.submit_plan`. Each wave completion-chains behind the
+      prior wave for concurrency bounding (``afterany`` — a partial failure must
+      not drop later independent waves), and EVERY wave success-gates on the
+      canary (*gate_job_ids*) so a canary failure drops the whole sweep (#339
+      inc 4). The plan derives from the same packer over the same (constraints,
+      total_tasks) as the cap-plan ``wave_map`` stamped into the sidecar, so the
+      waves run and the combiner's map agree.
 
     Returns one job id per wave for the multi-wave path (a list the journal /
     pre-stamp already tolerate), or the single array's id for the ≤cap path.
     """
-    if not _is_multiwave_sweep(
-        backend_name=backend_name, total_tasks=total_tasks, cluster=cluster
-    ):
+    if not _is_multiwave_sweep(backend_name=backend_name, total_tasks=total_tasks, cluster=cluster):
+        # ≤cap single wave: the canary gate is the afterok flag built from the
+        # gate ids, applied to the one array. Only build it when there ARE gate
+        # ids — the caller only populates them for an afterok-capable backend, so
+        # this never calls the method on a backend (or test stub) that lacks it.
+        afterok_flags = (
+            backend._build_afterok_dependency_flag(gate_job_ids)  # type: ignore[attr-defined]
+            if gate_job_ids
+            else []
+        )
         return _make_single_array_submission(
             backend,
             job_name=job_name,
@@ -1227,13 +1235,17 @@ def _submit_main_array(
         )
 
     # Over-cap: split into concurrency-bounded waves. Resource flags apply to
-    # every wave; the canary afterok gate applies to wave 0 (base_extra_flags),
-    # propagating to later waves through submit_plan's inter-wave chain.
+    # every wave; the canary success-gate (gate_job_ids) applies to every wave,
+    # merged with the inter-wave completion-chain inside submit_plan.
     plan = _main_submission_plan(total_tasks=total_tasks, cluster=cluster or "")
-    base_flags = backend.resource_flags(resources) + list(afterok_flags)
     try:
         submissions = backend.submit_plan(
-            plan, job_name, job_env, cwd=cwd, base_extra_flags=base_flags
+            plan,
+            job_name,
+            job_env,
+            cwd=cwd,
+            per_wave_extra_flags=backend.resource_flags(resources),
+            gate_job_ids=gate_job_ids,
         )
     except RuntimeError as exc:
         # Carry submit_plan's partial accounting (the wave ids that DID land
@@ -1558,13 +1570,18 @@ def _submit_one_spec(
     # round-trip) yet the scheduler drops main if the canary fails. Only when
     # the canary actually fired this call (canary_job_ids), the spec opted in,
     # and the scheduler supports afterok (SGE has none → left un-gated, as today).
-    afterok_flags: list[str] = []
-    if (
-        spec.enable_afterok_dependency and canary_job_ids and backend_obj.supports_afterok  # type: ignore[attr-defined]
-    ):
-        afterok_flags = backend_obj._build_afterok_dependency_flag(  # type: ignore[attr-defined]
-            list(canary_job_ids)
+    # The canary gate ids: the main array depends on the canary SUCCEEDING.
+    # Only when the canary fired this call, the spec opted in, and the scheduler
+    # supports afterok (SGE has none → left un-gated, as today). Passed as ids
+    # (not pre-built flags) so the multi-wave path can gate *every* wave —
+    # the completion-only inter-wave chain can't propagate a canary failure.
+    gate_job_ids: list[str] = (
+        list(canary_job_ids)
+        if (
+            spec.enable_afterok_dependency and canary_job_ids and backend_obj.supports_afterok  # type: ignore[attr-defined]
         )
+        else []
+    )
 
     try:
         job_ids = _submit_main_array(
@@ -1574,7 +1591,7 @@ def _submit_one_spec(
             job_env=job_env_full,
             cwd=experiment_dir,
             resources=spec.resources,
-            afterok_flags=afterok_flags,
+            gate_job_ids=gate_job_ids,
             backend_name=spec.backend,
             cluster=spec.cluster,
         )

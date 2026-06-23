@@ -7,7 +7,8 @@ Covers the submit-flow seams that the wave path introduces, below the full
   ``wave_map`` (overriding the axes default) iff the sweep exceeds the effective
   cap; a ≤cap sweep stamps no explicit wave_map.
 * **_submit_main_array routing** — ≤cap → one array; >cap → N waves via
-  ``submit_plan``, returning one id per wave; the canary afterok gates wave 0.
+  ``submit_plan``, returning one id per wave; the canary afterok gates EVERY
+  wave and the inter-wave chain is completion-gated (afterany).
 * **Mid-plan failure** — the partial wave ids surface on the typed envelope.
 """
 
@@ -54,9 +55,20 @@ class _WaveBackend(HPCBackend):
     def _build_afterok_dependency_flag(self, job_ids: list[str]) -> list[str]:
         return ["--dependency", "afterok:" + ":".join(job_ids)] if job_ids else []
 
-    def _build_command(
-        self, task_range, job_name, job_env, *, extra_flags=None, array=True
-    ):  # type: ignore[override]
+    def _build_wave_dependency_flag(self, *, afterok_ids, afterany_ids):  # type: ignore[override]
+        if not afterok_ids and not afterany_ids:
+            return []
+        conds: list[str] = []
+        if afterok_ids:
+            conds.append("afterok:" + ":".join(afterok_ids))
+        if afterany_ids:
+            conds.append("afterany:" + ":".join(afterany_ids))
+        flags = ["--dependency", ",".join(conds)]
+        if afterok_ids:
+            flags.append("--kill-on-invalid-dep=yes")
+        return flags
+
+    def _build_command(self, task_range, job_name, job_env, *, extra_flags=None, array=True):  # type: ignore[override]
         cmd = ["qsub", "-t", str(task_range), "-N", job_name]
         cmd.extend(extra_flags or [])
         return cmd
@@ -94,9 +106,7 @@ def _required_sidecar_spec(run_id: str, total_tasks: int):
     )
 
 
-def test_over_cap_sweep_stamps_cap_plan_wave_map(
-    tmp_path: Path, _capped_cluster: None
-) -> None:
+def test_over_cap_sweep_stamps_cap_plan_wave_map(tmp_path: Path, _capped_cluster: None) -> None:
     # 250 tasks, cap 100 -> n_batches=ceil(250/100)=3, evenly packed at
     # ceil(250/3)=84 per batch -> waves of 84/84/82 (concurrency 1 -> one batch
     # per wave). The cap-plan wave_map must mirror that exact split, GLOBAL
@@ -114,9 +124,7 @@ def test_over_cap_sweep_stamps_cap_plan_wave_map(
     assert all_ids == list(range(250))
 
 
-def test_at_cap_sweep_stamps_no_explicit_wave_map(
-    tmp_path: Path, _capped_cluster: None
-) -> None:
+def test_at_cap_sweep_stamps_no_explicit_wave_map(tmp_path: Path, _capped_cluster: None) -> None:
     # 100 tasks == cap -> single wave; provenance precedence keeps today's
     # behaviour: no cap-driven wave_map (the axes-derived default applies, which
     # with no axes.yaml present resolves to an empty map).
@@ -143,7 +151,7 @@ def test_submit_main_array_single_wave_under_cap(
         job_env={},
         cwd=Path("."),
         resources=None,
-        afterok_flags=[],
+        gate_job_ids=[],
         backend_name="sge",
         cluster="c",
     )
@@ -163,7 +171,7 @@ def test_submit_main_array_multi_wave_over_cap_with_canary_gate(
         job_env={},
         cwd=Path("."),
         resources=None,
-        afterok_flags=["--dependency", "afterok:42"],  # the canary gate
+        gate_job_ids=["42"],  # the canary gate
         backend_name="sge",
         cluster="c",
     )
@@ -171,10 +179,19 @@ def test_submit_main_array_multi_wave_over_cap_with_canary_gate(
     assert ids == ["501", "502", "503"]
     ranges = [c[c.index("-t") + 1] for c in backend.commands]
     assert ranges == ["1-84", "85-168", "169-250"]
-    # Wave 0 carries the canary afterok gate; later waves chain off predecessors.
+    # EVERY wave success-gates on the canary (42); later waves ALSO completion-gate
+    # on their predecessor (afterany), merged into one --dependency. A canary
+    # failure thus drops the whole sweep, while a partial failure in one wave does
+    # not cancel the independent later waves.
     assert backend.commands[0][backend.commands[0].index("--dependency") + 1] == "afterok:42"
-    assert backend.commands[1][backend.commands[1].index("--dependency") + 1] == "afterok:501"
-    assert backend.commands[2][backend.commands[2].index("--dependency") + 1] == "afterok:502"
+    assert (
+        backend.commands[1][backend.commands[1].index("--dependency") + 1]
+        == "afterok:42,afterany:501"
+    )
+    assert (
+        backend.commands[2][backend.commands[2].index("--dependency") + 1]
+        == "afterok:42,afterany:502"
+    )
 
 
 def test_submit_main_array_mid_plan_failure_surfaces_partial_ids(
@@ -197,7 +214,7 @@ def test_submit_main_array_mid_plan_failure_surfaces_partial_ids(
             job_env={},
             cwd=Path("."),
             resources=None,
-            afterok_flags=[],
+            gate_job_ids=[],
             backend_name="sge",
             cluster="c",
         )

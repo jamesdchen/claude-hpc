@@ -79,10 +79,11 @@ collaborator on one shared repo.
 | result pull (rsync) | `fetch_results` → download + unzip the run's artifacts |
 | stderr logs | `fetch_logs` → download the run's job-logs zip |
 
-The submit override lives in **`_execute_command`**, not `submit_array_tracked`:
-submit-flow's single-array path (`_make_single_array_submission`) calls
-`_build_command` + `_execute_command` and parses `JOB_ID_REGEX` from stdout, and
-that is the path a real submit takes.
+The submit override lives in **`_execute_command`**, not `submit_plan`:
+submit-flow routes every array through the shared per-batch primitive
+`submit_one` (`_build_command` + `_execute_command` + `JOB_ID_REGEX`), so this
+backend only overrides `_execute_command`/`_build_command` and that is the path
+a real submit takes — including each wave of a multi-wave (>256-task) run.
 
 ## What works end-to-end vs. what still needs bridging
 
