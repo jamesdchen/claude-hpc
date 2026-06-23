@@ -207,11 +207,22 @@ jobs:
         # Validates the workflow/expression surface hpc-agent edits (matrix, job
         # names, dispatch inputs) without running it. shellcheck is disabled: the
         # template's run-steps are user-facing examples, not hpc-agent's shell.
+        #
+        # Non-blocking: this fetches a binary from GitHub each run, so a release-
+        # CDN hiccup must never gate mergeability — the plugin tests above are the
+        # hard gate; this is advisory. The download script AND the binary are
+        # both pinned to v1.7.12 (no moving ``main`` ref), and ``curl -f --retry``
+        # piped into bash makes a failed download fail fast instead of feeding a
+        # stray error body to the shell.
+        continue-on-error: true
         shell: bash
         run: |
+          set -o pipefail
           tpl_dir="examples/plugins/${{ matrix.plugin }}/workflow-template"
           if compgen -G "$tpl_dir/*.yml" > /dev/null; then
-            bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.12 .
+            curl -fsSL --retry 3 --retry-delay 2 \
+              https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash \
+              | bash -s -- 1.7.12 .
             ./actionlint -shellcheck= "$tpl_dir"/*.yml
           else
             echo "no workflow-template for ${{ matrix.plugin }} — skipping"
