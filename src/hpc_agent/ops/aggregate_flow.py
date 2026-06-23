@@ -419,6 +419,12 @@ def _pure_api_reduce(
             )
         from hpc_agent.ops.aggregate.local_reduce import local_reduce
 
+        # ``aggregate_output_path`` is deliberately NOT threaded here: it carries
+        # cluster-path semantics (resolved under ``remote_path`` by cluster-
+        # reduce), and an absolute cluster path would make the local
+        # ``mkdir`` target the control plane's filesystem. The local output is
+        # internal anyway — the reduced JSON is returned inline below — so
+        # local-reduce keeps its own local default location.
         cr = local_reduce(
             run_id=run_id,
             results_dir=out,
