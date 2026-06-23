@@ -58,10 +58,12 @@ def _make_plan() -> SubmissionPlan:
 class _Recorder:
     def __init__(self, responder):
         self.calls: list[list[str]] = []
+        self.envs: list[dict[str, str]] = []
         self._responder = responder
 
     def __call__(self, cmd, *args, **kwargs):
         self.calls.append(list(cmd))
+        self.envs.append(dict(kwargs.get("env") or {}))
         return self._responder(cmd)
 
 
@@ -121,10 +123,13 @@ class TestSubmitPlanSlurm:
             assert "--array" in argv
             assert not any("--dependency" in a for a in argv)
 
-        # Task ranges in wave 0 argv.
-        expected_ranges_w0 = ["1-100", "101-200", "201-300"]
-        actual_ranges_w0 = [argv[argv.index("--array") + 1] for argv in wave0]
-        assert actual_ranges_w0 == expected_ranges_w0
+        # SLURM is index-bounded, so each batch submits a LOCAL ``1-<size>``
+        # array (always within MaxArraySize) and ships its global start as
+        # TASK_OFFSET in the job env (carried by ``--export``); wave-0 batch 0
+        # (offset 0) omits it, staying byte-identical to a ≤cap sweep. The
+        # RETURNED submissions still carry the GLOBAL range (asserted at the end).
+        assert [argv[argv.index("--array") + 1] for argv in wave0] == ["1-100", "1-100", "1-100"]
+        assert [e.get("TASK_OFFSET") for e in recorder.envs[:3]] == [None, "100", "200"]
 
         # Every wave-1 argv must carry --dependency referencing all wave-0 IDs.
         # Inter-wave chaining is COMPLETION-gated (afterany), not success-gated:
@@ -144,13 +149,20 @@ class TestSubmitPlanSlurm:
             for jid in wave0_jids:
                 assert jid in dep_value
 
-        # Task ranges in wave 1 argv.
-        expected_ranges_w1 = ["301-400", "401-500", "501-600"]
-        actual_ranges_w1 = [argv[argv.index("--array") + 1] for argv in wave1]
-        assert actual_ranges_w1 == expected_ranges_w1
+        # Wave 1 argv: also LOCAL ranges; offsets continue 300/400/500.
+        assert [argv[argv.index("--array") + 1] for argv in wave1] == ["1-100", "1-100", "1-100"]
+        assert [e.get("TASK_OFFSET") for e in recorder.envs[3:]] == ["300", "400", "500"]
 
-        # Returned submissions should pair task_range with job_id in order.
-        assert [s[1] for s in submissions] == expected_ranges_w0 + expected_ranges_w1
+        # Returned submissions pair the GLOBAL task_range with each job_id in
+        # order (sidecar / wave_map alignment is by global id, not local index).
+        assert [s[1] for s in submissions] == [
+            "1-100",
+            "101-200",
+            "201-300",
+            "301-400",
+            "401-500",
+            "501-600",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -204,19 +216,27 @@ class TestSubmitPlanSge:
             assert "-t" in argv
             assert "-hold_jid" not in argv
 
-        expected_ranges_w0 = ["1-100", "101-200", "201-300"]
-        actual_ranges_w0 = [argv[argv.index("-t") + 1] for argv in wave0]
-        assert actual_ranges_w0 == expected_ranges_w0
+        # SGE is index-bounded: each batch submits a LOCAL ``1-<size>`` array
+        # (within max_aj_tasks) + a per-batch TASK_OFFSET (in the job env);
+        # wave-0 batch 0 (offset 0) omits it. Returned submissions keep GLOBAL.
+        assert [argv[argv.index("-t") + 1] for argv in wave0] == ["1-100", "1-100", "1-100"]
+        assert [e.get("TASK_OFFSET") for e in recorder.envs[:3]] == [None, "100", "200"]
 
-        # Wave 1: -hold_jid with comma-joined wave-0 IDs.
+        # Wave 1: -hold_jid (completion gate) with comma-joined wave-0 IDs.
         for argv in wave1:
             assert "-hold_jid" in argv
             hold_value = argv[argv.index("-hold_jid") + 1]
             # SGE convention: comma-separated list.
             assert hold_value == ",".join(wave0_jids)
 
-        expected_ranges_w1 = ["301-400", "401-500", "501-600"]
-        actual_ranges_w1 = [argv[argv.index("-t") + 1] for argv in wave1]
-        assert actual_ranges_w1 == expected_ranges_w1
+        assert [argv[argv.index("-t") + 1] for argv in wave1] == ["1-100", "1-100", "1-100"]
+        assert [e.get("TASK_OFFSET") for e in recorder.envs[3:]] == ["300", "400", "500"]
 
-        assert [s[1] for s in submissions] == expected_ranges_w0 + expected_ranges_w1
+        assert [s[1] for s in submissions] == [
+            "1-100",
+            "101-200",
+            "201-300",
+            "301-400",
+            "401-500",
+            "501-600",
+        ]

@@ -568,7 +568,6 @@ def _submit_resubmit_batches(
     extra_flags = render_overrides_to_extra_flags(scheduler, effective_overrides)
 
     if backend_factory is None:
-        from hpc_agent import errors
         from hpc_agent.infra.backends.remote_factory import build_remote_backend
         from hpc_agent.infra.ssh_validation import validate_ssh_target
 
@@ -601,6 +600,39 @@ def _submit_resubmit_batches(
             remote_path=remote_path,
             job_env_keys=tuple(job_env.keys()),
         )
+
+    # Out-of-range guard for multi-wave resubmits (#339). On an index-bounded
+    # backend (``uses_global_array_index`` False — the SSH families) a valid
+    # scheduler array index is 1..max_array_size. The initial submit works around
+    # the cap by submitting LOCAL ranges + a per-batch TASK_OFFSET, but a
+    # resubmit replays the ACTUAL failed ids as a possibly NON-contiguous global
+    # array expression (e.g. ``"1500,1700"``), which a single offset cannot
+    # encode. If any failed id maps to an array index above the cap, refuse
+    # rather than silently emit an out-of-range array the scheduler rejects. The
+    # common case (every failed id < cap) is unaffected. Resubmit of an
+    # out-of-range multi-wave id set is a documented follow-up.
+    if not getattr(backend_obj, "uses_global_array_index", False):
+        from hpc_agent._kernel.contract.task_id import HpcTaskId, to_array_index
+        from hpc_agent.infra.constraints import ClusterConstraints
+
+        cap = (
+            effective_constraints.max_array_size
+            if effective_constraints is not None
+            else ClusterConstraints().max_array_size
+        )
+        over = sorted(
+            tid for tid in failed_task_ids if int(to_array_index(HpcTaskId(int(tid)))) > cap
+        )
+        if over:
+            raise errors.SpecInvalid(
+                "resubmit of an out-of-range multi-wave task id set is not "
+                f"supported yet on this backend: failed task id(s) {over} exceed "
+                f"the array index cap (max_array_size={cap}). These ids only exist "
+                "because the original submission waved past the cap; resubmitting "
+                "them would need a non-contiguous global array expression the "
+                "local-index + offset scheme cannot encode. Re-run the affected "
+                "wave instead (documented follow-up)."
+            )
 
     # Share the list with the caller so a mid-loop failure still
     # surfaces the IDs that DID land on the cluster. *start_batch* skips

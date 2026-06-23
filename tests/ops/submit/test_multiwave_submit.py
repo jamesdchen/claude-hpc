@@ -47,6 +47,7 @@ class _WaveBackend(HPCBackend):
         self.log_dir = "/tmp/mw-logs"
         self._counter = 500
         self.commands: list[list[str]] = []
+        self.envs: list[dict[str, str]] = []
 
     @property
     def supports_afterok(self) -> bool:
@@ -75,6 +76,7 @@ class _WaveBackend(HPCBackend):
 
     def _execute_command(self, cmd, job_env, cwd):  # type: ignore[override]
         self.commands.append(list(cmd))
+        self.envs.append(dict(job_env))
         self._counter += 1
         return SimpleNamespace(stdout=f"JOB{self._counter}\n", stderr="", returncode=0)
 
@@ -142,6 +144,11 @@ def test_backend_platform_cap_binds_plan_when_cluster_declares_no_limit(
         can_wave = True
 
     monkeypatch.setattr("hpc_agent.infra.backends.get_backend_class", lambda name: _CappedBackend)
+    # The cap lookup gates on registered_backend_names() (plugin-aware), so make
+    # the fake name resolvable there too.
+    monkeypatch.setattr(
+        "hpc_agent.infra.backends.registered_backend_names", lambda: frozenset({"gha"})
+    )
 
     # Keyed on the backend cap, a 300-task sweep is multi-wave.
     assert sf._is_multiwave_sweep(backend_name="gha", total_tasks=300, cluster="c")
@@ -205,10 +212,15 @@ def test_submit_main_array_multi_wave_over_cap_with_canary_gate(
         backend_name="sge",
         cluster="c",
     )
-    # One id per wave (3 waves of 84/84/82, 1-based task ranges).
+    # One id per wave (3 waves of 84/84/82). An SGE backend is index-bounded
+    # (uses_global_array_index False), so each wave submits a LOCAL array
+    # 1-<size> with a per-wave TASK_OFFSET recovering the global id — NOT a
+    # global range that would exceed the scheduler's array-index cap.
     assert ids == ["501", "502", "503"]
     ranges = [c[c.index("-t") + 1] for c in backend.commands]
-    assert ranges == ["1-84", "85-168", "169-250"]
+    assert ranges == ["1-84", "1-84", "1-82"]
+    offsets = [e.get("TASK_OFFSET") for e in backend.envs]
+    assert offsets == [None, "84", "168"]  # wave 0 omits the offset (byte-identical)
     # EVERY wave success-gates on the canary (42); later waves ALSO completion-gate
     # on their predecessor (afterany), merged into one --dependency. A canary
     # failure thus drops the whole sweep, while a partial failure in one wave does

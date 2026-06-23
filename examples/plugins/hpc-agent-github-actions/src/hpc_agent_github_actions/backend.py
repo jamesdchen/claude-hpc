@@ -196,6 +196,13 @@ class GitHubActionsBackend(HPCBackend):
     # submit-flow reject an over-cap sweep with a clean ``SpecInvalid`` before
     # dispatch, rather than the runner rejecting a >256-cell matrix afterward.
     max_array_size = 256
+    # Actions matrix cell values are arbitrary integers, so a wave dispatches a
+    # GLOBAL window directly (``_execute_command`` derives the window from the
+    # global ``task_range``; ``fan-out.yml`` expands the global id range). Keeping
+    # this True preserves that inc-5 global-window path; the index-bounded SSH
+    # families (default False) instead get a LOCAL ``1-<size>`` range + offset
+    # from ``submit_plan`` because their scheduler caps the array index.
+    uses_global_array_index = True
 
     def __init__(
         self,

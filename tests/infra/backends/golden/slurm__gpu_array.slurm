@@ -48,7 +48,7 @@ RESULT_DIR="${RESULT_DIR:-.}"
 REPO_DIR="${REPO_DIR:-.}"
 
 # Convert 1-based SLURM_ARRAY_TASK_ID to 0-based
-TASK_ID=$((SLURM_ARRAY_TASK_ID - 1))
+TASK_ID=$((SLURM_ARRAY_TASK_ID - 1 + ${TASK_OFFSET:-0}))
 HPC_TASK_ID=$TASK_ID  # canonical name used by .hpc/_hpc_dispatch.py
 
 # --- Diagnostics ---

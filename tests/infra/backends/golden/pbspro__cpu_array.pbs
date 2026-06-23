@@ -77,7 +77,7 @@ export MKL_NUM_THREADS="${HPC_MKL_NUM_THREADS:-${NCPUS:-1}}"
 mkdir -p "$RESULT_DIR"
 
 # Convert 1-based PBS_ARRAY_INDEX to 0-based
-TASK_ID=$((PBS_ARRAY_INDEX - 1))
+TASK_ID=$((PBS_ARRAY_INDEX - 1 + ${TASK_OFFSET:-0}))
 HPC_TASK_ID=$TASK_ID  # canonical name used by .hpc/_hpc_dispatch.py
 
 echo "Task:         $TASK_ID"

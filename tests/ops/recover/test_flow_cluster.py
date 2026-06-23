@@ -18,6 +18,7 @@ import pytest
 from hpc_agent import errors
 from hpc_agent.infra.backends import HPCBackend
 from hpc_agent.ops.recover_flow import (
+    _submit_resubmit_batches,
     render_overrides_to_extra_flags,
     resubmit_flow,
 )
@@ -251,6 +252,50 @@ class TestSubmitToClusterRequiredKwargs:
                 script="script.sh",
                 job_name="resub",
             )
+
+
+class TestResubmitOutOfRangeGuard:
+    """#339: resubmit on an index-bounded backend refuses out-of-range ids.
+
+    A multi-wave run's failed ids can exceed the scheduler's array-index cap.
+    The submit path waves past the cap with local-range + offset, but a resubmit
+    replays the actual (possibly non-contiguous) ids as a global array
+    expression a single offset can't encode — so it must fail loud rather than
+    emit an out-of-range array.
+    """
+
+    def _call(self, stub, *, failed_task_ids, total_tasks, cap, tmp_path):
+        from hpc_agent.infra.constraints import ClusterConstraints
+
+        return _submit_resubmit_batches(
+            experiment_dir=tmp_path,
+            run_id="r",
+            failed_task_ids=failed_task_ids,
+            effective_overrides=None,
+            ssh_target="u@h",
+            remote_path="/r",
+            scheduler="slurm",
+            script="run.sh",
+            job_name="resub",
+            job_env={"HPC_RUN_ID": "r"},
+            total_tasks=total_tasks,
+            constraints=ClusterConstraints(max_array_size=cap),
+            backend_factory=_make_factory(stub),
+        )
+
+    def test_over_cap_failed_id_raises(self, tmp_path):
+        # id 150 → 1-based array index 151 > cap 100 → refuse.
+        with pytest.raises(errors.SpecInvalid, match="out-of-range"):
+            self._call(
+                _StubBackend(), failed_task_ids=[150], total_tasks=200, cap=100, tmp_path=tmp_path
+            )
+
+    def test_in_range_ids_submit_as_before(self, tmp_path):
+        # All ids' 1-based indices are <= cap → submits exactly as before.
+        ids = self._call(
+            _StubBackend(), failed_task_ids=[3, 50], total_tasks=200, cap=100, tmp_path=tmp_path
+        )
+        assert len(ids) == 1  # one batch
 
 
 class TestClusterSubmission:

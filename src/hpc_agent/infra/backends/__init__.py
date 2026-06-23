@@ -52,6 +52,16 @@ if TYPE_CHECKING:
 # stray ``30``.
 _DEFAULT_JOB_ID_REGEX = re.compile(r"(\d+)")
 
+# Env var carrying a wave batch's GLOBAL 0-based offset to the cluster job.
+# On an index-bounded backend ``submit_plan`` submits each batch as a LOCAL
+# array ``1-<size>`` and injects this per batch; the runtime templates
+# (``_scripts.py``) recover the global task id as
+# ``<scheduler array index> - 1 + ${TASK_OFFSET:-0}``. Injected only when the
+# offset is non-zero, so a ≤cap single wave-0 array stays byte-identical. Kept
+# as a module constant so the submit edge and the template arithmetic name the
+# same variable.
+_TASK_OFFSET_ENV = "TASK_OFFSET"
+
 # Default subprocess timeout for ``qsub``/``sbatch`` invocations.  A
 # hung scheduler binary (NFS stall, scheduler outage) would otherwise
 # block the agent indefinitely; we surface ``TimeoutExpired`` so callers
@@ -152,6 +162,28 @@ class HPCBackend(abc.ABC):
     # Read off the *class* (a capability, not per-run state) so the guard pays
     # no constructor cost.
     can_wave: bool = True
+
+    # Whether the scheduler treats an array job's index space as GLOBAL and
+    # arbitrary (a wave can submit ``--array=1001-2000`` directly) — as opposed
+    # to BOUNDING the array index (SLURM ``MaxArraySize``, the SGE/PBS
+    # analogues), where a valid index is ``1 .. cap``. Waving fires exactly when
+    # ``total_tasks > max_array_size``, so on an index-bounded backend every wave
+    # past wave 0 would otherwise emit an array range ABOVE the cap and the
+    # scheduler rejects the whole batch (``Invalid job array specification``) —
+    # the post-dispatch failure waves exist to prevent. :meth:`submit_plan`
+    # reads this:
+    #   * True  → submit each batch's GLOBAL ``task_range`` unchanged (GitHub
+    #     Actions: matrix cell values are arbitrary, and its ``_execute_command``
+    #     already builds a global window).
+    #   * False → submit a LOCAL ``1-<array_size>`` array per batch + a per-batch
+    #     ``TASK_OFFSET`` so the job recovers its global 0-based id (the
+    #     ``_scripts.py`` templates do ``<index> - 1 + ${TASK_OFFSET:-0}``); the
+    #     offset is 0 for a single wave-0 array, keeping a ≤cap sweep
+    #     byte-for-byte unchanged.
+    # Default False = "the scheduler bounds the array index" (slurm / sge /
+    # pbspro / torque). A pure-API backend that builds its own global window
+    # overrides to True.
+    uses_global_array_index: bool = False
 
     log_dir: str  # subclasses must set this
     JOB_ID_REGEX: re.Pattern[str] = _DEFAULT_JOB_ID_REGEX
@@ -522,6 +554,17 @@ class HPCBackend(abc.ABC):
         # ``submit_one`` below skips its own (idempotent) ``mkdir``.
         self._setup_log_dir()
 
+        # On an index-bounded backend the per-batch offset ships to the job as
+        # ``TASK_OFFSET`` (read by the cluster templates). For SGE / PBS, ``-v``
+        # only transports keys in ``pass_env_keys``, so widen it ONCE here to
+        # include the offset key. Harmless for wave 0 (no offset injected → key
+        # absent from that batch's env → not emitted → ≤cap byte-identical) and
+        # for SLURM (``--export ALL`` already carries everything).
+        if not self.uses_global_array_index:
+            existing_keys = getattr(self, "pass_env_keys", None)
+            if existing_keys is not None and _TASK_OFFSET_ENV not in existing_keys:
+                self.pass_env_keys = (*existing_keys, _TASK_OFFSET_ENV)
+
         # Group batches by wave.
         waves: dict[int, list[JobBatch]] = defaultdict(list)
         for batch in plan.batches:
@@ -544,11 +587,28 @@ class HPCBackend(abc.ABC):
 
             current_wave_ids: list[str] = []
             for batch in waves[wave_num]:
+                # Render the batch per the index-space capability:
+                #   * global-index backend (GHA) → its GLOBAL window
+                #     (``batch.task_range``) + the shared env, unchanged.
+                #   * index-bounded backend → a LOCAL ``1-<array_size>`` array
+                #     (always within the cap) + a per-batch ``TASK_OFFSET`` so the
+                #     job recovers its global id. The offset is injected ONLY when
+                #     ``task_start > 1``, so a single wave-0 array ``1-N`` (offset
+                #     0) emits the SAME command AND env as a pre-wave ≤cap sweep.
+                if self.uses_global_array_index:
+                    task_range = batch.task_range
+                    batch_env = job_env
+                else:
+                    task_range = f"1-{batch.array_size}"
+                    offset = batch.task_start - 1
+                    batch_env = (
+                        {**job_env, _TASK_OFFSET_ENV: str(offset)} if offset > 0 else job_env
+                    )
                 try:
                     job_id = self.submit_one(
-                        batch.task_range,
+                        task_range,
                         job_name,
-                        job_env,
+                        batch_env,
                         extra_flags=dep_flags,
                         cwd=cwd,
                         setup_log_dir=False,

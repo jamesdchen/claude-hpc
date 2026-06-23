@@ -1138,14 +1138,23 @@ def _effective_cap_for_backend_name(backend_name: str, cluster: str | None) -> i
     capability) rather than an instance. Symmetric with
     :func:`_effective_array_cap`, which reads the same attribute off a built
     instance during submission. Returns ``None`` when no cap is known.
+
+    Goes through :func:`registered_backend_names` (not bare
+    :func:`get_backend_class`) so a PLUGIN backend's module is imported for its
+    ``@register`` side effect first — mirroring :func:`backend_requires_ssh`.
+    ``get_backend_class`` alone loads only the built-in ladder, so a pure-API
+    plugin's cap (GitHub Actions = 256) would otherwise be invisible by name in
+    a headless caller that reached here before the plugin import, silently
+    misjudging a >cap GHA sweep as a single array.
     """
     caps: list[int] = []
     try:
-        from hpc_agent.infra.backends import get_backend_class
+        from hpc_agent.infra.backends import get_backend_class, registered_backend_names
 
-        backend_cap = getattr(get_backend_class(backend_name), "max_array_size", None)
-        if backend_cap is not None:
-            caps.append(int(backend_cap))
+        if backend_name in registered_backend_names():
+            backend_cap = getattr(get_backend_class(backend_name), "max_array_size", None)
+            if backend_cap is not None:
+                caps.append(int(backend_cap))
     except Exception:  # noqa: BLE001 — an unknown backend name is uncapped here; submit fails later
         pass
     cluster_cap = _cluster_array_cap(cluster)

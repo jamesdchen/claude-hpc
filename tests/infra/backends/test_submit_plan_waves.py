@@ -41,6 +41,7 @@ class _StubBackend(HPCBackend):
         self._afterok = afterok
         self._counter = 100
         self.commands: list[list[str]] = []
+        self.envs: list[dict[str, str]] = []
         self.log_dir_setups = 0
 
     # -- capability under test -------------------------------------------
@@ -95,6 +96,7 @@ class _StubBackend(HPCBackend):
 
     def _execute_command(self, cmd, job_env, cwd):  # type: ignore[override]
         self.commands.append(list(cmd))
+        self.envs.append(dict(job_env))
         self._counter += 1
         return SimpleNamespace(stdout=f"submitted JOB{self._counter}\n", stderr="", returncode=0)
 
@@ -140,9 +142,15 @@ def test_three_waves_afterany_chain():
         (2, "101-150", "103"),
     ]
 
-    # Each command targets the batch's global task_range.
+    # The stub is index-bounded (uses_global_array_index False), so each wave
+    # submits a LOCAL 1-<size> array (always within the scheduler's index cap)
+    # plus a per-wave TASK_OFFSET that recovers the global id; wave 0 omits the
+    # offset (byte-identical to a ≤cap sweep). The RETURNED submissions above
+    # still carry the GLOBAL task_range for sidecar/wave_map alignment.
     ranges = [c[c.index("--array") + 1] for c in backend.commands]
-    assert ranges == ["1-50", "51-100", "101-150"]
+    assert ranges == ["1-50", "1-50", "1-50"]
+    offsets = [e.get("TASK_OFFSET") for e in backend.envs]
+    assert offsets == [None, "50", "100"]
 
     # Wave 0 has no dependency.
     assert "--dependency" not in backend.commands[0]
@@ -158,6 +166,26 @@ def test_three_waves_afterany_chain():
     # No canary gate here → no afterok / kill-on-invalid-dep anywhere.
     assert not any("afterok" in tok for c in backend.commands for tok in c)
     assert not any("--kill-on-invalid-dep=yes" in c for c in backend.commands)
+
+
+def test_global_index_backend_keeps_global_ranges_no_offset():
+    """A ``uses_global_array_index`` backend (GHA) submits GLOBAL ranges + no offset.
+
+    The counterpart of the index-bounded default: when the scheduler accepts an
+    arbitrary global index space, each batch keeps its global ``task_range`` and
+    no ``TASK_OFFSET`` is injected.
+    """
+
+    class _GlobalStub(_StubBackend):
+        uses_global_array_index = True
+
+    backend = _GlobalStub(afterok=True)
+    plan = _three_batch_plan()
+
+    backend.submit_plan(plan, job_name="probe", job_env={}, cwd=Path("."))
+
+    assert [c[c.index("--array") + 1] for c in backend.commands] == ["1-50", "51-100", "101-150"]
+    assert all("TASK_OFFSET" not in e for e in backend.envs)
 
 
 def test_multi_batch_wave_chains_on_all_prior_ids():
