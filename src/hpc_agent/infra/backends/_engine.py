@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from hpc_agent import errors
 from hpc_agent._kernel.contract.task_id import HpcTaskId, to_array_index
-from hpc_agent.infra.backends import HPCBackend
+from hpc_agent.infra.backends import _TASK_OFFSET_ENV, HPCBackend
 from hpc_agent.infra.backends.profile import SchedulerProfile
 from hpc_agent.infra.backends.profile import render_script as _render_script
 
@@ -373,14 +373,19 @@ class ProfileBackend(HPCBackend):
             "oe",
         ]
         pass_env_keys = getattr(self, "pass_env_keys", ())
-        bad = [k for k, v in job_env.items() if k in pass_env_keys and "," in str(v)]
+        # TASK_OFFSET is a framework-internal var (the per-wave global offset the
+        # array template recovers the task id from, #339); transport it whenever
+        # present regardless of the user's pass_env_keys allowlist, so a wave
+        # submission doesn't depend on the caller having allow-listed it.
+        passes = lambda k: k in pass_env_keys or k == _TASK_OFFSET_ENV  # noqa: E731
+        bad = [k for k, v in job_env.items() if passes(k) and "," in str(v)]
         if bad:
             raise errors.SpecInvalid(
                 "PBS qsub -v cannot transport env values containing "
                 f"','; offending keys: {sorted(bad)}. Pre-encode "
                 "(base64, space-delimited list, etc.) before submission."
             )
-        pass_vars = ",".join(f"{k}={v}" for k, v in job_env.items() if k in pass_env_keys)
+        pass_vars = ",".join(f"{k}={v}" for k, v in job_env.items() if passes(k))
         if pass_vars:
             cmd += ["-v", pass_vars]
         if extra_flags:
@@ -459,15 +464,18 @@ class ProfileBackend(HPCBackend):
         ]
         pass_env_keys = getattr(self, "pass_env_keys", ())
         # qsub -v uses comma to separate K=V pairs (same hazard as SLURM's
-        # --export). Reject comma-bearing values up front.
-        bad = [k for k, v in job_env.items() if k in pass_env_keys and "," in str(v)]
+        # --export). Reject comma-bearing values up front. TASK_OFFSET is a
+        # framework-internal var (the per-wave global offset, #339) transported
+        # regardless of the user's pass_env_keys allowlist.
+        passes = lambda k: k in pass_env_keys or k == _TASK_OFFSET_ENV  # noqa: E731
+        bad = [k for k, v in job_env.items() if passes(k) and "," in str(v)]
         if bad:
             raise errors.SpecInvalid(
                 "SGE qsub -v cannot transport env values containing "
                 f"','; offending keys: {sorted(bad)}. Pre-encode "
                 "(base64, space-delimited list, etc.) before submission."
             )
-        pass_vars = ",".join(f"{k}={v}" for k, v in job_env.items() if k in pass_env_keys)
+        pass_vars = ",".join(f"{k}={v}" for k, v in job_env.items() if passes(k))
         if pass_vars:
             cmd += ["-v", pass_vars]
         if extra_flags:

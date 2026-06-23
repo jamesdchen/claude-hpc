@@ -196,6 +196,65 @@ class TestSSHWrappedCommand:
         assert "-hold_jid" in qsub_calls[1]
         assert wave0_jid in qsub_calls[1]
 
+    def test_index_bounded_wave_emits_local_range_and_task_offset(self, tmp_path):
+        """#339: an index-bounded backend submits each wave as a LOCAL ``-t``
+        range (within the scheduler's array cap) and ships the global start as
+        ``TASK_OFFSET`` via ``-v`` — even though TASK_OFFSET is NOT in the
+        caller's pass_env_keys (it's a framework-internal var). Wave 0 (offset 0)
+        omits it, staying byte-identical to a ≤cap submission."""
+        from hpc_agent.infra.throughput import JobBatch, SubmissionPlan
+
+        plan = SubmissionPlan(
+            batches=[
+                JobBatch(
+                    batch_index=0, task_start=1, task_end=5, array_size=5, est_wall_s=None, wave=0
+                ),
+                JobBatch(
+                    batch_index=1, task_start=6, task_end=10, array_size=5, est_wall_s=None, wave=1
+                ),
+            ],
+            total_tasks=10,
+            total_batches=2,
+            max_concurrent=1,
+            est_total_wall_s=None,
+            strategy="test",
+        )
+
+        counter = {"n": 99}
+
+        def responder(cmd):
+            if "qsub" not in cmd:
+                return _cp()
+            counter["n"] += 1
+            return _cp(
+                stdout=f'Your job-array {counter["n"]}.1-5:1 ("probe") has been submitted\n',
+                returncode=0,
+            )
+
+        recorder = _SSHRecorder(responder)
+        backend = RemoteSGEBackend(
+            script="/remote/path/job.sh",
+            ssh_run=recorder,
+            remote_repo="/remote/path",
+            log_dir="/remote/path/logs",
+        )
+        # FOO is allow-listed; TASK_OFFSET is deliberately NOT — it must still
+        # transport as a framework var.
+        backend.pass_env_keys = ("FOO",)
+
+        backend.submit_plan(plan, job_name="probe", job_env={"FOO": "bar"}, cwd=tmp_path)
+
+        qsub_calls = [c for c in recorder.calls if "qsub" in c]
+        assert len(qsub_calls) == 2
+        # Both waves submit the LOCAL 1-5 range (never the global 6-10 that would
+        # exceed the array-index cap).
+        assert "-t 1-5" in qsub_calls[0]
+        assert "-t 1-5" in qsub_calls[1]
+        assert "-t 6-10" not in qsub_calls[1]
+        # Wave 0 (offset 0) omits TASK_OFFSET; wave 1 (offset 5) carries it.
+        assert "TASK_OFFSET" not in qsub_calls[0]
+        assert "TASK_OFFSET=5" in qsub_calls[1]
+
 
 # ---------------------------------------------------------------------------
 # stdout parsing

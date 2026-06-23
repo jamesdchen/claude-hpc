@@ -554,16 +554,11 @@ class HPCBackend(abc.ABC):
         # ``submit_one`` below skips its own (idempotent) ``mkdir``.
         self._setup_log_dir()
 
-        # On an index-bounded backend the per-batch offset ships to the job as
-        # ``TASK_OFFSET`` (read by the cluster templates). For SGE / PBS, ``-v``
-        # only transports keys in ``pass_env_keys``, so widen it ONCE here to
-        # include the offset key. Harmless for wave 0 (no offset injected → key
-        # absent from that batch's env → not emitted → ≤cap byte-identical) and
-        # for SLURM (``--export ALL`` already carries everything).
-        if not self.uses_global_array_index:
-            existing_keys = getattr(self, "pass_env_keys", None)
-            if existing_keys is not None and _TASK_OFFSET_ENV not in existing_keys:
-                self.pass_env_keys = (*existing_keys, _TASK_OFFSET_ENV)
+        # The per-batch offset ships to the job as ``TASK_OFFSET`` (read by the
+        # cluster templates). The scheduler env builders transport it as a
+        # framework-internal var whenever present — SGE/PBS ``-v`` special-case
+        # it past the ``pass_env_keys`` allowlist, SLURM ``--export ALL`` already
+        # carries everything — so no per-call backend mutation is needed here.
 
         # Group batches by wave.
         waves: dict[int, list[JobBatch]] = defaultdict(list)
