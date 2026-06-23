@@ -105,9 +105,7 @@ def fake_pure_api_backend(tmp_path: Path):
             for i, metrics in enumerate(_TASK_METRICS):
                 task_dir = dest / f"task-{i}"
                 task_dir.mkdir(parents=True, exist_ok=True)
-                (task_dir / "metrics.json").write_text(
-                    json.dumps(metrics), encoding="utf-8"
-                )
+                (task_dir / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
                 dirs.append(str(task_dir))
             return dirs
 

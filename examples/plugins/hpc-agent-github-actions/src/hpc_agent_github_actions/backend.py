@@ -115,6 +115,7 @@ def _job_to_task_status(job: dict[str, object]) -> str:
         return "unknown"
     return "failed"
 
+
 # Substrings that mark a 403 as an Actions quota / billing wall (vs. a
 # permissions 403), used to decide whether to rotate to the next account.
 _QUOTA_SIGNALS = ("minutes", "spending limit", "billing", "quota", "payment", "exceeded")
