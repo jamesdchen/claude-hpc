@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -69,6 +70,50 @@ _DISPATCH = "__gha_dispatch__"
 _ALIVE_STATUSES = frozenset(
     {"queued", "in_progress", "requested", "waiting", "pending", "action_required"}
 )
+
+# GitHub *job* statuses that mean "dispatched but not yet running" — the
+# per-task ``pending`` bucket that run-level liveness can't surface.
+_JOB_QUEUED = frozenset({"queued", "waiting", "pending", "requested"})
+
+# GitHub auto-names a matrix job ``<key> (<i>)``; the workflow template overrides
+# that with a deterministic ``task-<i>``. Match either so an older copied
+# workflow still resolves per-task ids.
+_AUTO_MATRIX_NAME = re.compile(r"\((\d+)\)\s*$")
+
+
+def _task_index_from_job_name(name: str) -> int | None:
+    """Map a job *name* to its 0-based task id, or ``None`` for a non-task job.
+
+    Primary form is the workflow's deterministic ``task-<i>``; the fallback
+    parses GitHub's auto matrix name ``<key> (<i>)`` so a repo still on an older
+    copied workflow keeps per-task resolution. Non-task jobs (``expand`` /
+    ``prefetch`` / ``reduce``) match neither and are skipped.
+    """
+    if name.startswith("task-"):
+        suffix = name[len("task-") :]
+        if suffix.isdigit():
+            return int(suffix)
+    match = _AUTO_MATRIX_NAME.search(name)
+    return int(match.group(1)) if match else None
+
+
+def _job_to_task_status(job: dict[str, object]) -> str:
+    """Bucket one job's ``status``/``conclusion`` into a ``TaskStatus`` value.
+
+    ``queued`` → ``pending``; ``in_progress`` → ``running``; a completed job is
+    ``complete`` on success, ``unknown`` on ``skipped``/``neutral`` (a matrix
+    cell that never ran its work), else ``failed`` (failure / timed_out /
+    startup_failure / cancelled).
+    """
+    status = str(job.get("status", ""))
+    if status != "completed":
+        return "pending" if status in _JOB_QUEUED else "running"
+    conclusion = str(job.get("conclusion") or "")
+    if conclusion == "success":
+        return "complete"
+    if conclusion in {"skipped", "neutral"}:
+        return "unknown"
+    return "failed"
 
 # Substrings that mark a 403 as an Actions quota / billing wall (vs. a
 # permissions 403), used to decide whether to rotate to the next account.
@@ -297,39 +342,43 @@ class GitHubActionsBackend(HPCBackend):
         return alive
 
     def task_statuses(self, job_ids: list[str], *, total_tasks: int) -> dict[int, str]:
-        """Per-task status from uploaded ``task-<i>`` artifacts + run liveness.
+        """True per-task status from the run's *jobs* (one job per matrix task).
 
-        Lets the host monitor report real per-task counts instead of run-level
-        liveness alone (the ``HPCBackend.task_statuses`` hook). A task whose
-        0-based ``task-<i>`` artifact has been uploaded is ``complete``; the
-        rest are ``running`` while any run in *job_ids* is still alive, else
-        ``failed`` — the run finished without that task's result. GitHub runs
-        the whole array under one workflow run, so there is no per-task
-        ``pending`` once dispatched. Values match the host's ``TaskStatus``
-        vocabulary (``complete`` / ``running`` / ``failed``).
+        The host's ``HPCBackend.task_statuses`` hook. The matrix expands to one
+        GitHub *job* per task, so the per-run jobs endpoint gives each task's
+        real state — crucially distinguishing a *queued* task (``pending``) from
+        an *in_progress* one (``running``), which run-level liveness cannot. Each
+        job maps to its 0-based task id via the workflow's deterministic
+        ``task-<i>`` job name (see :func:`_task_index_from_job_name`); its
+        status/conclusion buckets into the host's ``TaskStatus`` vocabulary (see
+        :func:`_job_to_task_status`).
+
+        Task ids with no job yet visible fall back to ``pending`` while any run
+        is alive (dispatched but the matrix cell hasn't materialised), else
+        ``failed`` (the run ended without that task ever running).
         """
-        completed: set[int] = set()
+        seen: dict[int, str] = {}
         any_alive = False
         for jid in job_ids:
-            run = self._get_run_any(jid)
+            api = self._owner_for(jid)
+            if api is None:
+                continue  # run vanished from every account → its tasks fail below
+            run = api.get_run(jid)
             if run is not None and str(run.get("status")) in _ALIVE_STATUSES:
                 any_alive = True
-            for art in self._owner_of(jid).list_artifacts(jid):
-                name = str(art.get("name", ""))
-                if name.startswith("task-"):
-                    try:
-                        completed.add(int(name[len("task-") :]))
-                    except ValueError:
-                        continue
-        statuses: dict[int, str] = {}
-        for i in range(total_tasks):
-            if i in completed:
-                statuses[i] = "complete"
-            elif any_alive:
-                statuses[i] = "running"
-            else:
-                statuses[i] = "failed"
-        return statuses
+            for job in api.list_jobs(jid):
+                idx = _task_index_from_job_name(str(job.get("name", "")))
+                if idx is not None:
+                    seen[idx] = _job_to_task_status(job)
+        unseen = "pending" if any_alive else "failed"
+        return {i: seen.get(i, unseen) for i in range(total_tasks)}
+
+    def _owner_for(self, run_id: str) -> GitHubActionsAPI | None:
+        """The pooled account that owns *run_id*, or ``None`` if none knows it."""
+        for api in self._accounts:
+            if api.get_run(run_id) is not None:
+                return api
+        return None
 
     def _get_run_any(self, run_id: str) -> dict[str, object] | None:
         """Probe every pooled account for *run_id* (run ids are account-scoped)."""
