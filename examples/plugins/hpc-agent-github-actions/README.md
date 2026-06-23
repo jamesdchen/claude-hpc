@@ -205,7 +205,12 @@ for a deliberate dataset change.
 ## Limits worth knowing
 
 - A matrix is capped at **256 cells per run** and ~20 concurrent runners by
-  default; for larger sweeps chunk into multiple dispatches.
+  default. A sweep larger than 256 is submitted automatically as multiple
+  **waves** (#339): hpc-agent's shared wave submitter dispatches one workflow run
+  per 256-task wave, each over its own GLOBAL id window (so `task-<i>` names and
+  per-task artifacts use 0-based global ids that line up with the combiner's
+  `wave_map`), and chains later waves behind their predecessor. You no longer
+  chunk by hand.
 - Standard runners are CPU-only, 6 h/job; results come back only as artifacts
   (default 90-day retention).
 
