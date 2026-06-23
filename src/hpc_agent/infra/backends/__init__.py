@@ -8,7 +8,7 @@ the core submission logic.
 Usage:
     from hpc_agent.infra.backends import get_backend
     backend = get_backend("slurm", script="path/to/job.slurm")
-    backend.submit_array(job_name, total_tasks, tasks_per_array, job_env)
+    backend.submit_plan(plan, job_name, job_env)
 """
 
 from __future__ import annotations
@@ -473,85 +473,6 @@ class HPCBackend(abc.ABC):
                 submissions.append((wave_num, batch.task_range, job_id))
 
             prev_wave_ids = current_wave_ids
-
-        return submissions
-
-    def submit_array(
-        self,
-        job_name: str,
-        total_tasks: int,
-        tasks_per_array: int,
-        job_env: dict[str, str],
-        *,
-        cwd: Path | None = None,
-    ) -> None:
-        """Submit an array job in batches of *tasks_per_array*.
-
-        Parameters
-        ----------
-        cwd : Path | None
-            Working directory for the subprocess.  Defaults to the current
-            working directory when ``None``.
-        """
-        self._run_batches(job_name, total_tasks, tasks_per_array, job_env, cwd=cwd)
-
-    def submit_array_tracked(
-        self,
-        job_name: str,
-        total_tasks: int,
-        tasks_per_array: int,
-        job_env: dict[str, str],
-        *,
-        cwd: Path | None = None,
-    ) -> list[tuple[str, str]]:
-        """Like submit_array but returns (task_range, job_id) pairs.
-
-        Parameters
-        ----------
-        cwd : Path | None
-            Working directory for the subprocess.  Defaults to the current
-            working directory when ``None``.
-        """
-        return self._run_batches(
-            job_name, total_tasks, tasks_per_array, job_env, cwd=cwd, track=True
-        )
-
-    def _run_batches(
-        self,
-        job_name: str,
-        total_tasks: int,
-        tasks_per_array: int,
-        job_env: dict[str, str],
-        *,
-        cwd: Path | None = None,
-        track: bool = False,
-    ) -> list[tuple[str, str]]:
-        """Core batching loop shared by submit_array and submit_array_tracked."""
-        if tasks_per_array < 1:
-            raise errors.SpecInvalid(f"tasks_per_array must be >= 1, got {tasks_per_array}")
-        cwd = cwd or Path.cwd()
-        self._setup_log_dir()
-        submissions: list[tuple[str, str]] = []
-
-        start_task = 1
-        while start_task <= total_tasks:
-            end_task = min(start_task + tasks_per_array - 1, total_tasks)
-            task_range = f"{start_task}-{end_task}"
-            cmd = self._build_command(task_range, job_name, job_env)
-            result = self._execute_command(cmd, job_env, cwd)
-            if result.returncode != 0:
-                stderr_msg = result.stderr.strip() if result.stderr else "(no stderr)"
-                raise RuntimeError(
-                    f"Job submission failed (exit {result.returncode}) for array {task_range}:\n"
-                    f"  command: {' '.join(cmd)}\n"
-                    f"  stderr:  {stderr_msg}"
-                )
-            if track:
-                match = self.JOB_ID_REGEX.search(result.stdout)
-                if not match:
-                    raise RuntimeError(f"Could not parse job ID from output: {result.stdout!r}")
-                submissions.append((task_range, match.group(1)))
-            start_task = end_task + 1
 
         return submissions
 

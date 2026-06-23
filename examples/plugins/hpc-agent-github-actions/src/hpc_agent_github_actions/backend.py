@@ -15,7 +15,7 @@ to build, so :meth:`_build_command` encodes the dispatch intent and
 :meth:`_execute_command` performs it — POST ``workflow_dispatch`` then resolve
 the run id — returning a ``CompletedProcess`` whose stdout is the run id. (The
 submit override therefore lives in ``_execute_command``, NOT the
-``submit_array_tracked`` a marketplace skeleton stubs: that method is not on
+``submit_plan`` a marketplace skeleton overrides: that method is not on
 submit-flow v1's path.)
 
 The per-task kwargs are NOT shipped in the dispatch. Exactly as the SLURM

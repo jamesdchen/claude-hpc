@@ -15,10 +15,31 @@ import pytest
 
 from hpc_agent import errors
 from hpc_agent.infra.backends.sge_remote import RemoteSGEBackend
+from hpc_agent.infra.throughput import JobBatch, SubmissionPlan
 
 
 def _cp(stdout: str = "", stderr: str = "", returncode: int = 0) -> SimpleNamespace:
     return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
+
+
+def _single_batch_plan(start: int = 1, end: int = 1) -> SubmissionPlan:
+    """A one-wave, one-batch plan covering tasks ``start..end`` (1-based)."""
+    batch = JobBatch(
+        batch_index=0,
+        task_start=start,
+        task_end=end,
+        array_size=end - start + 1,
+        est_wall_s=None,
+        wave=0,
+    )
+    return SubmissionPlan(
+        batches=[batch],
+        total_tasks=end - start + 1,
+        total_batches=1,
+        max_concurrent=1,
+        est_total_wall_s=None,
+        strategy="test",
+    )
 
 
 class _SSHRecorder:
@@ -57,12 +78,12 @@ class TestConstructor:
 
 
 # ---------------------------------------------------------------------------
-# submit_plan / submit_array_tracked build an SSH-wrapped qsub command
+# submit_plan builds an SSH-wrapped qsub command
 # ---------------------------------------------------------------------------
 
 
 class TestSSHWrappedCommand:
-    def test_submit_array_tracked_ssh_command_shape(self, tmp_path):
+    def test_submit_plan_ssh_command_shape(self, tmp_path):
         def responder(cmd):
             return _cp(
                 stdout='Your job-array 42.1-10:1 ("probe") has been submitted\n',
@@ -77,10 +98,9 @@ class TestSSHWrappedCommand:
             log_dir="/remote/path/logs",
         )
 
-        out = backend.submit_array_tracked(
+        out = backend.submit_plan(
+            _single_batch_plan(1, 10),
             "probe",
-            total_tasks=10,
-            tasks_per_array=10,
             job_env={},
             cwd=tmp_path,
         )
@@ -248,10 +268,9 @@ class TestErrors:
             remote_repo="/remote/path",
         )
         with pytest.raises(RuntimeError, match="qsub exploded"):
-            backend.submit_array_tracked(
+            backend.submit_plan(
+                _single_batch_plan(1, 5),
                 "probe",
-                total_tasks=5,
-                tasks_per_array=5,
                 job_env={},
                 cwd=tmp_path,
             )
@@ -276,10 +295,9 @@ class TestErrors:
             remote_repo="/remote/path with space",
             log_dir="/remote/path with space/logs",
         )
-        backend.submit_array_tracked(
+        backend.submit_plan(
+            _single_batch_plan(1, 5),
             "probe",
-            total_tasks=5,
-            tasks_per_array=5,
             job_env={},
             cwd=tmp_path,
         )
@@ -313,10 +331,9 @@ class TestErrors:
             remote_repo="/remote/path",
         )
         with pytest.raises(RuntimeError, match="Could not parse job ID"):
-            backend.submit_array_tracked(
+            backend.submit_plan(
+                _single_batch_plan(1, 5),
                 "probe",
-                total_tasks=5,
-                tasks_per_array=5,
                 job_env={},
                 cwd=tmp_path,
             )
