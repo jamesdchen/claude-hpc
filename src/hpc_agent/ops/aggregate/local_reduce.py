@@ -114,6 +114,7 @@ def local_reduce(
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=float(timeout_sec),
             check=False,
         )
