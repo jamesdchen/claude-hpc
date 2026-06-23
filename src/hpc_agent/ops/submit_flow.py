@@ -1236,7 +1236,15 @@ def _submit_main_array(
             plan, job_name, job_env, cwd=cwd, base_extra_flags=base_flags
         )
     except RuntimeError as exc:
-        raise errors.RemoteCommandFailed(str(exc)) from exc
+        # Carry submit_plan's partial accounting (the wave ids that DID land
+        # before the mid-plan failure, #339 inc 4) onto the typed envelope so the
+        # caller can pre-stamp them rather than losing them — mirroring
+        # _submit_flow_batch_locked's partial_submit_results contract.
+        landed = getattr(exc, "partial_submit_results", None)
+        wrapped = errors.RemoteCommandFailed(str(exc))
+        if landed:
+            wrapped.partial_submit_job_ids = [jid for _w, _r, jid in landed]  # type: ignore[attr-defined]
+        raise wrapped from exc
     return [job_id for _wave, _range, job_id in submissions]
 
 
@@ -1558,17 +1566,32 @@ def _submit_one_spec(
             list(canary_job_ids)
         )
 
-    job_ids = _submit_main_array(
-        backend_obj,
-        job_name=spec.job_name,
-        total_tasks=spec.total_tasks,
-        job_env=job_env_full,
-        cwd=experiment_dir,
-        resources=spec.resources,
-        afterok_flags=afterok_flags,
-        backend_name=spec.backend,
-        cluster=spec.cluster,
-    )
+    try:
+        job_ids = _submit_main_array(
+            backend_obj,
+            job_name=spec.job_name,
+            total_tasks=spec.total_tasks,
+            job_env=job_env_full,
+            cwd=experiment_dir,
+            resources=spec.resources,
+            afterok_flags=afterok_flags,
+            backend_name=spec.backend,
+            cluster=spec.cluster,
+        )
+    except errors.RemoteCommandFailed as exc:
+        # #339 inc 4 crash-safety: a multi-wave main array that failed mid-plan
+        # still landed the earlier waves' ids on the scheduler. Pre-stamp them to
+        # the sidecar (best-effort, same window as the post-qsub stamp below) so
+        # a reconcile / recovery can see the real ids instead of losing them with
+        # the bare raise. The journal entry never lands for this run (we re-raise),
+        # but the sidecar-reading recovery paths can still account for the waves.
+        landed_ids = getattr(exc, "partial_submit_job_ids", None)
+        if landed_ids:
+            from hpc_agent.state.runs import update_run_sidecar_job_ids
+
+            with contextlib.suppress(Exception):
+                update_run_sidecar_job_ids(experiment_dir, spec.run_id, list(landed_ids))
+        raise
     # Crash-safety pre-stamp — same rationale as the canary stamp above: the
     # 2026-06-11 demo lost main-array job id 13610902 to a process kill in
     # exactly this qsub → submit_and_record window, and the orchestrator's

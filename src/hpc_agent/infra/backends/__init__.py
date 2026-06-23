@@ -532,14 +532,26 @@ class HPCBackend(abc.ABC):
 
             current_wave_ids: list[str] = []
             for batch in waves[wave_num]:
-                job_id = self.submit_one(
-                    batch.task_range,
-                    job_name,
-                    job_env,
-                    extra_flags=dep_flags,
-                    cwd=cwd,
-                    setup_log_dir=False,
-                )
+                try:
+                    job_id = self.submit_one(
+                        batch.task_range,
+                        job_name,
+                        job_env,
+                        extra_flags=dep_flags,
+                        cwd=cwd,
+                        setup_log_dir=False,
+                    )
+                except RuntimeError as exc:
+                    # Partial accounting on mid-plan failure (#339 inc 4),
+                    # mirroring _submit_flow_batch_locked's partial_submit_results:
+                    # the ids that DID land (every prior wave + this wave's
+                    # earlier batches) are attached to the raised exception so the
+                    # caller can pre-stamp / reconcile them instead of losing them
+                    # with a bare raise. The chained-dependency waves that never
+                    # fired are simply absent — the scheduler drops them anyway.
+                    exc.partial_submit_results = list(submissions)  # type: ignore[attr-defined]
+                    exc.failed_wave = wave_num  # type: ignore[attr-defined]
+                    raise
                 current_wave_ids.append(job_id)
                 submissions.append((wave_num, batch.task_range, job_id))
 

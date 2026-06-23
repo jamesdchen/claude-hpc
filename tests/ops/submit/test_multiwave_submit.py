@@ -1,0 +1,205 @@
+"""Multi-wave main-array submit path (#339 increments 3 + 4).
+
+Covers the submit-flow seams that the wave path introduces, below the full
+``submit_flow_batch`` pipeline:
+
+* **Provenance precedence** — ``_ensure_run_sidecar`` stamps the CAP-DRIVEN
+  ``wave_map`` (overriding the axes default) iff the sweep exceeds the effective
+  cap; a ≤cap sweep stamps no explicit wave_map.
+* **_submit_main_array routing** — ≤cap → one array; >cap → N waves via
+  ``submit_plan``, returning one id per wave; the canary afterok gates wave 0.
+* **Mid-plan failure** — the partial wave ids surface on the typed envelope.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from hpc_agent import errors
+from hpc_agent.infra.backends import HPCBackend
+from hpc_agent.ops import submit_flow as sf
+from hpc_agent.state.runs import read_run_sidecar
+
+
+@pytest.fixture
+def _capped_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cluster declaring max_array_size=100 (and max_concurrent_jobs=1)."""
+    cfg = {
+        "c": {
+            "scheduler": "sge",
+            "constraints": {"max_array_size": 100, "max_concurrent_jobs": 1},
+        }
+    }
+    monkeypatch.setattr("hpc_agent.infra.clusters.load_clusters_config", lambda: cfg)
+
+
+class _WaveBackend(HPCBackend):
+    """Wave-capable stub returning a unique id per submitted array."""
+
+    JOB_ID_REGEX = re.compile(r"JOB(\d+)")
+
+    def __init__(self) -> None:
+        self.log_dir = "/tmp/mw-logs"
+        self._counter = 500
+        self.commands: list[list[str]] = []
+
+    @property
+    def supports_afterok(self) -> bool:
+        return True
+
+    def _build_afterok_dependency_flag(self, job_ids: list[str]) -> list[str]:
+        return ["--dependency", "afterok:" + ":".join(job_ids)] if job_ids else []
+
+    def _build_command(
+        self, task_range, job_name, job_env, *, extra_flags=None, array=True
+    ):  # type: ignore[override]
+        cmd = ["qsub", "-t", str(task_range), "-N", job_name]
+        cmd.extend(extra_flags or [])
+        return cmd
+
+    def _execute_command(self, cmd, job_env, cwd):  # type: ignore[override]
+        self.commands.append(list(cmd))
+        self._counter += 1
+        return SimpleNamespace(stdout=f"JOB{self._counter}\n", stderr="", returncode=0)
+
+    def _setup_log_dir(self) -> None:
+        pass
+
+
+# --------------------------------------------------------------------------- #
+# Provenance precedence: cap-driven wave_map wins iff the sweep is multi-wave.
+# --------------------------------------------------------------------------- #
+
+
+def _required_sidecar_spec(run_id: str, total_tasks: int):
+    from hpc_agent._wire.workflows.submit_flow import SubmitFlowSpec
+
+    return SubmitFlowSpec(
+        profile="p",
+        cluster="c",
+        ssh_target="user@host",
+        remote_path="/r",
+        job_name=run_id,
+        run_id=run_id,
+        total_tasks=total_tasks,
+        backend="sge",
+        script="run.sh",
+        job_env={"EXECUTOR": "python run.py"},
+        canary=False,
+        result_dir_template="results/{run_id}/task_{task_id}",
+    )
+
+
+def test_over_cap_sweep_stamps_cap_plan_wave_map(
+    tmp_path: Path, _capped_cluster: None
+) -> None:
+    # 250 tasks, cap 100 -> n_batches=ceil(250/100)=3, evenly packed at
+    # ceil(250/3)=84 per batch -> waves of 84/84/82 (concurrency 1 -> one batch
+    # per wave). The cap-plan wave_map must mirror that exact split, GLOBAL
+    # 0-based, with no overlap and full coverage of 0..249.
+    spec = _required_sidecar_spec("20260101-000000-overcap", total_tasks=250)
+    sf._ensure_run_sidecar(tmp_path, spec)
+
+    wave_map = read_run_sidecar(tmp_path, spec.run_id)["wave_map"]
+    assert sorted(wave_map.keys()) == ["0", "1", "2"]
+    assert wave_map["0"] == list(range(0, 84))
+    assert wave_map["1"] == list(range(84, 168))
+    assert wave_map["2"] == list(range(168, 250))
+    # No overlap, exact coverage.
+    all_ids = wave_map["0"] + wave_map["1"] + wave_map["2"]
+    assert all_ids == list(range(250))
+
+
+def test_at_cap_sweep_stamps_no_explicit_wave_map(
+    tmp_path: Path, _capped_cluster: None
+) -> None:
+    # 100 tasks == cap -> single wave; provenance precedence keeps today's
+    # behaviour: no cap-driven wave_map (the axes-derived default applies, which
+    # with no axes.yaml present resolves to an empty map).
+    spec = _required_sidecar_spec("20260101-000000-atcap", total_tasks=100)
+    sf._ensure_run_sidecar(tmp_path, spec)
+    wave_map = read_run_sidecar(tmp_path, spec.run_id)["wave_map"]
+    # No multi-wave cap plan was stamped (axes default → empty here).
+    assert wave_map == {}
+
+
+# --------------------------------------------------------------------------- #
+# _submit_main_array routing.
+# --------------------------------------------------------------------------- #
+
+
+def test_submit_main_array_single_wave_under_cap(
+    _capped_cluster: None,
+) -> None:
+    backend = _WaveBackend()
+    ids = sf._submit_main_array(
+        backend,
+        job_name="probe",
+        total_tasks=50,
+        job_env={},
+        cwd=Path("."),
+        resources=None,
+        afterok_flags=[],
+        backend_name="sge",
+        cluster="c",
+    )
+    assert ids == ["501"]
+    assert len(backend.commands) == 1
+    assert backend.commands[0][backend.commands[0].index("-t") + 1] == "1-50"
+
+
+def test_submit_main_array_multi_wave_over_cap_with_canary_gate(
+    _capped_cluster: None,
+) -> None:
+    backend = _WaveBackend()
+    ids = sf._submit_main_array(
+        backend,
+        job_name="probe",
+        total_tasks=250,
+        job_env={},
+        cwd=Path("."),
+        resources=None,
+        afterok_flags=["--dependency", "afterok:42"],  # the canary gate
+        backend_name="sge",
+        cluster="c",
+    )
+    # One id per wave (3 waves of 84/84/82, 1-based task ranges).
+    assert ids == ["501", "502", "503"]
+    ranges = [c[c.index("-t") + 1] for c in backend.commands]
+    assert ranges == ["1-84", "85-168", "169-250"]
+    # Wave 0 carries the canary afterok gate; later waves chain off predecessors.
+    assert backend.commands[0][backend.commands[0].index("--dependency") + 1] == "afterok:42"
+    assert backend.commands[1][backend.commands[1].index("--dependency") + 1] == "afterok:501"
+    assert backend.commands[2][backend.commands[2].index("--dependency") + 1] == "afterok:502"
+
+
+def test_submit_main_array_mid_plan_failure_surfaces_partial_ids(
+    _capped_cluster: None,
+) -> None:
+    class _FailWave2(_WaveBackend):
+        def _execute_command(self, cmd, job_env, cwd):  # type: ignore[override]
+            self.commands.append(list(cmd))
+            if len(self.commands) == 3:  # 3rd array == wave 2
+                return SimpleNamespace(stdout="", stderr="rejected", returncode=1)
+            self._counter += 1
+            return SimpleNamespace(stdout=f"JOB{self._counter}\n", stderr="", returncode=0)
+
+    backend = _FailWave2()
+    with pytest.raises(errors.RemoteCommandFailed) as exc:
+        sf._submit_main_array(
+            backend,
+            job_name="probe",
+            total_tasks=250,
+            job_env={},
+            cwd=Path("."),
+            resources=None,
+            afterok_flags=[],
+            backend_name="sge",
+            cluster="c",
+        )
+    # The two waves that landed before the failure are recoverable.
+    assert exc.value.partial_submit_job_ids == ["501", "502"]  # type: ignore[attr-defined]
