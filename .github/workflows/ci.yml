@@ -166,6 +166,56 @@ jobs:
           python scripts/enable_subprocess_coverage.py
           pytest -q -m 'not slow' --cov=src/hpc_agent --cov-report=term-missing
 
+  plugins:
+    # Isolated plugin suites. Installing a plugin makes the host's entry-point
+    # scan discover its backend, which shifts ``registered_backend_names()`` (and
+    # thus ``capabilities.supported_schedulers``) — so plugin tests run in their
+    # OWN job, never mixed into the ``test`` matrix, to keep that registry
+    # pollution out of the core suite. Offline ONLY: every plugin test drives a
+    # FAKE API client, so no token / network is needed. The live
+    # ``workflow_dispatch`` round-trip is deliberately out of scope — it would be
+    # circular (an Actions backend tested on Actions) and burns real minutes.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Plugins that ship a ``tests/`` dir. Add a plugin here when it grows one.
+        plugin: ["hpc-agent-github-actions"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+      - name: Install core (workspace) + plugin
+        # Core from the checkout FIRST so the plugin's ``hpc-agent`` dependency
+        # resolves to the workspace, not PyPI; then the plugin with ``--no-deps``
+        # so it does not re-pull core over the top.
+        run: |
+          pip install -e .
+          pip install -e "examples/plugins/${{ matrix.plugin }}" --no-deps
+          pip install pytest
+      - name: Plugin offline tests (fake API client, zero network)
+        run: pytest -q "examples/plugins/${{ matrix.plugin }}/tests"
+      - name: actionlint workflow templates (syntax + expressions)
+        # Validates the workflow/expression surface hpc-agent edits (matrix, job
+        # names, dispatch inputs) without running it. shellcheck is disabled: the
+        # template's run-steps are user-facing examples, not hpc-agent's shell.
+        shell: bash
+        run: |
+          tpl_dir="examples/plugins/${{ matrix.plugin }}/workflow-template"
+          if compgen -G "$tpl_dir/*.yml" > /dev/null; then
+            bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.12 .
+            ./actionlint -shellcheck= "$tpl_dir"/*.yml
+          else
+            echo "no workflow-template for ${{ matrix.plugin }} — skipping"
+          fi
+
   test-windows:
     # Signal-only Windows lane (ref #163): there is otherwise no Windows
     # coverage in CI, so Windows-specific correctness only surfaces during
