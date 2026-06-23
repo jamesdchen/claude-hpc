@@ -120,7 +120,7 @@ class VastAIBackend(HPCBackend):
         job_env: dict[str, str],
         *,
         cwd: Path | None = None,
-    ) -> list[tuple[str, str]]:
+    ) -> list[tuple[int, str, str]]:
         """Rent instances and launch one executor container per batch.
 
         Overrides the host's surviving submission primitive
@@ -132,11 +132,12 @@ class VastAIBackend(HPCBackend):
         instance per task — or a work-queue over the batch's
         ``array_size`` — passing ``self.image`` with per-task env
         (``HPC_TASK_ID``, ``HPC_KW_*`` from *job_env*, ``RESULT_DIR=/out``)
-        and ``self.label``; return ``(batch.task_range, instance_id)``
-        pairs, the same shape the SSH backends parse out of qsub/sbatch
-        stdout. Inter-wave dependencies (the base loop's scheduler
-        ``afterok`` chain) map to gating each wave's instance-create on the
-        prior wave's instances reaching a terminal state via the API.
+        and ``self.label``; return ``(batch.wave, batch.task_range,
+        instance_id)`` triples, the same shape the base loop yields from
+        qsub/sbatch stdout. Inter-wave dependencies (the base loop's
+        scheduler ``afterok`` chain) map to gating each wave's
+        instance-create on the prior wave's instances reaching a terminal
+        state via the API.
         """
         raise NotImplementedError("vastai instance-create call not implemented")
 

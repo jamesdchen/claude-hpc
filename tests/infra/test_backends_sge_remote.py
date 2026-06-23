@@ -104,7 +104,7 @@ class TestSSHWrappedCommand:
             job_env={},
             cwd=tmp_path,
         )
-        assert out == [("1-10", "42")]
+        assert out == [(0, "1-10", "42")]
 
         # ssh_run was called at least once for `mkdir -p <log_dir>` and then
         # once for qsub itself.

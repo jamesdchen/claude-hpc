@@ -238,7 +238,7 @@ class TestJobIdParsingAnchored:
             job_env={},
             cwd=tmp_path,
         )
-        assert out == [("1-1", "12345")]
+        assert out == [(0, "1-1", "12345")]
 
     def test_clean_output_still_parses(self, monkeypatch, tmp_path):
         def fake_run(cmd, *args, **kwargs):
@@ -255,7 +255,7 @@ class TestJobIdParsingAnchored:
             job_env={},
             cwd=tmp_path,
         )
-        assert out == [("1-1", "99999")]
+        assert out == [(0, "1-1", "99999")]
 
 
 # ─── Bug 3: hung scheduler subprocess surfaces TimeoutExpired ────────────
