@@ -5,7 +5,7 @@ The slash conducts user-facing dialogs **after** the skill identifies what needs
 ## Execution style
 
 - **Batch independent tool calls** into one parallel message — multiple reads, greps, or `hpc-agent describe`/`--help` lookups with no data dependency should not run serially.
-- **Be terse.** Lead with the action or result; skip filler ("Let me…", "I'll go ahead and…") and trailing restatements of what tool output already shows.
+- **Be terse — caveman terse.** Lead with the action or result; cut every word that is not load-bearing. No filler ("Let me…", "I'll go ahead and…"), no trailing restatements of what tool output already shows. One line beats three. (Style anchor: "submitted run 7 — 240 tasks queued", not "Great! I've gone ahead and submitted your run, which now has 240 tasks queued.")
 
 ## Invocation
 
