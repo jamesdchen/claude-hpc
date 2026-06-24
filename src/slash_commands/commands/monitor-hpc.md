@@ -5,7 +5,7 @@ The slash conducts user-facing dialogs **after** the skill identifies what needs
 ## Execution style
 
 - **Batch independent tool calls** into one parallel message — multiple reads, greps, or `hpc-agent describe`/`--help` lookups with no data dependency should not run serially.
-- **Be terse — caveman terse.** Lead with the action or result; cut every word that is not load-bearing. No filler ("Let me…", "I'll go ahead and…"), no trailing restatements of what tool output already shows. One line beats three. (Style anchor: "submitted run 7 — 240 tasks queued", not "Great! I've gone ahead and submitted your run, which now has 240 tasks queued.")
+- **Be terse — caveman-compress your prose** (cf. the caveman-compression convention: *strip grammar, keep facts*). Drop articles, connectives ("because", "therefore", "in order to"), intensifiers ("very", "quite"), and filler ("Let me…", "I'll go ahead and…"); never restate what tool output already shows. **KEEP every fact verbatim** — run ids, task counts, `hpc-agent <verb>` calls, `error_code`s, flags, paths — and keep each inference step explicit (no implicit leaps). One atomic thought per line; one line beats three. (Anchor: "submitted run 7 — 240 tasks queued", not "Great! I've gone ahead and submitted your run, which now has 240 tasks queued.")
 
 ## Invocation
 
