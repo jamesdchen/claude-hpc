@@ -180,9 +180,7 @@ def test_compute_coerces_float_bool_and_optional(tmp_path: Path) -> None:
         "    return {'lr': lr, 'verbose': verbose, 'limit': limit}\n"
     )
     out = tmp_path / "o.json"
-    mod.compute(
-        argparse.Namespace(lr="0.25", verbose="false", limit="50", output_file=str(out))
-    )
+    mod.compute(argparse.Namespace(lr="0.25", verbose="false", limit="50", output_file=str(out)))
     assert json.loads(out.read_text()) == {"lr": 0.25, "verbose": False, "limit": 50}
 
 
