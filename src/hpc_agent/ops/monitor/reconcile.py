@@ -575,16 +575,17 @@ def _reconcile_one(
     #     job's records post-completion; the reporter's per-task counts still
     #     prove every result is on disk. This run is COMPLETE, not abandoned
     #     (the demo-bug class: a FINISHED run read as abandoned because its
-    #     job records were purged). Guarded by ``_all_tasks_complete`` below,
-    #     alongside the existing ``alive_check_failed`` guard.
+    #     job records were purged). Classified by ``classify_settled``'s strict
+    #     all-complete arm, alongside the existing ``alive_check_failed`` guard.
     #   * Ran and FAILED + records purged. The reporter shows ``failed >= 1``:
     #     a task reached the cluster, ran, and exited non-zero with a readable
     #     ``exit_code``/traceback on disk. That is POSITIVE failure evidence, the
-    #     symmetric counterpart to ``_all_tasks_complete`` — categorically NOT a
+    #     symmetric counterpart to the all-complete arm — categorically NOT a
     #     vanished scratch. Pre-#351 this routed through ``abandoned`` ("scratch
     #     purged, no recovery; re-submit") because the binary verdict keyed only
-    #     on completeness, hiding the fixable error. Now ``_run_failed`` routes it
-    #     to ``failed`` and carries the classified error out via ``last_status``.
+    #     on completeness, hiding the fixable error. Now ``classify_settled``'s
+    #     ``run_failed`` arm routes it to ``failed`` and the FAILED branch below
+    #     carries the classified error out via ``last_status``.
     #   * Incomplete-but-not-failed + records gone. Tasks merely missing/unknown
     #     (NO positive ``failed`` count) AND nothing alive AND both probes ran
     #     cleanly → genuine abandon: no evidence on disk at all.
