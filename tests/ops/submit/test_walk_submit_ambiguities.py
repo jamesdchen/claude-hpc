@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 
-import hpc_agent.ops.submit.walk_submit_ambiguities as mod
+import hpc_agent.ops.walk_submit_ambiguities as mod
 from hpc_agent._wire.queries.walk_submit_ambiguities import WalkSubmitAmbiguitiesInput
-from hpc_agent.ops.submit.walk_submit_ambiguities import walk_submit_ambiguities
+from hpc_agent.ops.walk_submit_ambiguities import walk_submit_ambiguities
 
 
 @pytest.fixture(autouse=True)
