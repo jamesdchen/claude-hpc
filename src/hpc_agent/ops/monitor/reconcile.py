@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hpc_agent import errors
+from hpc_agent._kernel.contract.vocabulary import LifecycleState
 from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent.cli._dispatch import CliArg, CliShape
 from hpc_agent.infra import remote
 from hpc_agent.infra.backends import backend_requires_ssh
 from hpc_agent.infra.time import utcnow_iso
+from hpc_agent.ops.monitor.classify import classify_settled
 from hpc_agent.ops.monitor.status import _ssh_status_report
 from hpc_agent.state.journal import load_run, mark_run, update_run_status
 
@@ -115,54 +117,11 @@ def _ssh_alive_job_ids(*, ssh_target: str, job_ids: list[str], scheduler: str) -
     return backend_cls.parse_alive_output(proc.stdout, job_ids)
 
 
-def _all_tasks_complete(summary: dict[str, Any], total_tasks: int) -> bool:
-    """True when the reporter's per-task counts prove the run finished.
-
-    Ground-truth-from-the-cluster completion: every expected task is
-    ``complete`` and NOTHING is failed / pending / running / unknown. This
-    is the evidence that distinguishes a normal post-completion record purge
-    (SGE/Slurm drop a finished job's records) from a genuine abandon. A run
-    whose tasks all completed but whose scheduler records were purged is
-    COMPLETE, not abandoned — so reconcile must NOT flip it to ``abandoned``
-    just because no job_ids are alive.
-
-    Reads the canonical 5-key ``TaskStatus`` summary
-    (``complete``/``running``/``pending``/``failed``/``unknown`` — see
-    ``execution/mapreduce/reduce/status._empty_summary``). Returns False on a
-    reporter-failure summary (``{"error": ...}``) or a zero-task run: those
-    carry no completion evidence and must not read as complete.
-    """
-    if total_tasks <= 0:
-        return False
-    complete = summary.get("complete")
-    if not isinstance(complete, int) or complete != total_tasks:
-        return False
-    # No task may be in any non-complete bucket. Missing keys count as 0
-    # (a clean reporter always emits all five), but any positive non-complete
-    # count is disqualifying evidence of non-completion.
-    return all(
-        int(summary.get(key, 0) or 0) == 0 for key in ("running", "pending", "failed", "unknown")
-    )
-
-
-def _run_failed(summary: dict[str, Any]) -> bool:
-    """True when the reporter's per-task counts prove a task ran AND failed.
-
-    The symmetric counterpart to :func:`_all_tasks_complete`: that one reads
-    POSITIVE evidence of completion, this one reads POSITIVE evidence of
-    *failure*. A reporter ``failed >= 1`` is a task that reached the cluster,
-    ran, and exited non-zero (a readable ``exit_code``/traceback) — categorically
-    different from a purged scratch dir where nothing is observable. Collapsing
-    the two into ``abandoned`` (the pre-#351 bug) told the operator "scratch
-    purged, no recovery; re-submit" for a run whose canary actually failed with
-    a fixable error already on disk.
-
-    Reads the same canonical 5-key ``TaskStatus`` summary as
-    ``_all_tasks_complete``. A reporter-failure summary (``{"error": ...}``)
-    carries no ``failed`` count, so this returns False — that case is already
-    routed through ``unable_to_verify`` upstream, never here.
-    """
-    return int(summary.get("failed", 0) or 0) > 0
+# The settle-path completion/failure predicates and their precedence now live
+# in :mod:`hpc_agent.ops.monitor.classify` (``all_tasks_complete`` /
+# ``run_failed`` / ``classify_settled``) so the count-to-verdict rule has a
+# single home shared with the monitor poll loop. ``_reconcile_one`` applies
+# them via :func:`classify_settled`.
 
 
 def _gather_failure_features(
@@ -634,9 +593,10 @@ def _reconcile_one(
     # ``unable_to_verify`` (set above) — confirmed-dead-on-scheduler +
     # reporter-dead-so-results-unknown is not a provable verdict either way.
     if record.job_ids and not alive and not alive_check_failed and not reporter_failed:
-        if _all_tasks_complete(summary, record.total_tasks):
-            updated = mark_run(experiment_dir, run_id, status="complete")
-        elif _run_failed(summary):
+        # One verdict from the shared settle-path classifier (strict completion,
+        # failure outranks absence); the side-effects stay local to each arm.
+        verdict = classify_settled(summary, record.total_tasks)
+        if verdict == LifecycleState.FAILED:
             # Positive failure evidence — surface the classified error in
             # ``last_status.failure_features`` so ``_reconcile_envelope`` carries
             # it out (the skill's ``failed`` branch reads it), then mark terminal
@@ -652,7 +612,7 @@ def _reconcile_one(
             update_run_status(experiment_dir, run_id, last_status=failed_status)
             updated = mark_run(experiment_dir, run_id, status="failed")
         else:
-            updated = mark_run(experiment_dir, run_id, status="abandoned")
+            updated = mark_run(experiment_dir, run_id, status=str(verdict))
     return updated, alive_check_failed
 
 
