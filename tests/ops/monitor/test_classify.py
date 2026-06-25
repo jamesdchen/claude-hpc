@@ -19,10 +19,14 @@ import pytest
 
 from hpc_agent._kernel.contract.vocabulary import JournalStatus, LifecycleState
 from hpc_agent.ops.monitor.classify import (
+    SETTLE_REASON_ABANDONED,
+    SETTLE_REASON_COMPLETE,
+    SETTLE_REASON_FAILED,
     all_tasks_complete,
     classify_polling,
     classify_settled,
     run_failed,
+    settle,
 )
 
 
@@ -126,6 +130,32 @@ def test_settled_never_complete_while_failure_present():
 def test_settled_verdicts_are_valid_journal_statuses():
     for summary in (_summary(complete=5), _summary(failed=1), _summary(pending=5)):
         assert str(classify_settled(summary, 5)) in set(JournalStatus)
+
+
+# --------------------------------------------------------------------------
+# settle() — verdict provenance. classify_settled stays the verdict-only view.
+# --------------------------------------------------------------------------
+
+
+def test_settle_carries_reason_and_evidence_for_each_arm():
+    cases = [
+        (_summary(complete=5), LifecycleState.COMPLETE, SETTLE_REASON_COMPLETE),
+        (_summary(complete=4, failed=1), LifecycleState.FAILED, SETTLE_REASON_FAILED),
+        (_summary(complete=3, unknown=2), LifecycleState.ABANDONED, SETTLE_REASON_ABANDONED),
+    ]
+    for summary, verdict, reason in cases:
+        d = settle(summary, 5)
+        assert d.verdict == verdict
+        assert d.reason == reason
+        # Evidence snapshot is the counts the decision was made from.
+        assert d.evidence["total_tasks"] == 5
+        assert d.evidence["complete"] == int(summary.get("complete", 0))
+
+
+def test_classify_settled_matches_settle_verdict():
+    # The thin wrapper must never diverge from settle()'s verdict.
+    for summary in (_summary(complete=5), _summary(failed=2), _summary(pending=5), _summary()):
+        assert classify_settled(summary, 5) == settle(summary, 5).verdict
 
 
 # --------------------------------------------------------------------------

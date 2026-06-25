@@ -37,6 +37,7 @@ silent edit.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from hpc_agent._kernel.contract.vocabulary import LifecycleState
@@ -46,7 +47,20 @@ __all__ = [
     "run_failed",
     "classify_polling",
     "classify_settled",
+    "settle",
+    "SettleDecision",
+    "SETTLE_REASON_COMPLETE",
+    "SETTLE_REASON_FAILED",
+    "SETTLE_REASON_ABANDONED",
 ]
+
+# Stable machine-readable reasons for a settle verdict — the provenance an
+# operator/agent reads to know WHY reconcile reached a terminal state, instead
+# of re-deriving it from the raw counts. Recorded in the run's ``last_status``
+# (``verdict_reason``) and carried out in the reconcile envelope.
+SETTLE_REASON_COMPLETE = "all_tasks_complete"
+SETTLE_REASON_FAILED = "positive_failure_evidence"
+SETTLE_REASON_ABANDONED = "no_on_disk_evidence"
 
 # The non-``complete`` buckets of the canonical 5-key ``TaskStatus`` summary
 # (see ``execution/mapreduce/reduce/status._empty_summary``). A clean reporter
@@ -133,24 +147,58 @@ def classify_polling(
     return (None, None)
 
 
-def classify_settled(summary: dict[str, Any], total_tasks: int) -> str:
-    """Settled verdict for a run the scheduler holds NOTHING alive for.
+@dataclass(frozen=True)
+class SettleDecision:
+    """A settle verdict plus the provenance for why it was reached.
+
+    ``verdict`` is the terminal lifecycle state; ``reason`` is one of the
+    ``SETTLE_REASON_*`` constants naming the arm that fired; ``evidence`` is the
+    count snapshot the decision was made from (so a recorded verdict is
+    debuggable without re-running reconcile).
+    """
+
+    verdict: str
+    reason: str
+    evidence: dict[str, int]
+
+
+def _evidence(summary: dict[str, Any], total_tasks: int) -> dict[str, int]:
+    snap = {
+        key: int(summary.get(key, 0) or 0)
+        for key in ("complete", *_NON_COMPLETE_KEYS)
+    }
+    snap["total_tasks"] = int(total_tasks)
+    return snap
+
+
+def settle(summary: dict[str, Any], total_tasks: int) -> SettleDecision:
+    """Settled verdict (with provenance) for a run the scheduler holds NOTHING
+    alive for.
 
     Precondition (enforced by the caller): no recorded job is alive AND both
     the alive-check and the reporter probe ran cleanly. Under that precondition
     the verdict is one of three terminal states, in strict precedence of
     POSITIVE evidence first, absence last:
 
-    1. all tasks complete (strict) -> ``complete``
-    2. any task ran and failed     -> ``failed``
-    3. otherwise (no evidence)     -> ``abandoned``
+    1. all tasks complete (strict) -> ``complete``  (``all_tasks_complete``)
+    2. any task ran and failed     -> ``failed``    (``positive_failure_evidence``)
+    3. otherwise (no evidence)     -> ``abandoned`` (``no_on_disk_evidence``)
 
     Failure outranks absence (#351 sub-bug #4): a readable ``failed`` count is
     proof a task ran, never a vanished scratch. ``abandoned`` is reserved for
     "no on-disk evidence at all".
     """
+    evidence = _evidence(summary, total_tasks)
     if all_tasks_complete(summary, total_tasks):
-        return LifecycleState.COMPLETE
+        return SettleDecision(LifecycleState.COMPLETE, SETTLE_REASON_COMPLETE, evidence)
     if run_failed(summary):
-        return LifecycleState.FAILED
-    return LifecycleState.ABANDONED
+        return SettleDecision(LifecycleState.FAILED, SETTLE_REASON_FAILED, evidence)
+    return SettleDecision(LifecycleState.ABANDONED, SETTLE_REASON_ABANDONED, evidence)
+
+
+def classify_settled(summary: dict[str, Any], total_tasks: int) -> str:
+    """Back-compat thin wrapper: the settle verdict without its provenance.
+
+    Prefer :func:`settle` when you want the reason/evidence too.
+    """
+    return settle(summary, total_tasks).verdict

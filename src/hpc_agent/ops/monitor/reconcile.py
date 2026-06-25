@@ -16,7 +16,7 @@ from hpc_agent.cli._dispatch import CliArg, CliShape
 from hpc_agent.infra import remote
 from hpc_agent.infra.backends import backend_requires_ssh
 from hpc_agent.infra.time import utcnow_iso
-from hpc_agent.ops.monitor.classify import classify_settled
+from hpc_agent.ops.monitor.classify import settle
 from hpc_agent.ops.monitor.status import _ssh_status_report
 from hpc_agent.state.journal import load_run, mark_run, update_run_status
 
@@ -595,9 +595,14 @@ def _reconcile_one(
     # reporter-dead-so-results-unknown is not a provable verdict either way.
     if record.job_ids and not alive and not alive_check_failed and not reporter_failed:
         # One verdict from the shared settle-path classifier (strict completion,
-        # failure outranks absence); the side-effects stay local to each arm.
-        verdict = classify_settled(summary, record.total_tasks)
-        if verdict == LifecycleState.FAILED:
+        # failure outranks absence); the side-effects stay local to each arm. The
+        # decision's ``reason`` is recorded in ``last_status.verdict_reason`` so
+        # WHY reconcile reached this terminal state is readable from the envelope
+        # (the "abandoned-vs-failed" confusion class, #351 #4) instead of having
+        # to re-derive it from the raw counts.
+        decision = settle(summary, record.total_tasks)
+        recorded = {**summary, "verdict_reason": decision.reason}
+        if decision.verdict == LifecycleState.FAILED:
             # Positive failure evidence — surface the classified error in
             # ``last_status.failure_features`` so ``_reconcile_envelope`` carries
             # it out (the skill's ``failed`` branch reads it), then mark terminal
@@ -609,11 +614,13 @@ def _reconcile_one(
                 job_ids=list(record.job_ids),
                 scheduler=scheduler,
             )
-            failed_status = {**summary, "failure_features": features}
-            update_run_status(experiment_dir, run_id, last_status=failed_status)
+            update_run_status(
+                experiment_dir, run_id, last_status={**recorded, "failure_features": features}
+            )
             updated = mark_run(experiment_dir, run_id, status="failed")
         else:
-            updated = mark_run(experiment_dir, run_id, status=str(verdict))
+            update_run_status(experiment_dir, run_id, last_status=recorded)
+            updated = mark_run(experiment_dir, run_id, status=str(decision.verdict))
     return updated, alive_check_failed
 
 
