@@ -33,6 +33,20 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent decorate-entry-point --path <path> --function-name <function_name>",
+    "idempotent": true,
+    "input_schema": null,
+    "name": "decorate-entry-point",
+    "output_schema": null,
+    "python": "hpc_agent.incorporation.decorate_entry_point.decorate_entry_point",
+    "side_effects": [
+      "filesystem"
+    ],
+    "summary": "Insert `from hpc_agent import register_run` + `@register_run` onto a named module-level function via a structure-preserving AST line-splice (body untouched). Refuses signature-rewriting decorators (hydra/click/typer) — route those to the wrapper fallback.",
+    "verb": "mutate"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent emit-skill-return [--experiment-dir <dir>] --skill <skill>",
     "idempotent": true,
     "input_schema": null,
