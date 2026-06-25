@@ -691,7 +691,7 @@ def find_run_by_cmd_sha(
                 warnings.warn(
                     f"deduping against run {path.stem!r} (same cmd_sha "
                     f"{cmd_sha[:8]}…, i.e. identical swept parameters), but its "
-                    f"recorded tasks.py drift sha {drift.drifted_tasks_py_sha[:8]}… "
+                    f"recorded tasks.py drift sha {str(drift.drifted_tasks_py_sha)[:8]}… "
                     f"differs from the current {str(tasks_py_sha)[:8]}… — the "
                     "executor code changed since that run. The replay will run "
                     "the PRIOR submission's code (dedup keys on parameters by "
