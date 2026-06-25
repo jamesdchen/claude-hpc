@@ -766,20 +766,6 @@
   },
   {
     "agent_facing": true,
-    "cli": "hpc-agent build-interview-spec --spec <path> [--experiment-dir <dir>]",
-    "idempotent": true,
-    "input_schema": "build_interview_spec.input.json",
-    "name": "build-interview-spec",
-    "output_schema": "build_interview_spec.output.json",
-    "python": "hpc_agent.incorporation.build_interview_spec.build_interview_spec",
-    "side_effects": [
-      "writes-sidecar"
-    ],
-    "summary": "Assemble an InterviewSpec from discrete args (goal, task_count, produced_by, an explicit tasks_py_mode, an optional typed task_generator + entry_point) and write it to .hpc/interview_spec.json. The LLM passes values; it never composes the spec JSON. goal + task_generator are required (task_generator by mode: generator needs it, validate forbids it) → spec_invalid otherwise.",
-    "verb": "scaffold"
-  },
-  {
-    "agent_facing": true,
     "cli": "hpc-agent build-submit-spec --spec <path> [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": "build_submit_spec.input.json",

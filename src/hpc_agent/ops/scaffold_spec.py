@@ -657,8 +657,8 @@ def _scaffold_interview(ctx: _Context, acc: _Acc) -> dict[str, Any]:
     # (ops/submit/field_partition) — the framework never invents the recipe,
     # so the skeleton's placeholder is always the caller's to fill. Sourcing
     # the flag from the partition (not a bare literal) keeps the read-only
-    # skeleton and the authoritative build-interview-spec assembler reconciled
-    # on one definition of "caller must supply this".
+    # skeleton and the authoritative `interview` assembler reconciled on one
+    # definition of "caller must supply this".
     spec["task_generator"] = {"kind": "enumerated", "params": {"items": [{}]}}
     acc.sources["task_generator"] = (
         "placeholder — single-item enumerated; replace with the real recipe "

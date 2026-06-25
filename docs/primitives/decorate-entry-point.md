@@ -22,7 +22,7 @@ This is the deterministic replacement for the `Edit`-tool decoration the `hpc-wr
 ## Compose with
 
 - Common predecessor: [detect-entry-point](detect-entry-point.md) (picks the file + function and classifies its CLI surface) — `hpc-wrap-entry-point` Step 2 routes a kwarg'd function here.
-- Common successors: `classify-axis-auto` / `build-interview-spec`. The decorated function's name becomes the `run_name`; `entry_point.kind = "register_run"`.
+- Common successors: `classify-axis-auto` / `interview`. The decorated function's name becomes the `run_name`; `entry_point.kind = "register_run"`.
 
 ## Notes
 

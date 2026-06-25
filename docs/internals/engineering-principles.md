@@ -83,9 +83,10 @@ strategy contract reverse-engineered from site-packages source. Each is the same
 root cause in a different face — **authoring / sequencing / discovery** — and
 each fix takes the same shape: a bounded verb does the deterministic step, and
 the tool or surface that allowed freelancing is removed (no `Edit` in onboarding
-skills; the spec JSON is assembled by `build-interview-spec`, not hand-written;
-the strategy is materialized by `scaffold-strategy`, not copied from source; the
-preflight→classify chain is one `classify-axis-auto` call, not hand-sequenced).
+skills; the strategy is materialized by `scaffold-strategy`, not copied from
+source; the preflight→classify chain is one `classify-axis-auto` call, not
+hand-sequenced; the submit resolution applies safe-defaults via a deterministic
+verb whose field partition refuses to fabricate a `task_generator`).
 
 A guard the LLM itself satisfies is not a guard. A provenance marker claiming
 "this task_generator was caller-supplied" was rejected for exactly this reason

@@ -340,13 +340,6 @@ _CROSS_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
     # belongs on ``_Provenance`` itself, not on the enclosing
     # ``InterviewSpec``.
     "_Provenance": {"session_sha": "abc12345"},
-    # BuildInterviewSpecInput's ``_check_tasks_py_mode`` validator couples
-    # tasks_py_mode to task_generator: the synthesizer picks tasks_py_mode
-    # ='generator' (first Literal) but leaves the optional task_generator unset,
-    # which 'generator' mode forbids being absent. Pin 'validate' (which forbids
-    # task_generator — and the synthesizer omits it anyway) so the minimal
-    # instance satisfies the cross-field rule.
-    "BuildInterviewSpecInput": {"tasks_py_mode": "validate"},
 }
 
 

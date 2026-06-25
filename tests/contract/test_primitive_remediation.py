@@ -89,7 +89,6 @@ _SPEC_VERBS: frozenset[str] = frozenset(
     {
         "aggregate-flow",
         "apply-safe-defaults",
-        "build-interview-spec",
         "build-submit-spec",
         "build-tasks-py",
         "campaign-run",
@@ -217,7 +216,6 @@ XFAIL_NO_FAILURE_FEATURES: set[str] = {
     "resolve-submit-inputs",
     # lift-out-of-llm spec-verbs (S2/S3) — new resolvers/composites; like the
     # other composites they do not yet thread failure_features (WS3 punch list).
-    "build-interview-spec",
     "walk-submit-ambiguities",
     "apply-safe-defaults",
     "classify-axis-auto",

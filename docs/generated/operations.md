@@ -4,7 +4,7 @@
 
 Auto-generated from `hpc-agent capabilities`. Run `uv run python scripts/build_operations_index.py` after editing any primitive frontmatter; the script subprocess-calls the CLI and parses the same JSON envelope an external agent would get at runtime, so this page is provably in sync with runtime introspection.
 
-**101 operations total**: 90 primitive atoms + 11 workflow atoms.
+**100 operations total**: 89 primitive atoms + 11 workflow atoms.
 
 ## How to read this page
 
@@ -116,7 +116,7 @@ Records a new submission (sidecar write + journal entry).
 |---|---|---|---|---|---|---|
 | [`submit-spec`](../primitives/submit-spec.md) | ✓ | scheduler-submit; writes-journal | `hpc-agent submit --spec <path> [--experiment-dir <dir>] [--dry-run]` | `_(none)_` | — | — |
 
-## `scaffold` (16)
+## `scaffold` (15)
 
 Creates new files (e.g. starter executor templates).
 
@@ -124,7 +124,6 @@ Creates new files (e.g. starter executor templates).
 |---|---|---|---|---|---|---|
 | [`axes-init`](../primitives/axes-init.md) | ✓ | writes-sidecar | `hpc-agent axes-init [--experiment-dir <dir>] [--axes <axes>] [--homogeneous-axes <homogeneous_axes>] [--force]` | `_(none)_` | — | — |
 | [`build-executor`](../primitives/build-executor.md) | ✗ | writes-file | `hpc-agent build-executor --name <name> [--output-dir <output_dir>] [--type <type>] [--force]` | `_(none)_` | — | — |
-| [`build-interview-spec`](../primitives/build-interview-spec.md) | ✓ | writes-sidecar | `hpc-agent build-interview-spec --spec <path> [--experiment-dir <dir>]` | `_(none)_` | — | — |
 | [`build-submit-spec`](../primitives/build-submit-spec.md) | ✓ | _none_ | `hpc-agent build-submit-spec --spec <path> [--experiment-dir <dir>]` | `_(none)_` | — | — |
 | [`build-tasks-py`](../primitives/build-tasks-py.md) | ✓ | writes-sidecar | `hpc-agent build-tasks-py [--experiment-dir <dir>] --spec <spec> [--force]` | `_(none)_` | — | — |
 | [`build-template`](../primitives/build-template.md) | ✓ | writes-file | `hpc-agent build-template [--repo-dir <repo_dir>] [--force] [--shape <shape>]` | `_(none)_` | — | — |

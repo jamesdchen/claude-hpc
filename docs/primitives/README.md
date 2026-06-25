@@ -181,7 +181,6 @@ The verb partitions primitives into bands the reader can scan independently:
 |---|---|---|---|
 | [axes-init](axes-init.md) | yes | writes-sidecar: `<experiment>/.hpc/axes.yaml` | `hpc-agent axes-init [--experiment-dir <dir>] [--axes <axes>] [--homogeneous-axes <homogeneous_axes>] [--force]` |
 | [build-executor](build-executor.md) | no | writes-file: `<output_dir>/<name>.py` | `hpc-agent build-executor --name <name> [--output-dir <output_dir>] [--type <type>] [--force]` |
-| [build-interview-spec](build-interview-spec.md) | yes | writes-sidecar: `<experiment>/.hpc/interview_spec.json` | `hpc-agent build-interview-spec --spec <path> [--experiment-dir <dir>]` |
 | [build-submit-spec](build-submit-spec.md) | yes | _none_ | `hpc-agent build-submit-spec --spec <path> [--experiment-dir <dir>]` |
 | [build-tasks-py](build-tasks-py.md) | yes | writes-sidecar: `<experiment>/.hpc/tasks.py`; writes-sidecar: `<experiment>/.hpc/cli.py` | `hpc-agent build-tasks-py [--experiment-dir <dir>] --spec <spec> [--force]` |
 | [build-template](build-template.md) | yes | writes-file: `<repo_dir>/{.hpc/template.mk,.hpc/scaffold.py}` | `hpc-agent build-template [--repo-dir <repo_dir>] [--force] [--shape <shape>]` |
