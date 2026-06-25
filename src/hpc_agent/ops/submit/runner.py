@@ -12,6 +12,7 @@ from hpc_agent._kernel.registry.primitive import SideEffect, primitive
 from hpc_agent._wire.actions.submit import SubmitSpec
 from hpc_agent.cli._dispatch import CliArg, CliShape
 from hpc_agent.infra.time import utcnow_iso
+from hpc_agent.state.code_drift import detect_code_drift
 from hpc_agent.state.journal import is_resubmittable_terminal, load_run, upsert_run
 from hpc_agent.state.run_record import RunRecord
 from hpc_agent.state.runs import find_run_by_cmd_sha, read_run_sidecar
@@ -104,25 +105,19 @@ def _layer1_code_drift(
     Returns ``(drift, recorded_executor, recorded_tasks_py_sha)``. ``drift``
     is True when EITHER the recorded executor or the recorded tasks_py_sha is
     non-empty AND differs from the current — exactly the symmetric drift
-    predicate :func:`find_run_by_cmd_sha` applies at layer 2 (an
-    empty/absent recorded value is NOT drift; we cannot prove it changed,
+    predicate :func:`find_run_by_cmd_sha` applies at layer 2, now a single
+    shared definition (:func:`hpc_agent.state.code_drift.detect_code_drift`) so
+    a change to the rule can no longer land in one layer and miss the other
+    (an empty/absent recorded value is NOT drift; we cannot prove it changed,
     e.g. a pre-#351 record that never stamped these fields).
     """
-    recorded_executor = existing.executor
-    recorded_tasks_py_sha = existing.tasks_py_sha
-    executor_changed = bool(
-        current_executor and recorded_executor and str(recorded_executor) != str(current_executor)
+    drift = detect_code_drift(
+        recorded_executor=existing.executor,
+        recorded_tasks_py_sha=existing.tasks_py_sha,
+        current_executor=current_executor,
+        current_tasks_py_sha=current_tasks_py_sha,
     )
-    code_changed = bool(
-        current_tasks_py_sha
-        and recorded_tasks_py_sha
-        and str(recorded_tasks_py_sha) != str(current_tasks_py_sha)
-    )
-    return (
-        executor_changed or code_changed,
-        str(recorded_executor) if executor_changed else None,
-        str(recorded_tasks_py_sha) if code_changed else None,
-    )
+    return (drift.drifted, drift.drifted_executor, drift.drifted_tasks_py_sha)
 
 
 def _warn_layer1_drift(
