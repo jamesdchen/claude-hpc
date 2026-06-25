@@ -66,9 +66,7 @@ def detect_code_drift(
     2: the matched sidecar dict).
     """
     executor_changed = bool(
-        current_executor
-        and recorded_executor
-        and str(recorded_executor) != str(current_executor)
+        current_executor and recorded_executor and str(recorded_executor) != str(current_executor)
     )
     code_changed = bool(
         current_tasks_py_sha

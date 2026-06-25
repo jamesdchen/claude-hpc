@@ -163,10 +163,7 @@ class SettleDecision:
 
 
 def _evidence(summary: dict[str, Any], total_tasks: int) -> dict[str, int]:
-    snap = {
-        key: int(summary.get(key, 0) or 0)
-        for key in ("complete", *_NON_COMPLETE_KEYS)
-    }
+    snap = {key: int(summary.get(key, 0) or 0) for key in ("complete", *_NON_COMPLETE_KEYS)}
     snap["total_tasks"] = int(total_tasks)
     return snap
 
