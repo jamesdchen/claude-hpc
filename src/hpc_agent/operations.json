@@ -161,6 +161,18 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent apply-safe-defaults --spec <path>",
+    "idempotent": true,
+    "input_schema": "apply_safe_defaults.input.json",
+    "name": "apply-safe-defaults",
+    "output_schema": "apply_safe_defaults.output.json",
+    "python": "hpc_agent.ops.submit.apply_safe_defaults.apply_safe_defaults",
+    "side_effects": [],
+    "summary": "Consume a {resolved, ambiguities} envelope and fill each ambiguity from its safe_default. Structurally cannot fill task_generator (no slot, by the field partition); re-checks may_have_safe_default and raises spec_invalid if a required-caller field carries a safe_default. Reports what stayed unresolved (chiefly goal / task_generator).",
+    "verb": "query"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent batch-status [--experiment-dir <dir>]",
     "idempotent": true,
     "input_schema": null,
@@ -714,6 +726,18 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent walk-submit-ambiguities --spec <path>",
+    "idempotent": true,
+    "input_schema": "walk_submit_ambiguities.input.json",
+    "name": "walk-submit-ambiguities",
+    "output_schema": "walk_submit_ambiguities.output.json",
+    "python": "hpc_agent.ops.walk_submit_ambiguities.walk_submit_ambiguities",
+    "side_effects": [],
+    "summary": "Walk hpc-submit Steps 2-6 as deterministic branches: resolve cluster / entry_point / data_axis / homogeneous_axes / uncovered_param, reuse resolve-resources for walltime/gpu/partition/mpi_pe, and accumulate Ambiguity entries (safe_default ONLY for auto-resolvable fields; goal/task_generator get none). Returns the needs_resolution envelope {resolved, ambiguities}.",
+    "verb": "query"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent axes-init [--experiment-dir <dir>] [--axes <axes>] [--homogeneous-axes <homogeneous_axes>] [--force]",
     "idempotent": true,
     "input_schema": null,
@@ -738,6 +762,20 @@
       "writes-file"
     ],
     "summary": "Scaffold a new executor from a starter template.",
+    "verb": "scaffold"
+  },
+  {
+    "agent_facing": true,
+    "cli": "hpc-agent build-interview-spec --spec <path> [--experiment-dir <dir>]",
+    "idempotent": true,
+    "input_schema": "build_interview_spec.input.json",
+    "name": "build-interview-spec",
+    "output_schema": "build_interview_spec.output.json",
+    "python": "hpc_agent.incorporation.build_interview_spec.build_interview_spec",
+    "side_effects": [
+      "writes-sidecar"
+    ],
+    "summary": "Assemble an InterviewSpec from discrete args (goal, task_count, produced_by, an explicit tasks_py_mode, an optional typed task_generator + entry_point) and write it to .hpc/interview_spec.json. The LLM passes values; it never composes the spec JSON. goal + task_generator are required (task_generator by mode: generator needs it, validate forbids it) → spec_invalid otherwise.",
     "verb": "scaffold"
   },
   {
@@ -824,6 +862,20 @@
   },
   {
     "agent_facing": true,
+    "cli": "hpc-agent classify-axis-auto [--spec <path>] [--experiment-dir <dir>]",
+    "idempotent": true,
+    "input_schema": "classify_axis_auto.input.json",
+    "name": "classify-axis-auto",
+    "output_schema": "classify_axis_auto.output.json",
+    "python": "hpc_agent.incorporation.classify_axis_auto.classify_axis_auto",
+    "side_effects": [
+      "writes-sidecar"
+    ],
+    "summary": "Composite head of hpc-classify-axis: preflight (discover-runs + cache-check + recall) → classify-axis-easy → classify-axis recorder, in ONE call. Resolves the single @register_run, then branches: caller data_axis (interview) / cache hit (reuse) / recall structural match / a confident AST match (agent) all record into .hpc/axes.yaml; an unclassifiable/function_not_found matcher verdict records NOTHING and returns {needs_llm_tree: true, source_path, run_name, run_signature_sha, evidence, tried} so the caller walks the LLM decision tree. The LLM makes one call and only works the genuine long tail.",
+    "verb": "scaffold"
+  },
+  {
+    "agent_facing": true,
     "cli": "hpc-agent export-package [--experiment-dir <dir>] [--force]",
     "idempotent": true,
     "input_schema": "export_package.input.json",
@@ -876,6 +928,20 @@
       "writes-followup-specs"
     ],
     "summary": "Pre-stage monitor_spec.json + aggregate_spec.json into the experiment dir from submit-time state, so a later /monitor-hpc and /aggregate-hpc can skip the operator interview. Each spec carries run_id + a cmd_sha staleness gate + a null sentinel for the operator-choice field (monitor wait_terminal; aggregate allow_partial/stage). The consuming skill validates cmd_sha against the journal before honoring the pre-staged spec (#278).",
+    "verb": "scaffold"
+  },
+  {
+    "agent_facing": true,
+    "cli": "hpc-agent scaffold-strategy --name <name> [--output-dir <output_dir>] [--force]",
+    "idempotent": true,
+    "input_schema": null,
+    "name": "scaffold-strategy",
+    "output_schema": null,
+    "python": "hpc_agent.incorporation.scaffold_strategy.scaffold_strategy",
+    "side_effects": [
+      "writes-file"
+    ],
+    "summary": "Scaffold a closed-loop campaign strategy (optuna|pbt) into a repo.",
     "verb": "scaffold"
   },
   {

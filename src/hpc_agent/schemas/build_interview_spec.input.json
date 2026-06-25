@@ -1,0 +1,842 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/build_interview_spec.input.json",
+  "title": "build-interview-spec input",
+  "description": "Discrete fields the framework assembles into an ``InterviewSpec``.\n\nEvery field here is a value the LLM *relays* (free-text goal, a typed\nrecipe node, a provenance dict) — never a hand-composed spec object.\n``build-interview-spec`` validates these, assembles the\n:class:`InterviewSpec`, and writes ``.hpc/interview_spec.json``.",
+  "type": "object",
+  "required": [
+    "goal",
+    "task_count",
+    "produced_by",
+    "tasks_py_mode"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "goal": {
+      "description": "Free-text campaign goal (~one sentence). REQUIRED — genuine judgment the LLM relays; absence is a spec_invalid, never an auto-resolution (REQUIRED_CALLER_FIELDS).",
+      "minLength": 1,
+      "title": "Goal",
+      "type": "string"
+    },
+    "task_count": {
+      "description": "Expected number of tasks. The interview materializer cross-checks tasks.total() == task_count before any disk write.",
+      "minimum": 1,
+      "title": "Task Count",
+      "type": "integer"
+    },
+    "produced_by": {
+      "$ref": "#/$defs/_Provenance",
+      "description": "Who/what produced this intent (agent|human + provenance)."
+    },
+    "tasks_py_mode": {
+      "description": "How tasks.py is produced — ALWAYS explicit, never inferred from task_generator's absence. 'generator' regenerates .hpc/tasks.py from the typed recipe (REQUIRES task_generator); 'validate' validates a hand-written .hpc/tasks.py the caller already wrote (FORBIDS task_generator). The explicit flag preserves the sanctioned hand-written-tasks.py path that a 'refuse if absent' gate would silently break.",
+      "enum": [
+        "generator",
+        "validate"
+      ],
+      "title": "Tasks Py Mode",
+      "type": "string"
+    },
+    "task_generator": {
+      "anyOf": [
+        {
+          "discriminator": {
+            "mapping": {
+              "cartesian_product": "#/$defs/_CartesianProduct",
+              "enumerated": "#/$defs/_Enumerated",
+              "items_x_seeds": "#/$defs/_ItemsXSeeds",
+              "numeric_linspace": "#/$defs/_NumericLinspace",
+              "numeric_logspace": "#/$defs/_NumericLogspace"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/_Enumerated"
+            },
+            {
+              "$ref": "#/$defs/_CartesianProduct"
+            },
+            {
+              "$ref": "#/$defs/_ItemsXSeeds"
+            },
+            {
+              "$ref": "#/$defs/_NumericLogspace"
+            },
+            {
+              "$ref": "#/$defs/_NumericLinspace"
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Typed sweep recipe (one of five shapes). REQUIRED when tasks_py_mode='generator'; FORBIDDEN when tasks_py_mode='validate'. REQUIRED_CALLER_FIELDS member — the framework cannot invent it; absence in generator mode is a spec_invalid, not a fabrication.",
+      "title": "Task Generator"
+    },
+    "entry_point": {
+      "anyOf": [
+        {
+          "discriminator": {
+            "mapping": {
+              "python_module": "#/$defs/_PythonModuleEntry",
+              "register_run": "#/$defs/_RegisterRunEntry",
+              "shell_command": "#/$defs/_ShellCommandEntry"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/_RegisterRunEntry"
+            },
+            {
+              "$ref": "#/$defs/_PythonModuleEntry"
+            },
+            {
+              "$ref": "#/$defs/_ShellCommandEntry"
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional entry-point declaration (register_run | python_module | shell_command). Passed through to the assembled InterviewSpec.",
+      "title": "Entry Point"
+    },
+    "task_kind": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Free-text tag grouping related campaigns for recall.",
+      "title": "Task Kind"
+    },
+    "budget": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/_BudgetSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional soft caps."
+    },
+    "abort_if": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/_AbortIfSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional early-stop criterion."
+    },
+    "cluster_target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/_ClusterTargetSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional pre-resolved cluster target."
+    },
+    "transcript": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/_TranscriptTurn"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional interview Q/A turns.",
+      "title": "Transcript"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional free-form notes.",
+      "title": "Notes"
+    }
+  },
+  "$defs": {
+    "_AbortIfSpec": {
+      "additionalProperties": true,
+      "properties": {
+        "metric": {
+          "minLength": 1,
+          "title": "Metric",
+          "type": "string"
+        },
+        "after_tasks": {
+          "minimum": 1,
+          "title": "After Tasks",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "metric",
+        "after_tasks"
+      ],
+      "title": "_AbortIfSpec",
+      "type": "object"
+    },
+    "_BudgetSpec": {
+      "additionalProperties": true,
+      "properties": {
+        "wall_clock_max_h": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wall Clock Max H"
+        }
+      },
+      "title": "_BudgetSpec",
+      "type": "object"
+    },
+    "_CartesianProduct": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "cartesian_product",
+          "title": "Kind",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/_CartesianProductParams"
+        }
+      },
+      "required": [
+        "kind",
+        "params"
+      ],
+      "title": "_CartesianProduct",
+      "type": "object"
+    },
+    "_CartesianProductParams": {
+      "additionalProperties": false,
+      "properties": {
+        "axes": {
+          "additionalProperties": {
+            "items": {},
+            "type": "array"
+          },
+          "description": "Named axes; tasks = full Cartesian product. resolve(i) returns a dict with one key per axis.",
+          "minProperties": 1,
+          "title": "Axes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "axes"
+      ],
+      "title": "_CartesianProductParams",
+      "type": "object"
+    },
+    "_ClusterTargetSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cluster": {
+          "minLength": 1,
+          "title": "Cluster",
+          "type": "string"
+        },
+        "profile": {
+          "minLength": 1,
+          "title": "Profile",
+          "type": "string"
+        },
+        "constraint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Constraint"
+        }
+      },
+      "required": [
+        "cluster",
+        "profile"
+      ],
+      "title": "_ClusterTargetSpec",
+      "type": "object"
+    },
+    "_DataAxisHint": {
+      "additionalProperties": false,
+      "description": "Pre-declared series-axis classification.\n\nFor shell-out wrappers ``classify-axis`` cannot introspect the body\n(it's a ``subprocess.check_call``). When the experimenter knows the\nclassification — usually they do, because they wrote ``main.py`` —\nthey can declare it here and the interview persists it so\nclassify-axis records it directly without an introspection step.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "independent",
+            "associative",
+            "bounded_halo",
+            "sequential"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "halo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_HaloHint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Required when ``kind='bounded_halo'``; otherwise must be omitted."
+        },
+        "monoid": {
+          "anyOf": [
+            {
+              "enum": [
+                "sum",
+                "moments"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional for ``kind='associative'``; defaults to 'moments'. Ignored for other kinds.",
+          "title": "Monoid"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "_DataAxisHint",
+      "type": "object"
+    },
+    "_Enumerated": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "enumerated",
+          "title": "Kind",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/_EnumeratedParams"
+        }
+      },
+      "required": [
+        "kind",
+        "params"
+      ],
+      "title": "_Enumerated",
+      "type": "object"
+    },
+    "_EnumeratedParams": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "description": "List of task-kwargs dicts. Most agnostic shape — just stores the list verbatim and resolve(i) returns items[i].",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "_EnumeratedParams",
+      "type": "object"
+    },
+    "_HaloHint": {
+      "additionalProperties": false,
+      "description": "Halo expression for a ``bounded_halo`` ``data_axis_hint``.",
+      "properties": {
+        "expr": {
+          "description": "Arithmetic-only expression over the wrapper's parameters; the same restricted-AST form classify-axis already accepts. Example: ``train_window * 48``.",
+          "minLength": 1,
+          "title": "Expr",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expr"
+      ],
+      "title": "_HaloHint",
+      "type": "object"
+    },
+    "_ItemsXSeeds": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "items_x_seeds",
+          "title": "Kind",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/_ItemsXSeedsParams"
+        }
+      },
+      "required": [
+        "kind",
+        "params"
+      ],
+      "title": "_ItemsXSeeds",
+      "type": "object"
+    },
+    "_ItemsXSeedsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        },
+        "seeds": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Seeds",
+          "type": "array"
+        }
+      },
+      "required": [
+        "seeds"
+      ],
+      "title": "_ItemsXSeedsParams",
+      "type": "object"
+    },
+    "_NumericLinspace": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "numeric_linspace",
+          "title": "Kind",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/_NumericLinspaceParams"
+        }
+      },
+      "required": [
+        "kind",
+        "params"
+      ],
+      "title": "_NumericLinspace",
+      "type": "object"
+    },
+    "_NumericLinspaceParams": {
+      "additionalProperties": false,
+      "properties": {
+        "param": {
+          "minLength": 1,
+          "title": "Param",
+          "type": "string"
+        },
+        "low": {
+          "title": "Low",
+          "type": "number"
+        },
+        "high": {
+          "title": "High",
+          "type": "number"
+        },
+        "n": {
+          "minimum": 2,
+          "title": "N",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "param",
+        "low",
+        "high",
+        "n"
+      ],
+      "title": "_NumericLinspaceParams",
+      "type": "object"
+    },
+    "_NumericLogspace": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "numeric_logspace",
+          "title": "Kind",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/_NumericLogspaceParams"
+        }
+      },
+      "required": [
+        "kind",
+        "params"
+      ],
+      "title": "_NumericLogspace",
+      "type": "object"
+    },
+    "_NumericLogspaceParams": {
+      "additionalProperties": false,
+      "properties": {
+        "param": {
+          "minLength": 1,
+          "title": "Param",
+          "type": "string"
+        },
+        "low": {
+          "exclusiveMinimum": 0,
+          "title": "Low",
+          "type": "number"
+        },
+        "high": {
+          "exclusiveMinimum": 0,
+          "title": "High",
+          "type": "number"
+        },
+        "n": {
+          "minimum": 2,
+          "title": "N",
+          "type": "integer"
+        },
+        "base": {
+          "default": 10.0,
+          "exclusiveMinimum": 1,
+          "title": "Base",
+          "type": "number"
+        }
+      },
+      "required": [
+        "param",
+        "low",
+        "high",
+        "n"
+      ],
+      "title": "_NumericLogspaceParams",
+      "type": "object"
+    },
+    "_PetscSolverHint": {
+      "additionalProperties": false,
+      "description": "Checkpoint-instrumentation hint for a PETSc-based shell_command entry point.\n\nA PETSc app owns its solve loop (``TSSolve``/``SNESSolve`` are library\ncode), so the executor-side checkpoint helpers can't be called from a\nloop body the way ``run_iterations`` assumes. PETSc's options database is\nthe injection channel instead: any app that calls ``setFromOptions()``\nhonors ``PETSC_OPTIONS`` from the environment. Declaring this hint makes\nthe interview materialize a checkpoint-instrumented wrapper that exports\nthe per-step solution-dump option (into the stable per-task checkpoint\ndir), caps the solve at 2 steps under the checkpoint-canary probe, and —\nwhen ``resume_flag`` is declared — hands a previous attempt's dump back\nto the app on resume. The entry point itself stays opaque and untouched.\n\n``resume_flag`` is deliberately explicit: writing checkpoints is generic,\nbut *loading* one is app-specific (there is no universal PETSc restart\noption). Omit it and the wrapper still writes checkpoints; resume just\nnever feeds them back.",
+      "properties": {
+        "kind": {
+          "const": "petsc",
+          "title": "Kind",
+          "type": "string"
+        },
+        "solver_object": {
+          "default": "ts",
+          "description": "Which PETSc object owns the solve loop: 'ts' (time stepper — the usual shape for a transient PDE solve) or 'snes' (nonlinear solver). Selects the option family the wrapper exports (-ts_monitor_solution / -snes_monitor_solution and the canary's -ts_max_steps 2 / -snes_max_it 2).",
+          "enum": [
+            "ts",
+            "snes"
+          ],
+          "title": "Solver Object",
+          "type": "string"
+        },
+        "resume_flag": {
+          "anyOf": [
+            {
+              "pattern": "^-{1,2}[A-Za-z0-9_][A-Za-z0-9_\\-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The app's own restart flag (e.g. '-restart_file' or '--resume-from'). When declared, the wrapper appends ``<resume_flag> <path-to-previous-attempt-dump>`` to argv on a resumed attempt. The app must interpret the file (a PETSc binary viewer dump). Omit when the app has no restart surface.",
+          "title": "Resume Flag"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "_PetscSolverHint",
+      "type": "object"
+    },
+    "_Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "agent",
+            "human"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "session_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent/orchestrator session identifier. Required when kind=agent; null otherwise.",
+          "title": "Session Sha"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO-8601 timestamp.",
+          "title": "At"
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human operator name/handle when kind=human; null when kind=agent.",
+          "title": "Operator"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "_Provenance",
+      "type": "object"
+    },
+    "_PythonModuleEntry": {
+      "additionalProperties": false,
+      "description": "Canonical Python entry point: an importable module + function.\n\nA second canonical Python shape, alongside ``register_run``: the\nframework can already introspect importable Python, so this kind is\na wire hint so the interview can validate the module/function exists\nbefore submit. No wrapper is materialized. Prefer ``register_run``\nwhen the user can decorate the function directly; use this kind for\nimportable Python the framework should target by dotted path\ninstead of by ``@register_run`` discovery.",
+      "properties": {
+        "kind": {
+          "const": "python_module",
+          "title": "Kind",
+          "type": "string"
+        },
+        "module": {
+          "description": "Dotted module path, e.g. ``my_pkg.train``.",
+          "minLength": 1,
+          "title": "Module",
+          "type": "string"
+        },
+        "function": {
+          "default": "main",
+          "description": "The function inside ``module`` to treat as the entry point.",
+          "minLength": 1,
+          "title": "Function",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "module"
+      ],
+      "title": "_PythonModuleEntry",
+      "type": "object"
+    },
+    "_RegisterRunEntry": {
+      "additionalProperties": false,
+      "description": "Canonical Python entry point: an ``@register_run``-decorated function.\n\nThe default and recommended shape for Python repos. The user puts\n``@register_run`` directly on the function the framework should treat\nas the entry point — whether it lives in a notebook\n(``notebooks/<name>.ipynb``) or a ``.py`` file (``train.py``,\n``main.py``). Pure pointer — no materialization. The framework's\nexisting ``discover_runs`` walks the experiment to find the function\nby ``run_name``. For a mature repo with an existing entry-point\nfunction, this is a two-line code edit (an import and a decorator)\nand is strongly preferred over ``shell_command`` whenever direct\ndecoration is possible.",
+      "properties": {
+        "kind": {
+          "const": "register_run",
+          "title": "Kind",
+          "type": "string"
+        },
+        "run_name": {
+          "description": "The ``@register_run`` function name to discover (in notebooks/ or .py files under the experiment).",
+          "minLength": 1,
+          "title": "Run Name",
+          "type": "string"
+        },
+        "fixed_params": {
+          "additionalProperties": true,
+          "description": "Constant (non-axis) kwargs the executor requires but that do not vary per task — e.g. {'samples': 10000} when only 'seed' is a sweep axis. Each is baked into every materialized task's kwargs (resolve(i)), so the cluster exports HPC_KW_<param> and the executor command is complete. Keys must be valid Python identifiers; values are JSON scalars. A swept axis of the same name wins (the axis value is per-task; this is the constant fallback). Requires task_generator — a hand-written tasks.py must include the constants itself. Resolves #195: a required signature param left uncovered.",
+          "title": "Fixed Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "run_name"
+      ],
+      "title": "_RegisterRunEntry",
+      "type": "object"
+    },
+    "_ShellCommandEntry": {
+      "additionalProperties": false,
+      "description": "Fallback entry point: a shell command (compiled binary, decorator-conflicting CLI, ...).\n\n**The fallback path, used only when direct ``@register_run``\ndecoration isn't possible** — non-Python entry points (shell\nscripts, compiled binaries), CLI libraries whose decorators conflict\nwith ``@register_run`` (e.g. ``@hydra.main`` rewrites the signature),\nor vendor code the user can't edit. For a Python repo with an\nimportable entry-point function, prefer ``register_run`` instead:\na two-line code edit beats a subprocess shim, and the framework\nintrospects the real function rather than the wrapper.\n\nThe interview materializes a thin ``@register_run`` wrapper at\n``.hpc/wrappers/<run_name>.py`` whose body subprocess-invokes the\nargv with kwargs substituted in. The wrapper's *signature* (built\nfrom ``signature``) is what downstream introspection reads;\nthe underlying entry point stays opaque to the framework.\n\n``frozen_configs`` lets the experimenter declare config files\nwhose content is part of the experiment's identity. The\nmaterializer hashes each path's bytes; the interview threads\n``<basename>_sha`` into every materialized task's kwargs so the\nframework's ``cmd_sha`` correctly distinguishes ``exp_42.yaml``\nfrom ``exp_43.yaml`` (and catches accidental in-place edits).\n\n*Constraint*: ``frozen_configs`` requires ``task_generator`` (so the\nframework has somewhere to thread the shas). A hand-written tasks.py\nplus ``frozen_configs`` is rejected at interview time — the framework\ncan't safely edit the user's hand-rolled file, and silently dropping\nthe shas would defeat the identity guarantee. Use ``task_generator``\nor include the shas in your own tasks.py kwargs.\n\n*Timing*: ``frozen_configs`` are hashed at interview time. If the\nYAML is edited between interview and submit, the stored sha is the\ninterview-time content; the cluster runs whatever rsync ships. The\nwindow is small (interview is typically immediately before submit)\nbut real — re-run the interview to refresh.",
+      "properties": {
+        "kind": {
+          "const": "shell_command",
+          "title": "Kind",
+          "type": "string"
+        },
+        "run_name": {
+          "description": "Name for the generated wrapper file (``.hpc/wrappers/<run_name>.py``) and the ``@register_run``-decorated function inside it. Must be a valid Python identifier.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "title": "Run Name",
+          "type": "string"
+        },
+        "argv": {
+          "description": "Argv template. ``{param}`` placeholders are substituted from the wrapper's kwargs at call time. Example: [\"python3\", \"main.py\", \"--config\", \"{config}\", \"--seed\", \"{seed}\"].",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Argv",
+          "type": "array"
+        },
+        "signature": {
+          "additionalProperties": {
+            "enum": [
+              "str",
+              "int",
+              "float",
+              "bool"
+            ],
+            "type": "string"
+          },
+          "description": "Wrapper signature: ``{param_name: type_str}``. Each name must be a valid Python identifier; types are 'str' / 'int' / 'float' / 'bool'. The wrapper also takes ``**kwargs`` so framework-injected identity fields (e.g. ``config_sha``) flow through without polluting main.py.",
+          "title": "Signature",
+          "type": "object"
+        },
+        "frozen_configs": {
+          "description": "Paths (relative to campaign_dir) to config files whose content should be part of the experiment's identity. For each entry the interview hashes the bytes and threads ``<basename>_sha`` into every task's kwargs. Requires ``task_generator`` (see class docstring).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Frozen Configs",
+          "type": "array"
+        },
+        "data_axis_hint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_DataAxisHint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pre-declared series-axis classification. classify-axis cannot introspect a shell-out body, so when the experimenter knows the classification they declare it here. The interview persists it to ``interview.json._materialized.entry_point.data_axis`` so classify-axis records it directly. Omit when you want the interactive classification interview."
+        },
+        "solver": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_PetscSolverHint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional checkpoint-instrumentation hint for a known solver library. When present, the materialized wrapper injects the library's checkpoint hooks around the argv (see ``_PetscSolverHint``) so a long solve becomes preemption-safe without touching the entry point. One adapter today: 'petsc'."
+        },
+        "fixed_params": {
+          "additionalProperties": true,
+          "description": "Constant (non-axis) kwargs the executor requires but that do not vary per task — e.g. {'samples': 10000} when only 'seed' is a sweep axis. Each is baked into every materialized task's kwargs (resolve(i)), so the cluster exports HPC_KW_<param> and the executor command is complete. Keys must be valid Python identifiers; values are JSON scalars. A swept axis of the same name wins (the axis value is per-task; this is the constant fallback). Requires task_generator — a hand-written tasks.py must include the constants itself. Resolves #195: a required signature param left uncovered.",
+          "title": "Fixed Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "run_name",
+        "argv"
+      ],
+      "title": "_ShellCommandEntry",
+      "type": "object"
+    },
+    "_TranscriptTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "enum": [
+            "agent",
+            "operator",
+            "system"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        }
+      },
+      "required": [
+        "role",
+        "text"
+      ],
+      "title": "_TranscriptTurn",
+      "type": "object"
+    }
+  }
+}

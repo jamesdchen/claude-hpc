@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesdchen/hpc-agent/schemas/build_interview_spec.output.json",
+  "title": "build-interview-spec output",
+  "description": "Shape of the ``data`` block on a ``build-interview-spec`` envelope.",
+  "type": "object",
+  "required": [
+    "spec_path",
+    "tasks_py_mode",
+    "goal",
+    "task_count",
+    "has_task_generator",
+    "has_entry_point",
+    "wrote"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "spec_path": {
+      "description": "Absolute path to the written .hpc/interview_spec.json.",
+      "title": "Spec Path",
+      "type": "string"
+    },
+    "tasks_py_mode": {
+      "description": "The explicit mode the spec was assembled under.",
+      "enum": [
+        "generator",
+        "validate"
+      ],
+      "title": "Tasks Py Mode",
+      "type": "string"
+    },
+    "goal": {
+      "description": "The relayed goal, echoed back.",
+      "title": "Goal",
+      "type": "string"
+    },
+    "task_count": {
+      "description": "The declared task_count, echoed back.",
+      "minimum": 1,
+      "title": "Task Count",
+      "type": "integer"
+    },
+    "has_task_generator": {
+      "description": "Whether the assembled spec carries a task_generator.",
+      "title": "Has Task Generator",
+      "type": "boolean"
+    },
+    "has_entry_point": {
+      "description": "Whether the assembled spec carries an entry_point.",
+      "title": "Has Entry Point",
+      "type": "boolean"
+    },
+    "wrote": {
+      "description": "Always true on success (the spec file was written).",
+      "title": "Wrote",
+      "type": "boolean"
+    }
+  }
+}

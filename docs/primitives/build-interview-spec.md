@@ -2,11 +2,13 @@
 name: build-interview-spec
 verb: scaffold
 side_effects:
-  - writes-sidecar <experiment>/.hpc/interview_spec.json
+- writes-sidecar: <experiment>/.hpc/interview_spec.json
 idempotent: true
 idempotency_key: experiment_dir
 error_codes:
-  - spec_invalid
+- code: spec_invalid
+  category: user
+  retry_safe: false
 backed_by:
   cli: hpc-agent build-interview-spec --spec <path> [--experiment-dir <dir>]
   python: hpc_agent.incorporation.build_interview_spec.build_interview_spec

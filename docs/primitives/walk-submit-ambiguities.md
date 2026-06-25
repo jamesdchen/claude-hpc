@@ -1,15 +1,13 @@
 ---
 name: walk-submit-ambiguities
 verb: query
-composes:
-  - resolve-resources
 side_effects: []
 idempotent: true
 idempotency_key: none
 error_codes: []
 backed_by:
   cli: hpc-agent walk-submit-ambiguities --spec <path>
-  python: hpc_agent.ops.submit.walk_submit_ambiguities.walk_submit_ambiguities
+  python: hpc_agent.ops.walk_submit_ambiguities.walk_submit_ambiguities
 ---
 # walk-submit-ambiguities
 

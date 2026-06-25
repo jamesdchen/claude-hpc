@@ -9,10 +9,6 @@ error_codes:
 - code: spec_invalid
   category: user
   retry_safe: false
-composes:
-- classify-axis-preflight
-- classify-axis-easy
-- classify-axis
 backed_by:
   cli: hpc-agent classify-axis-auto [--spec <path>] [--experiment-dir <dir>]
   python: hpc_agent.incorporation.classify_axis_auto.classify_axis_auto

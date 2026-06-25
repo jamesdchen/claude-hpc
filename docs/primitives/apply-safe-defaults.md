@@ -5,7 +5,9 @@ side_effects: []
 idempotent: true
 idempotency_key: none
 error_codes:
-  - spec_invalid
+- code: spec_invalid
+  category: user
+  retry_safe: false
 backed_by:
   cli: hpc-agent apply-safe-defaults --spec <path>
   python: hpc_agent.ops.submit.apply_safe_defaults.apply_safe_defaults
