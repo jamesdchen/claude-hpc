@@ -119,9 +119,10 @@ def _ssh_alive_job_ids(*, ssh_target: str, job_ids: list[str], scheduler: str) -
 
 # The settle-path completion/failure predicates and their precedence now live
 # in :mod:`hpc_agent.ops.monitor.classify` (``all_tasks_complete`` /
-# ``run_failed`` / ``classify_settled``) so the count-to-verdict rule has a
-# single home shared with the monitor poll loop. ``_reconcile_one`` applies
-# them via :func:`classify_settled`.
+# ``run_failed`` / ``settle``) so the count-to-verdict rule has a single home
+# shared with the monitor poll loop. ``_reconcile_one`` applies them via
+# :func:`settle`, which also returns the provenance recorded in
+# ``last_status.verdict_reason``.
 
 
 def _gather_failure_features(
@@ -575,7 +576,7 @@ def _reconcile_one(
     #     job's records post-completion; the reporter's per-task counts still
     #     prove every result is on disk. This run is COMPLETE, not abandoned
     #     (the demo-bug class: a FINISHED run read as abandoned because its
-    #     job records were purged). Classified by ``classify_settled``'s strict
+    #     job records were purged). Classified by ``settle``'s strict
     #     all-complete arm, alongside the existing ``alive_check_failed`` guard.
     #   * Ran and FAILED + records purged. The reporter shows ``failed >= 1``:
     #     a task reached the cluster, ran, and exited non-zero with a readable
@@ -583,7 +584,7 @@ def _reconcile_one(
     #     symmetric counterpart to the all-complete arm — categorically NOT a
     #     vanished scratch. Pre-#351 this routed through ``abandoned`` ("scratch
     #     purged, no recovery; re-submit") because the binary verdict keyed only
-    #     on completeness, hiding the fixable error. Now ``classify_settled``'s
+    #     on completeness, hiding the fixable error. Now ``settle``'s
     #     ``run_failed`` arm routes it to ``failed`` and the FAILED branch below
     #     carries the classified error out via ``last_status``.
     #   * Incomplete-but-not-failed + records gone. Tasks merely missing/unknown
