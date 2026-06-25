@@ -171,6 +171,8 @@ The entry point handles *one task*. The `task_generator` enumerates the **N task
 
 The skill does **not** invent a `task_generator` — refuse with `spec_invalid` if absent. (The slash command elicits this from the user; MARs supplies it explicitly.)
 
+**Fixed enumeration vs. adaptive sweep.** The shapes above enumerate a *fixed* task set up front. If the sweep is **adaptive** — each batch's hyperparameters depend on prior results (Bayesian optimization / Optuna ask-tell, PBT, Hyperband) — it is NOT a `task_generator`: route to **`hpc-campaign`** and materialize the strategy with **`hpc-agent scaffold-strategy --name {optuna,pbt}`**. The framework drives the submit→monitor→aggregate→decide loop and owns the ask/tell contract (see the hpc-campaign strategy-authoring contract). Do NOT hand-roll a campaign controller or reverse-engineer the strategy from source.
+
 ### 5b. Cover non-axis required params (fixed_params)
 
 The entry point's signature may require params the `task_generator` does NOT vary — e.g. `monte_carlo_pi(seed, samples)` where only `seed` is swept. If nothing supplies `samples`, the executor crashes on every task (#195).
