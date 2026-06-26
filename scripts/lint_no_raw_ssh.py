@@ -92,11 +92,7 @@ def _code_spans(text: str) -> list[tuple[int, str]]:
     Both fenced blocks and inline spans, so a raw command is caught whether it
     is written ``` `ssh ...` ``` inline or inside a ```` ``` ```` block.
     """
-    return [
-        (m.start(), m.group(0))
-        for rx in (_FENCED_RE, _INLINE_RE)
-        for m in rx.finditer(text)
-    ]
+    return [(m.start(), m.group(0)) for rx in (_FENCED_RE, _INLINE_RE) for m in rx.finditer(text)]
 
 
 def lint_file(path: Path) -> list[tuple[int, str]]:

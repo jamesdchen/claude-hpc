@@ -85,7 +85,7 @@ def test_raw_scp_and_rsync_fire(tmp_path: Path) -> None:
 
 
 def test_worker_prompt_is_scanned(tmp_path: Path) -> None:
-    root = _worker_prompt(tmp_path, 'Probe via `ssh $SSH_TARGET hostname` first.\n')
+    root = _worker_prompt(tmp_path, "Probe via `ssh $SSH_TARGET hostname` first.\n")
     assert lint.main(root) == 1
 
 

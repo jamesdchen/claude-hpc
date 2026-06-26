@@ -148,7 +148,7 @@ def _resolve_target_path(
             "Inspect a deployed experiment tree on the cluster (read-only, "
             "throttled): ls/find under REPO_DIR (--run-id) or an explicit scratch "
             "path (--path), through the connection-storm-safe ssh seam. Replaces "
-            "raw `ssh <host> \"ls ...\"`, which bypasses the safe_interval / "
+            'raw `ssh <host> "ls ..."`, which bypasses the safe_interval / '
             "ConnectTimeout guards. Scratch-confined; no caller command string."
         ),
         experiment_dir_arg=True,

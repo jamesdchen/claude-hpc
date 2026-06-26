@@ -44,7 +44,7 @@ def _wire(monkeypatch, *, ssh_handler, record=None, clusters=None) -> list[tuple
 
     monkeypatch.setattr(
         "hpc_agent.infra.clusters.load_clusters_config",
-        lambda: (clusters if clusters is not None else _CLUSTERS),
+        lambda: clusters if clusters is not None else _CLUSTERS,
     )
     monkeypatch.setattr("hpc_agent.infra.remote.ssh_run", _ssh)
     monkeypatch.setattr("hpc_agent.state.journal.load_run", lambda exp, rid: record)
@@ -82,9 +82,7 @@ def test_explicit_path_under_scratch_lists(monkeypatch, tmp_path: Path) -> None:
         ssh_handler=lambda c, **k: _cp("/scratch1/jc/other\n"),
         record=None,
     )
-    out = inspect_deployment(
-        experiment_dir=tmp_path, cluster="disc", path="/scratch1/jc/other"
-    )
+    out = inspect_deployment(experiment_dir=tmp_path, cluster="disc", path="/scratch1/jc/other")
     assert out["exists"] is True
     assert out["path"] == "/scratch1/jc/other"
     assert out["repo_dir"] is None and out["run_id"] is None
@@ -151,7 +149,11 @@ def test_neither_target_is_spec_invalid(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_both_targets_is_spec_invalid(monkeypatch, tmp_path: Path) -> None:
-    _wire(monkeypatch, ssh_handler=lambda c, **k: _cp(""), record=SimpleNamespace(remote_path="/scratch1/jc/x"))
+    _wire(
+        monkeypatch,
+        ssh_handler=lambda c, **k: _cp(""),
+        record=SimpleNamespace(remote_path="/scratch1/jc/x"),
+    )
     with pytest.raises(errors.SpecInvalid):
         inspect_deployment(
             experiment_dir=tmp_path, cluster="disc", run_id="x", path="/scratch1/jc/y"
