@@ -144,16 +144,19 @@ def main(scan_root: Path | None = None) -> int:
     failures = 0
     for path in iter_targets(root):
         try:
-            rel = str(path.resolve().relative_to(root.resolve()))
+            # ``as_posix`` so the ALLOWLIST (forward-slash, scan-root-relative)
+            # matches on Windows too — ``str(WindowsPath)`` yields backslashes
+            # that would never compare equal to a cited entry.
+            rel = path.resolve().relative_to(root.resolve()).as_posix()
         except ValueError:
-            rel = str(path)
+            rel = path.as_posix()
         if rel in ALLOWLIST:
             continue
         for lineno, hint in lint_file(path):
             try:
-                disp = str(path.resolve().relative_to(REPO))
+                disp = path.resolve().relative_to(REPO).as_posix()
             except ValueError:
-                disp = str(path)
+                disp = path.as_posix()
             print(f"{disp}:{lineno}: {hint}")
             failures += 1
     if failures:
