@@ -111,7 +111,13 @@ def lint_file(path: Path) -> list[tuple[int, str]]:
         m = _INVOCATION_RE.search(span)
         if not m:
             continue
-        lineno = text.count("\n", 0, start) + m.start() + 1
+        # Line number of the match itself: count newlines up to its ABSOLUTE
+        # offset (span start + match offset within the span). Counting only to
+        # ``start`` and adding ``m.start()`` would add a char offset to a line
+        # count — wrong for any match not at the very start of its span, and
+        # badly wrong inside a multi-line fenced block.
+        abs_off = start + m.start()
+        lineno = text.count("\n", 0, abs_off) + 1
         if lineno in seen:
             continue
         seen.add(lineno)

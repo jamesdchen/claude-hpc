@@ -214,6 +214,17 @@ def inspect_deployment(
         path=path, run_id=run_id, experiment_dir=exp
     )
 
+    # A caller-supplied ``--path`` can only be confined when the cluster
+    # declares a scratch root: ``validate_remote_path_under_scratch`` is a no-op
+    # on an empty scratch, which would let ``--path`` probe anywhere. Refuse
+    # rather than list unconfined. (``--run-id`` is exempt: its target is the
+    # run's OWN journaled deploy path, not an arbitrary caller string.)
+    if path and not scratch:
+        raise errors.SpecInvalid(
+            f"cluster {cluster!r} declares no scratch root, so an explicit --path "
+            "cannot be confined; use --run-id to inspect a known deployment instead."
+        )
+
     # Confine the probe to the cluster's scratch root (#184 reuse): rejects the
     # scratch root itself and anything not strictly below it. Also runs the
     # shape check (no shell metachars / leading dash) so the value is safe to

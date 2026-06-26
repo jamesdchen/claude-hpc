@@ -67,6 +67,18 @@ def test_fenced_raw_ssh_fires(tmp_path: Path) -> None:
     assert lint.main(root) == 1
 
 
+def test_reports_the_line_of_the_match_not_the_span_start(tmp_path: Path, capsys) -> None:
+    """Regression: the reported line is the match's own line — even deep inside a
+    fenced block (the offset-vs-line-count bug reported a wrong number)."""
+    # ``ssh ...`` sits on line 6 of the file (1: text, 2: blank, 3: fence,
+    # 4: comment, 5: blank, 6: the invocation).
+    body = 'Intro line\n\n```bash\n# preamble comment\n\nssh host "ls"\n```\n'
+    root = _skill(tmp_path, body)
+    assert lint.main(root) == 1
+    out = capsys.readouterr().out
+    assert ":6:" in out, out
+
+
 def test_raw_scp_and_rsync_fire(tmp_path: Path) -> None:
     root = _skill(tmp_path, "Pull with `scp host:/a /b` or `rsync host:/a /b`.\n")
     assert lint.main(root) == 1

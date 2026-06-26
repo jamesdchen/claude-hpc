@@ -118,6 +118,32 @@ def test_missing_target_reports_not_exists(monkeypatch, tmp_path: Path) -> None:
     assert out["entry_count"] == 0
 
 
+def test_explicit_path_on_scratchless_cluster_is_refused(monkeypatch, tmp_path: Path) -> None:
+    """A cluster with no scratch can't confine --path → refuse, never probe."""
+    calls = _wire(
+        monkeypatch,
+        ssh_handler=lambda c, **k: _cp("anything"),
+        clusters={"local": {"host": "h", "user": "u"}},  # no scratch
+    )
+    with pytest.raises(errors.SpecInvalid):
+        inspect_deployment(experiment_dir=tmp_path, cluster="local", path="/anywhere/x")
+    assert calls == []  # never probed
+
+
+def test_run_id_on_scratchless_cluster_is_allowed(monkeypatch, tmp_path: Path) -> None:
+    """--run-id is exempt: its target is the run's own journaled deploy path."""
+    record = SimpleNamespace(remote_path="/data/run-7", cluster="local")
+    calls = _wire(
+        monkeypatch,
+        ssh_handler=lambda c, **k: _cp("/data/run-7\n"),
+        record=record,
+        clusters={"local": {"host": "h", "user": "u"}},  # no scratch
+    )
+    out = inspect_deployment(experiment_dir=tmp_path, cluster="local", run_id="run-7")
+    assert out["exists"] is True and out["path"] == "/data/run-7"
+    assert len(calls) == 1
+
+
 def test_neither_target_is_spec_invalid(monkeypatch, tmp_path: Path) -> None:
     _wire(monkeypatch, ssh_handler=lambda c, **k: _cp(""))
     with pytest.raises(errors.SpecInvalid):
