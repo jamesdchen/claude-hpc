@@ -248,10 +248,13 @@ def test_vanished_canary_resolves_completed_unknown_fast(
     from hpc_agent.ops.verify_canary import verify_canary
 
     _seed_canary(tmp_path)
-    # monotonic() never crosses the deadline — if the loop didn't break on the
-    # persistent all-zero summary it would spin forever (StopIteration), so a
-    # clean verdict is the assertion that the fast break fired.
-    monkeypatch.setattr("hpc_agent.ops.verify_canary.time.monotonic", lambda: 0.0)
+    # monotonic() advances 100s per read (far above the default 30s registration
+    # grace, well under the 1800s deadline) so the all-zero state spans the grace
+    # by the 2nd poll and the fast break fires — proving the verdict, not a timeout.
+    import itertools
+
+    _clk = itertools.count(0.0, 100.0)
+    monkeypatch.setattr("hpc_agent.ops.verify_canary.time.monotonic", lambda: next(_clk))
     with (
         mock.patch(
             "hpc_agent.infra.cluster_status.ssh_status_report",
@@ -281,7 +284,10 @@ def test_transient_all_zero_then_progress_does_not_false_trigger(
     from hpc_agent.ops.verify_canary import verify_canary
 
     _seed_canary(tmp_path)
-    monkeypatch.setattr("hpc_agent.ops.verify_canary.time.monotonic", lambda: 0.0)
+    import itertools
+
+    _clk = itertools.count(0.0, 100.0)
+    monkeypatch.setattr("hpc_agent.ops.verify_canary.time.monotonic", lambda: next(_clk))
     summaries = iter(
         [
             # poll 1: transient all-zero (pre-registration window)
@@ -316,7 +322,10 @@ def test_vanished_canary_with_stderr_marker_prefers_the_marker(
     from hpc_agent.ops.verify_canary import verify_canary
 
     _seed_canary(tmp_path)
-    monkeypatch.setattr("hpc_agent.ops.verify_canary.time.monotonic", lambda: 0.0)
+    import itertools
+
+    _clk = itertools.count(0.0, 100.0)
+    monkeypatch.setattr("hpc_agent.ops.verify_canary.time.monotonic", lambda: next(_clk))
     with (
         mock.patch(
             "hpc_agent.infra.cluster_status.ssh_status_report",
@@ -1191,6 +1200,46 @@ def test_next_poll_interval_doubles_and_caps_at_ceiling() -> None:
     # Past the ceiling, hold the configured cadence — never poll slower.
     assert vc._next_poll_interval(24.0, 30.0) == 30.0
     assert vc._next_poll_interval(30.0, 30.0) == 30.0
+
+
+def test_fast_start_allzero_within_grace_is_not_falsely_vanished(
+    tmp_path: Path, journal_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the fast-start ramp must NOT trip the 2-consecutive-all-zero
+    vanished verdict before the scheduler has had ``poll_interval_sec`` to list
+    the array. Two rapid all-zero polls (a slow-to-register canary) followed by
+    progress must complete normally, not fail as ``completed_unknown``."""
+    import itertools
+
+    from hpc_agent.ops.verify_canary import verify_canary
+
+    _seed_canary(tmp_path)
+    # Clock advances only 2s per read: two all-zero polls land well inside the
+    # 30s registration grace. Without the time floor the 2nd poll would falsely
+    # declare the canary vanished; with it, the verdict waits for the grace.
+    _clk = itertools.count(0.0, 2.0)
+    monkeypatch.setattr("hpc_agent.ops.verify_canary.time.monotonic", lambda: next(_clk))
+    summaries = iter(
+        [
+            {"complete": 0, "running": 0, "pending": 0, "failed": 0, "unknown": 0},  # all-zero
+            {"complete": 0, "running": 0, "pending": 0, "failed": 0, "unknown": 0},  # all-zero
+            {"complete": 0, "running": 1, "pending": 0, "failed": 0, "unknown": 0},  # registered!
+            {"complete": 1, "running": 0, "pending": 0, "failed": 0, "unknown": 0},  # complete
+        ]
+    )
+    with (
+        mock.patch(
+            "hpc_agent.infra.cluster_status.ssh_status_report",
+            side_effect=lambda **_: {"summary": next(summaries)},
+        ),
+        mock.patch(
+            "hpc_agent.infra.cluster_logs.fetch_task_logs",
+            return_value=[{"task_id": 0, "content": "[dispatch] task_id=0 run_id=r1\n"}],
+        ),
+    ):
+        out = verify_canary(tmp_path, canary_run_id="r1-canary", wait_budget_sec=1800)
+    assert out["ok"] is True, out
+    assert out["failure_kind"] is None
 
 
 def test_poll_loop_ramps_instead_of_flat_waiting(

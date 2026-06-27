@@ -628,6 +628,17 @@ def verify_canary(
     # than riding the full wait_budget_sec polling an absent job (#193).
     vanished_polls = 0
     _VANISHED_POLLS_TO_TERMINAL = 2
+    # The vanished verdict also requires the all-zero state to SPAN at least this
+    # much wall-clock, not just N consecutive polls. The 2-poll heuristic relied
+    # on polls being ``poll_interval_sec`` apart (≈30s) to give the scheduler
+    # time to register the array after qsub; the fast-start ramp below now spaces
+    # the first polls only seconds apart, so without a time floor a canary whose
+    # array is merely slow to appear in qstat (all-zero for the first few rapid
+    # polls) would be falsely declared ``completed_unknown`` and wrongly fail the
+    # gate. Tying the grace to ``poll_interval_sec`` reproduces the original
+    # timing (the two confirming polls used to be exactly that far apart).
+    _vanished_grace_sec = float(poll_interval_sec)
+    first_vanished_at: float | None = None
     job_vanished = False
     # Adaptive fast-start: poll quickly at first (so a canary that lands in a
     # few seconds is caught immediately) and ramp toward ``poll_interval_sec``,
@@ -671,11 +682,18 @@ def verify_canary(
         # marker (OOM, traceback) is preferred over the bland unknown verdict.
         if complete == 0 and failed == 0 and running == 0 and pending == 0 and unknown == 0:
             vanished_polls += 1
-            if vanished_polls >= _VANISHED_POLLS_TO_TERMINAL:
+            if first_vanished_at is None:
+                first_vanished_at = time.monotonic()
+            # Require BOTH enough consecutive all-zero polls AND that they span
+            # the registration grace, so the fast-start ramp can't trip this
+            # before the scheduler has had ``poll_interval_sec`` to list the job.
+            spanned = time.monotonic() - first_vanished_at
+            if vanished_polls >= _VANISHED_POLLS_TO_TERMINAL and spanned >= _vanished_grace_sec:
                 job_vanished = True
                 break
         else:
             vanished_polls = 0
+            first_vanished_at = None
         time.sleep(effective_poll)
         effective_poll = _next_poll_interval(effective_poll, _poll_ceiling)
     else:
