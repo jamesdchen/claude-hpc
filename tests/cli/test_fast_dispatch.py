@@ -24,9 +24,7 @@ from hpc_agent.cli._verb_module_map import VERB_MODULE_MAP
 
 # A one-liner that runs the real CLI entry point in a FRESH interpreter, so the
 # registration latch starts unset and the fast path is genuinely exercised.
-_RUNNER = (
-    "import sys; from hpc_agent.cli.dispatch import main; sys.exit(main(sys.argv[1:]))"
-)
+_RUNNER = "import sys; from hpc_agent.cli.dispatch import main; sys.exit(main(sys.argv[1:]))"
 
 
 def _run_cli(args: list[str], *, force_full: bool) -> subprocess.CompletedProcess[str]:
@@ -145,6 +143,5 @@ def test_generated_map_is_in_sync_with_registry() -> None:
             expected[_leaf_verb(name, shape)] = (name, module)
 
     assert dict(VERB_MODULE_MAP) == expected, (
-        "verb-module map is stale; run "
-        "`uv run python scripts/build_verb_module_map.py --write`"
+        "verb-module map is stale; run `uv run python scripts/build_verb_module_map.py --write`"
     )
