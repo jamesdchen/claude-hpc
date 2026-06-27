@@ -29,10 +29,11 @@
       "type": "string"
     },
     "format": {
-      "description": "`dag` includes edges + per-wave nodes; `flat` is the run list only.",
+      "description": "`dag` includes edges + per-wave nodes; `flat` is the run list only; `dot` is the full dag plus a rendered Graphviz `dot` string.",
       "enum": [
         "dag",
-        "flat"
+        "flat",
+        "dot"
       ],
       "title": "Format",
       "type": "string"
@@ -92,6 +93,19 @@
       },
       "title": "Edges",
       "type": "array"
+    },
+    "dot": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Graphviz DOT rendering of the DAG — populated only in `dot` format, null otherwise. Pipe it to `dot -Tsvg` to draw the graph.",
+      "title": "Dot"
     }
   }
 }

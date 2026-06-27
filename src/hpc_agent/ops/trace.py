@@ -131,6 +131,66 @@ def _lineage_edges(run_id: str, sidecar: dict[str, Any]) -> list[dict[str, Any]]
     ]
 
 
+# --- Graphviz DOT rendering (--format dot) -----------------------------------
+
+_NODE_SHAPE = {"campaign": "box", "run": "ellipse", "wave": "note"}
+# Fill colour by run lifecycle status / wave verdict — green = done, red =
+# failed, grey = still in flight, white = unknown. Shared so a run and the wave
+# it contains read the same.
+_DONE = "#cdebc5"
+_FAIL = "#f4c7c3"
+_LIVE = "#d9d9d9"
+_RUN_FILL = {"complete": _DONE, "failed": _FAIL, "error": _FAIL, "timeout": _FAIL}
+_WAVE_FILL = {"combined": _DONE, "failed": _FAIL, "in_flight": _LIVE}
+_EDGE_STYLE = {"member": "solid", "derived-from": "dashed", "contains": "dotted"}
+
+
+def _dot_escape(text: str) -> str:
+    r"""Escape a string for a double-quoted DOT id/label (``\`` and ``"``)."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _dot_node_attrs(node: dict[str, Any]) -> tuple[str, str]:
+    """Return ``(label, fillcolor)`` for one node, keyed by ``kind``."""
+    kind = node["kind"]
+    if kind == "campaign":
+        return f"campaign\\n{node['campaign_id']}\\n{node['run_count']} runs", "#cfe2f3"
+    if kind == "run":
+        status = str(node.get("status") or "?")
+        # The trailing slug of the run id is the human-recognisable part.
+        short = str(node["run_id"]).rsplit("-", 1)[-1]
+        return f"run {short}\\n{status}", _RUN_FILL.get(status, "#ffffff")
+    state = str(node.get("state") or "")
+    return f"wave {node['wave']}\\n{state} ({node['task_count']})", _WAVE_FILL.get(state, "#ffffff")
+
+
+def _render_dot(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
+    """Render *nodes* / *edges* as a Graphviz DOT digraph.
+
+    Node shape encodes kind (box=campaign, ellipse=run, note=wave) and fill
+    encodes lifecycle state; edge line-style encodes the relation
+    (solid=member, dashed=derived-from, dotted=contains). The string is stable
+    for a given DAG so a caller can diff two renders.
+    """
+    lines = [
+        "digraph hpc_trace {",
+        "  rankdir=LR;",
+        '  node [fontname="monospace", style=filled];',
+    ]
+    for node in nodes:
+        label, fill = _dot_node_attrs(node)
+        shape = _NODE_SHAPE.get(str(node["kind"]), "ellipse")
+        node_id = _dot_escape(str(node["id"]))
+        lines.append(f'  "{node_id}" [label="{label}", shape={shape}, fillcolor="{fill}"];')
+    for edge in edges:
+        style = _EDGE_STYLE.get(str(edge["rel"]), "solid")
+        src = _dot_escape(str(edge["from"]))
+        dst = _dot_escape(str(edge["to"]))
+        lines.append(f'  "{src}" -> "{dst}" [label="{edge["rel"]}", style={style}];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
 def _trace_campaign(experiment_dir: Path, campaign_id: str, fmt: str) -> TraceResult:
     """Assemble the DAG for every run tagged with *campaign_id*."""
     records = find_runs_by_campaign(experiment_dir, campaign_id)
@@ -157,7 +217,7 @@ def _trace_campaign(experiment_dir: Path, campaign_id: str, fmt: str) -> TraceRe
         record = record_by_id.get(run_id)
         sidecar = sidecars.get(run_id, {})
         nodes.append(_run_node(run_id, sidecar, record))
-        if fmt == "dag":
+        if fmt != "flat":
             edges.append({"from": root, "to": f"run:{run_id}", "rel": "member"})
             edges.extend(_lineage_edges(run_id, sidecar))
             wave_nodes, wave_edges = _wave_nodes_and_edges(run_id, sidecar, record)
@@ -171,7 +231,7 @@ def _trace_campaign(experiment_dir: Path, campaign_id: str, fmt: str) -> TraceRe
     return TraceResult(
         trace_schema_version=TRACE_SCHEMA_VERSION,
         scope="campaign",
-        format="dag" if fmt == "dag" else "flat",
+        format=fmt,
         campaign_id=campaign_id,
         root=root,
         signature=signature,
@@ -211,7 +271,7 @@ def _trace_run(experiment_dir: Path, run_id: str, fmt: str) -> TraceResult:
         record = seed_record if current == run_id else load_run(experiment_dir, current)
         sidecar = seed_sidecar if current == run_id else _safe_sidecar(experiment_dir, current)
         nodes.append(_run_node(current, sidecar, record))
-        if fmt == "dag":
+        if fmt != "flat":
             edges.extend(_lineage_edges(current, sidecar))
             wave_nodes, wave_edges = _wave_nodes_and_edges(current, sidecar, record)
             nodes.extend(wave_nodes)
@@ -220,7 +280,7 @@ def _trace_run(experiment_dir: Path, run_id: str, fmt: str) -> TraceResult:
     return TraceResult(
         trace_schema_version=TRACE_SCHEMA_VERSION,
         scope="run",
-        format="dag" if fmt == "dag" else "flat",
+        format=fmt,
         campaign_id=None,
         root=f"run:{run_id}",
         signature=None,
@@ -243,7 +303,7 @@ def _trace_run(experiment_dir: Path, run_id: str, fmt: str) -> TraceResult:
             "records, the per-run sidecars, and the signable provenance "
             "manifest. Read-only, no SSH. --format dag (default) emits run + "
             "wave nodes and member/derived-from/contains edges; --format flat "
-            "emits the run list only."
+            "emits the run list only; --format dot adds a Graphviz `dot` string."
         ),
         experiment_dir_arg=True,
         args=(
@@ -260,10 +320,10 @@ def _trace_run(experiment_dir: Path, run_id: str, fmt: str) -> TraceResult:
             CliArg(
                 "--format",
                 type=str,
-                choices=("dag", "flat"),
+                choices=("dag", "flat", "dot"),
                 default="dag",
                 dest="trace_format",
-                help="`dag` (default): nodes + edges. `flat`: run nodes only.",
+                help="`dag` (default): nodes + edges. `flat`: run nodes only. `dot`: + Graphviz.",
             ),
         ),
     ),
@@ -292,10 +352,14 @@ def trace(
     rid = (run_id or "").strip()
     if bool(cid) == bool(rid):
         raise errors.SpecInvalid("trace requires exactly one of --campaign-id or --run-id")
-    fmt = trace_format if trace_format in ("dag", "flat") else "dag"
+    fmt = trace_format if trace_format in ("dag", "flat", "dot") else "dag"
     experiment_dir = Path(experiment_dir)
     result = (
         _trace_campaign(experiment_dir, cid, fmt) if cid else _trace_run(experiment_dir, rid, fmt)
     )
+    # `dot` carries the same graph as `dag` plus a rendered Graphviz string, so
+    # a consumer can pull `data.dot` and pipe straight to `dot -Tsvg`.
+    if fmt == "dot":
+        result.dot = _render_dot(result.nodes, result.edges)
     dumped: dict[str, Any] = result.model_dump(mode="json")
     return dumped

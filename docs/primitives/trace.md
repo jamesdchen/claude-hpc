@@ -31,9 +31,10 @@ consumption. Read-only and client-side — no SSH, no scheduler.
   Mutually exclusive with `--run-id`.
 - `--run-id` (string) — trace this run plus its transitive lineage (the
   `parent_run_ids` resubmit chain). Mutually exclusive with `--campaign-id`.
-- `--format` (`dag` | `flat`, default `dag`) — `dag` emits `run` and `wave`
-  nodes plus `member` / `derived-from` / `contains` edges; `flat` emits the
-  `run` nodes only, with no edges or wave nodes.
+- `--format` (`dag` | `flat` | `dot`, default `dag`) — `dag` emits `run` and
+  `wave` nodes plus `member` / `derived-from` / `contains` edges; `flat` emits
+  the `run` nodes only, with no edges or wave nodes; `dot` emits the full
+  `dag` plus a rendered Graphviz `dot` string (pipe to `dot -Tsvg`).
 - `--experiment-dir` (path, default cwd) — the experiment root.
 
 Exactly one of `--campaign-id` / `--run-id` is required.
@@ -41,7 +42,7 @@ Exactly one of `--campaign-id` / `--run-id` is required.
 ## Outputs
 
 `{trace_schema_version, scope, format, campaign_id, root, signature,
-node_count, nodes, edges}`.
+node_count, nodes, edges, dot}`.
 
 - `scope` — `"campaign"` or `"run"`.
 - `root` — the DAG root node id (`campaign:<id>` or `run:<seed>`).
@@ -55,6 +56,9 @@ node_count, nodes, edges}`.
   `task_ids`.
 - `edges` — directed, by `rel`: `member` (run→campaign), `derived-from`
   (run→parent run lineage), `contains` (run→wave). Empty in `flat` format.
+- `dot` — a Graphviz DOT rendering of the DAG (node shape by kind, fill by
+  lifecycle state, edge style by relation); populated only in `dot` format,
+  `null` otherwise.
 
 ## Errors
 

@@ -225,6 +225,36 @@ def test_flat_format_drops_edges_and_wave_nodes(journal_home: Path, experiment: 
     assert result["edges"] == []
     assert _ids(result, "wave") == set()
     assert _ids(result, "run") == {f"run:{rid}"}
+    assert result["dot"] is None
+
+
+def test_dot_format_renders_graphviz_over_the_full_dag(
+    journal_home: Path, experiment: Path
+) -> None:
+    rid = "20260101-000001-aaaaaaa"
+    _sidecar(experiment, rid, campaign_id="camp", wave_map={"0": [0, 1]})
+    upsert_run(experiment, _record(rid, campaign_id="camp", combined_waves=[0]))
+
+    result = trace(experiment_dir=experiment, campaign_id="camp", trace_format="dot")
+    # `dot` carries the same graph as `dag` (edges + wave nodes) ...
+    assert result["format"] == "dot"
+    assert _ids(result, "wave") == {f"wave:{rid}:0"}
+    assert ("campaign:camp", f"run:{rid}") in _edges(result, "member")
+    # ... plus a rendered Graphviz string referencing every node id.
+    dot = result["dot"]
+    assert dot.startswith("digraph hpc_trace {")
+    assert dot.rstrip().endswith("}")
+    assert '"campaign:camp"' in dot
+    assert f'"run:{rid}"' in dot
+    assert f'"wave:{rid}:0"' in dot
+    assert "-> " in dot  # at least one edge rendered
+
+
+def test_non_dot_formats_have_null_dot(journal_home: Path, experiment: Path) -> None:
+    rid = "20260101-000001-aaaaaaa"
+    _sidecar(experiment, rid, campaign_id="camp")
+    upsert_run(experiment, _record(rid, campaign_id="camp"))
+    assert trace(experiment_dir=experiment, campaign_id="camp")["dot"] is None
 
 
 # --- resilience: one surface present, the other absent -----------------------

@@ -33,8 +33,11 @@ class TraceResult(BaseModel):
     scope: Literal["campaign", "run"] = Field(
         description="Whether the DAG was rooted at a campaign or a single run's lineage.",
     )
-    format: Literal["dag", "flat"] = Field(
-        description="`dag` includes edges + per-wave nodes; `flat` is the run list only.",
+    format: Literal["dag", "flat", "dot"] = Field(
+        description=(
+            "`dag` includes edges + per-wave nodes; `flat` is the run list "
+            "only; `dot` is the full dag plus a rendered Graphviz `dot` string."
+        ),
     )
     campaign_id: str | None = Field(
         default=None,
@@ -66,5 +69,12 @@ class TraceResult(BaseModel):
             "Directed edges by `rel`: `member` (run→campaign membership), "
             "`derived-from` (run→parent run lineage via parent_run_ids), and "
             "`contains` (run→wave). Empty in `flat` format."
+        ),
+    )
+    dot: str | None = Field(
+        default=None,
+        description=(
+            "Graphviz DOT rendering of the DAG — populated only in `dot` "
+            "format, null otherwise. Pipe it to `dot -Tsvg` to draw the graph."
         ),
     )
