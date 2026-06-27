@@ -64,6 +64,7 @@ jobs:
           python scripts/build_primitive_index.py --write
           python scripts/build_operations_index.py --write
           python scripts/bake_operations_json.py --write
+          python scripts/build_verb_module_map.py --write
       - name: Commit regen drift to PR branch
         # No-op when no diff; only fires when the regen actually
         # changed something. The commit triggers a fresh workflow run;
@@ -72,7 +73,7 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(generated): auto-regenerate after upstream drift"
-          file_pattern: "docs/ src/hpc_agent/operations.json src/hpc_agent/schemas/"
+          file_pattern: "docs/ src/hpc_agent/operations.json src/hpc_agent/schemas/ src/hpc_agent/cli/_verb_module_map.py"
           commit_user_name: github-actions[bot]
           commit_user_email: github-actions[bot]@users.noreply.github.com
 
