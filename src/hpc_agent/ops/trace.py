@@ -25,7 +25,7 @@ reads here are allowed by construction.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from hpc_agent import errors
 from hpc_agent._kernel.registry.primitive import primitive
@@ -46,9 +46,27 @@ if TYPE_CHECKING:
 
 __all__ = ["trace"]
 
+# The closed set of output formats, mirrored on TraceResult.format. Typed as a
+# Literal (not bare str) so it satisfies the TraceResult field without a cast.
+TraceFormat = Literal["dag", "flat", "dot"]
+
 # Bump when the emitted node/edge shape changes in a way a consumer would need
 # to branch on. Mirrored in TraceResult.trace_schema_version.
 TRACE_SCHEMA_VERSION: int = 1
+
+
+def _coerce_format(value: str) -> TraceFormat:
+    """Narrow an arbitrary CLI string to a valid :data:`TraceFormat`.
+
+    `value in (...)` does not narrow the type for the checker, so an explicit
+    branch is what lets ``format=fmt`` type-check against the Literal field.
+    Any unknown value falls back to the ``dag`` default.
+    """
+    if value == "flat":
+        return "flat"
+    if value == "dot":
+        return "dot"
+    return "dag"
 
 
 def _safe_sidecar(experiment_dir: Path, run_id: str) -> dict[str, Any]:
@@ -191,7 +209,7 @@ def _render_dot(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str
     return "\n".join(lines)
 
 
-def _trace_campaign(experiment_dir: Path, campaign_id: str, fmt: str) -> TraceResult:
+def _trace_campaign(experiment_dir: Path, campaign_id: str, fmt: TraceFormat) -> TraceResult:
     """Assemble the DAG for every run tagged with *campaign_id*."""
     records = find_runs_by_campaign(experiment_dir, campaign_id)
     sidecars: dict[str, dict[str, Any]] = {
@@ -241,7 +259,7 @@ def _trace_campaign(experiment_dir: Path, campaign_id: str, fmt: str) -> TraceRe
     )
 
 
-def _trace_run(experiment_dir: Path, run_id: str, fmt: str) -> TraceResult:
+def _trace_run(experiment_dir: Path, run_id: str, fmt: TraceFormat) -> TraceResult:
     """Assemble the DAG for one run plus its transitive lineage ancestors."""
     seed_record = load_run(experiment_dir, run_id)
     seed_sidecar = _safe_sidecar(experiment_dir, run_id)
@@ -352,7 +370,7 @@ def trace(
     rid = (run_id or "").strip()
     if bool(cid) == bool(rid):
         raise errors.SpecInvalid("trace requires exactly one of --campaign-id or --run-id")
-    fmt = trace_format if trace_format in ("dag", "flat", "dot") else "dag"
+    fmt = _coerce_format(trace_format)
     experiment_dir = Path(experiment_dir)
     result = (
         _trace_campaign(experiment_dir, cid, fmt) if cid else _trace_run(experiment_dir, rid, fmt)
